@@ -11,18 +11,20 @@
   --panel-deep: #e2e8f0;
   --border: #e2e8f0;
   --border-strong: #cbd5e1;
-  --border-accent: rgba(99, 102, 241, 0.28);
+  --border-accent: rgba(79, 70, 229, 0.28);
 
   /* ---- 文字 ---- */
   --text: #0f172a;
   --text-2: #334155;
-  --muted: #64748b;
+  --muted: #475569;
 
   /* ---- 强调色：主操作/选中/状态（极光靛蓝 Indigo） ---- */
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --accent-soft: rgba(99, 102, 241, 0.08);
-  --accent-ring: rgba(99, 102, 241, 0.28);
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: rgba(79, 70, 229, 0.08);
+  --accent-ring: rgba(79, 70, 229, 0.28);
+  /* 主色填充之上的文字色：浅色用白，深色反转为深墨，两主题均 ≥4.5:1 */
+  --accent-ink: #ffffff;
 
   /* ---- 状态色 ---- */
   --danger: #dc2626;
@@ -52,7 +54,7 @@
   --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.07);
   --shadow-lg: 0 12px 40px rgba(15, 23, 42, 0.12);
   --shadow-modal: 0 20px 60px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.06);
-  --glow-accent: 0 2px 8px rgba(99, 102, 241, 0.25);
+  --glow-accent: 0 2px 8px rgba(79, 70, 229, 0.25);
 
   /* ---- 圆角 ---- */
   --r-xs: 4px;
@@ -80,7 +82,7 @@
 }
 
 /* ---- 浏览器表面主题化 ---- */
-::selection { background: rgba(99, 102, 241, 0.18); }
+::selection { background: rgba(79, 70, 229, 0.18); }
 * { caret-color: var(--accent); }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -179,7 +181,7 @@ button { font-family: inherit; }
 }
 .btn-primary:hover {
   background: linear-gradient(180deg, #6d6df0 0%, var(--accent-hover) 100%);
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .btn-primary:active { transform: scale(0.985); }
 
@@ -229,7 +231,7 @@ kbd {
 }
 .new-btn:hover {
   background: linear-gradient(180deg, #6d6df0 0%, var(--accent-hover) 100%);
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.22);
   transform: translateY(-1px);
 }
 .new-btn:active { transform: scale(0.96); }
@@ -275,7 +277,7 @@ kbd {
 }
 .type-chip:hover { border-color: var(--accent); color: var(--accent); }
 .type-chip.on {
-  background: var(--accent); border-color: var(--accent); color: #fff;
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
 }
 .new-note-row { display: flex; gap: 6px; }
 .new-note-dir {
@@ -308,7 +310,7 @@ kbd {
   font-size: 10px; color: transparent; font-weight: 700;
   transition: all var(--t-fast) var(--ease);
 }
-.tree-row .ck.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tree-row .ck.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .tree-row .dir-count { margin-left: auto; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; background: var(--panel); padding: 0 6px; border-radius: 999px; }/* 批量操作条 */
 .tree-batchbar {
   border-top: 1px solid var(--border); padding: 8px 10px;
@@ -428,12 +430,12 @@ kbd {
   cursor: pointer;
   font-weight: 500;
 }
-.editor-host .lp-wiki:hover { background: rgba(99, 102, 241, 0.16); }
+.editor-host .lp-wiki:hover { background: rgba(79, 70, 229, 0.16); }
 .editor-host .lp-key { color: var(--accent); font-weight: 600; }
 /* 标准链接 */
 .editor-host .lp-link {
   color: var(--accent);
-  border-bottom: 1px solid rgba(99, 102, 241, 0.4);
+  border-bottom: 1px solid rgba(79, 70, 229, 0.4);
   border-radius: 2px; padding: 0 2px;
   cursor: pointer;
 }
@@ -513,7 +515,7 @@ kbd {
 .editor-host .cm-scroller { font-family: 'Cascadia Code', 'Fira Code', Consolas, 'PingFang SC', 'Microsoft YaHei', monospace; line-height: 1.85; }
 .editor-host .cm-content { padding: 14px 0 40vh; }
 .editor-host .cm-cursor { border-left-color: var(--accent); border-left-width: 2px; }
-.editor-host ::selection { background: rgba(99, 102, 241, 0.15); }
+.editor-host ::selection { background: rgba(79, 70, 229, 0.15); }
 .editor-host .cm-gutters {
   background: var(--bg-raised);
   border-right: 1px solid var(--border);
@@ -604,7 +606,7 @@ kbd {
 .markdown-body blockquote {
   margin: 12px 0; padding: 12px 18px;
   border-left: 3px solid var(--accent);
-  background: linear-gradient(90deg, var(--accent-soft), rgba(99, 102, 241, 0.02));
+  background: linear-gradient(90deg, var(--accent-soft), rgba(79, 70, 229, 0.02));
   border-radius: 0 var(--r-md) var(--r-md) 0;
   color: var(--text-2);
 }
@@ -640,7 +642,7 @@ kbd {
 .markdown-body a:not(.wikilink) {
   color: var(--accent);
   text-decoration: none;
-  border-bottom: 1px solid rgba(99, 102, 241, 0.35);
+  border-bottom: 1px solid rgba(79, 70, 229, 0.35);
 }
 .markdown-body a:not(.wikilink):hover { border-bottom-color: var(--accent); }
 .markdown-body img {
@@ -670,7 +672,7 @@ a.wikilink {
   transition: all var(--t-fast) var(--ease);
 }
 a.wikilink:hover {
-  background: rgba(99, 102, 241, 0.16);
+  background: rgba(79, 70, 229, 0.16);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 a.wikilink.missing {
@@ -722,6 +724,8 @@ a.wikilink.missing::after {
   border-bottom: 1px solid var(--border);
   background: transparent;
 }
+/* 基类 outline:none 与全局 :focus-visible 同权重且声明在后，会吃掉焦点环；这里显式补回 */
+.qs-input:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .qs-input::placeholder { color: var(--muted); }
 .qs-results { overflow-y: auto; padding: var(--sp-1); }
 .qs-empty { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
@@ -848,7 +852,7 @@ a.wikilink.missing::after {
   flex: 1; min-width: 0;
   position: relative;
   background:
-    radial-gradient(ellipse at 50% 30%, rgba(99, 102, 241, 0.05), transparent 60%),
+    radial-gradient(ellipse at 50% 30%, rgba(79, 70, 229, 0.05), transparent 60%),
     linear-gradient(180deg, #f6f8fb 0%, #e8edf5 100%);
 }
 .viewer3d { position: absolute; inset: 0; }
@@ -861,7 +865,7 @@ a.wikilink.missing::after {
 }
 .sys-chip {
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--panel-glass-strong);
   backdrop-filter: blur(6px);
   color: var(--text-2);
   border-radius: 999px;
@@ -872,7 +876,7 @@ a.wikilink.missing::after {
 }
 .sys-chip:hover { border-color: var(--accent); color: var(--accent); }
 .sys-chip.on {
-  background: var(--accent); border-color: var(--accent); color: #fff;
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
 }
 .sys-chip.loading { opacity: 0.55; cursor: wait; }
 /* 右侧工具条：视角预设 / 自动旋转 / 聚焦 / 复位（与系统 chip 同款视觉） */
@@ -885,7 +889,7 @@ a.wikilink.missing::after {
 }
 .tool-chip {
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--panel-glass-strong);
   backdrop-filter: blur(6px);
   color: var(--text-2);
   border-radius: 8px;
@@ -896,7 +900,7 @@ a.wikilink.missing::after {
   white-space: nowrap;
 }
 .tool-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.tool-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tool-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .tool-chip:disabled { opacity: 0.45; cursor: not-allowed; }
 /* 右下角：当前结构名称（悬停优先，否则显示选中的） */
 .viewer3d-status {
@@ -933,7 +937,7 @@ a.wikilink.missing::after {
 .viewer3d-hint {
   position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
   pointer-events: none;
-  background: rgba(255, 255, 255, 0.75);
+  background: var(--panel-glass-strong);
   backdrop-filter: blur(4px);
   padding: 4px 14px; border-radius: 999px;
   border: 1px solid var(--border);
@@ -973,6 +977,7 @@ a.wikilink.missing::after {
 }
 .anatomy-search::placeholder { color: var(--muted); }
 .anatomy-search:focus { border-bottom-color: var(--accent); }
+.anatomy-search:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .anatomy-attribution {
   padding: var(--sp-2) var(--sp-4);
   font-size: 10px; line-height: 1.6;
@@ -1048,7 +1053,7 @@ a.wikilink.missing::after {
 .viewer3d-legend .lg {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11px; color: var(--text-2);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--panel-glass-strong);
   backdrop-filter: blur(6px);
   padding: 3px 10px; border-radius: 999px;
   border: 1px solid var(--border);
@@ -1068,9 +1073,9 @@ a.wikilink.missing::after {
   gap: 6px;
   margin-top: 6px;
   font-size: 12px;
-  color: #6b7280;
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid #e4e7ec;
+  color: var(--muted);
+  background: var(--panel-glass-strong);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 3px 10px;
   width: fit-content;
@@ -1399,14 +1404,15 @@ a.wikilink.missing::after {
   color: var(--muted); background: transparent; border: 1px solid transparent;
 }
 .todo-filter.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
-.todo-clear { margin-left: auto; font-size: 12px; color: var(--muted); cursor: pointer; }
+/* 未重置 background/border 时 <button> 会露出浏览器原生底（深色下为 #6b6b6b），此处补上 */
+.todo-clear { margin-left: auto; font-size: 12px; color: var(--muted); cursor: pointer; background: none; border: none; padding: 0; }
 .todo-clear:hover { color: var(--danger); }
 .todo-item { cursor: default; }
 .todo-check {
   width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
   border: 1.5px solid var(--border-strong); background: transparent;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 12px; color: #fff; cursor: pointer; transition: all var(--t-fast) var(--ease);
+  font-size: 12px; color: var(--accent-ink); cursor: pointer; transition: all var(--t-fast) var(--ease);
 }
 .todo-check.on { background: var(--accent); border-color: var(--accent); }
 .todo-item.done .todo-text { color: var(--muted); text-decoration: line-through; }
@@ -1515,7 +1521,7 @@ a.wikilink.missing::after {
 .graph-legend .lg-item {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 11px; color: var(--text-2);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--panel-glass-strong);
   backdrop-filter: blur(6px);
   padding: 3px 10px; border-radius: 999px;
   border: 1px solid var(--border);
@@ -1899,7 +1905,7 @@ a.wikilink.missing::after {
   background: var(--accent); color: #fff;
   border-radius: 8px; padding: 7px 12px;
   font-size: 12.5px; display: flex; gap: 10px;
-  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.35);
   cursor: pointer; white-space: nowrap;
   animation: rise-in var(--t-fast) var(--ease);
 }
@@ -1920,10 +1926,10 @@ a.wikilink.missing::after {
 /* 几何选区高亮：加描边 + 阴影让选中范围一眼可见；新选中的 span 有一次淡入，
    拖动时是增量更新（只给新增的 span 加类），所以动画不会每次移动都重放 */
 .pdf-geo-hl {
-  background: rgba(99, 102, 241, 0.34) !important;
+  background: rgba(79, 70, 229, 0.34) !important;
   border-radius: 3px;
   box-shadow:
-    0 0 0 1.5px rgba(99, 102, 241, 0.6),
+    0 0 0 1.5px rgba(79, 70, 229, 0.6),
     0 1px 4px rgba(79, 70, 229, 0.28) !important;
 }
 .pdf-toggle {
@@ -1947,8 +1953,8 @@ a.wikilink.missing::after {
 .pdf-right {
   width: 42%; min-width: 360px;
   border-left: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  /* 滚动区域不用 backdrop-filter（约定：模糊只用于静态层），改为实色 */
+  background: var(--bg-raised);
   overflow-y: auto;
 }
 .pdf-tabs { display: flex; gap: 6px; padding: 10px 14px 0; }
@@ -1959,7 +1965,7 @@ a.wikilink.missing::after {
   transition: all var(--t-fast) var(--ease);
 }
 .pdf-tab:hover { border-color: var(--accent); color: var(--accent); }
-.pdf-tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pdf-tab.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .pdf-draft, .pdf-history { padding: 12px 14px 20px; }
 .pdf-draft-empty { text-align: center; padding: 40px 16px; font-weight: 500; }
 .pdf-saved {
@@ -2037,7 +2043,7 @@ a.wikilink.missing::after {
 .tree-row.dir:hover { background: var(--panel); }
 
 /* 编辑器：光标所在行轻微高亮 + 行号着色，聚焦更清晰 */
-.editor-host .cm-activeLine { background: rgba(99, 102, 241, 0.05); }
+.editor-host .cm-activeLine { background: rgba(79, 70, 229, 0.05); }
 .editor-host .cm-activeLineGutter {
   background: transparent;
   color: var(--accent);
@@ -2077,12 +2083,12 @@ a.wikilink.missing::after {
   padding: 12px 0;
   font-size: 14.5px; font-weight: 600; letter-spacing: 0.01em;
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.28);
+  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.28);
   transition: background var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease), transform var(--t-fast) var(--ease);
 }
 .btn-primary:hover {
   background: linear-gradient(180deg, #818cf8 0%, #4f46e5 100%);
-  box-shadow: 0 8px 22px rgba(99, 102, 241, 0.36);
+  box-shadow: 0 8px 22px rgba(79, 70, 229, 0.36);
   transform: translateY(-1px);
 }
 .btn-primary:active { transform: scale(0.985); }
@@ -2150,9 +2156,9 @@ a.wikilink.missing::after {
   cursor: pointer;
   transition: all var(--t-fast) var(--ease);
 }
-.rail-logo svg { width: 34px; height: 34px; filter: drop-shadow(0 3px 10px rgba(99, 102, 241, 0.4)); }
+.rail-logo svg { width: 34px; height: 34px; filter: drop-shadow(0 3px 10px rgba(79, 70, 229, 0.4)); }
 .rail-logo:hover { transform: translateY(-1px) scale(1.04); }
-.rail-logo:hover svg { filter: drop-shadow(0 5px 14px rgba(99, 102, 241, 0.55)); }
+.rail-logo:hover svg { filter: drop-shadow(0 5px 14px rgba(79, 70, 229, 0.55)); }
 .rail-logo:active { transform: scale(0.96); }
 .rail-sep { width: 26px; height: 1px; background: var(--border); margin: 7px 0; flex-shrink: 0; }
 /* 弹性空隙做成一根柔和的竖向脊线：让上下两组图标是「被连起来的分组」，
@@ -2347,11 +2353,12 @@ a.wikilink.missing::after {
   --border-accent: rgba(129, 140, 248, 0.4);
   --text: #f1f5f9;
   --text-2: #cbd5e1;
-  --muted: #7c8aa5;
+  --muted: #8b98b0;
   --accent: #818cf8;
   --accent-hover: #a5b4fc;
   --accent-soft: rgba(129, 140, 248, 0.14);
   --accent-ring: rgba(129, 140, 248, 0.4);
+  --accent-ink: #10162b;
   --danger: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.1);
   --success: #34d399;
