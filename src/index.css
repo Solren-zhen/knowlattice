@@ -177,7 +177,7 @@ button { font-family: inherit; }
 .btn-primary {
   display: block; width: 100%;
   background: var(--grad-primary);
-  color: #fff;
+  color: var(--accent-ink);
   border: none; border-radius: var(--r-md);
   padding: 12px 0; font-size: 15px; font-weight: 600;
   cursor: pointer;
@@ -224,7 +224,7 @@ kbd {
 /* 侧栏头部：新建 = 主动作（带文字）；备份/导入导出/批量删除收纳进「⋯」 */
 .new-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  border: 1px solid transparent; color: #fff;
+  border: 1px solid transparent; color: var(--accent-ink);
   background: var(--grad-primary);
   border-radius: var(--r-md);
   padding: 0 12px; height: 28px;   /* 与同排的 .btn-icon 对齐 */
@@ -1222,7 +1222,7 @@ a.wikilink.missing::after {
 .mv-confirm-actions button:hover { border-color: var(--border-accent); background: var(--accent-soft); }
 .mv-confirm-actions .mv-confirm-ok {
   background: var(--grad-primary);
-  border-color: transparent; color: #fff;
+  border-color: transparent; color: var(--accent-ink);
   box-shadow: var(--glow-accent);
 }
 .mv-confirm-actions .mv-confirm-ok:hover { filter: brightness(1.06); background: var(--grad-primary-hover); }
@@ -1917,7 +1917,7 @@ a.wikilink.missing::after {
 .pdf-popover {
   position: fixed; z-index: 60;
   transform: translateX(-50%);
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--accent-ink);
   border-radius: 8px; padding: 7px 12px;
   font-size: 12.5px; display: flex; gap: 10px;
   box-shadow: 0 6px 18px rgba(79, 70, 229, 0.35);
@@ -1932,7 +1932,12 @@ a.wikilink.missing::after {
 .pdf-popover kbd {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.4);
-  color: #fff;
+  color: var(--accent-ink);
+}
+/* 深色下浮层底色是浅靛蓝，白描边会糊掉，改用墨色描边 */
+[data-theme='dark'] .pdf-popover kbd {
+  background: rgba(16, 22, 43, 0.12);
+  border-color: rgba(16, 22, 43, 0.3);
 }
 /* 按行选取（扫描版）：关掉原生选区，改用自绘高亮，避免 OCR 文字层顺序导致的跳行 */
 /* 几何选区（默认开）：禁用原生选区，改用自绘高亮——绝对定位的文字层上原生划选
@@ -2093,7 +2098,7 @@ a.wikilink.missing::after {
 .btn-primary {
   display: block; width: 100%;
   background: var(--grad-primary);
-  color: #fff; border: none;
+  color: var(--accent-ink); border: none;
   border-radius: 999px;
   padding: 12px 0;
   font-size: 14.5px; font-weight: 600; letter-spacing: 0.01em;
@@ -2415,12 +2420,12 @@ a.wikilink.missing::after {
 /* 深色下主按钮：极光靛蓝渐变 + 深墨文字（浅紫底配白字对比度不足） */
 [data-theme='dark'] .btn-primary {
   background: var(--grad-primary);
-  color: #10162b;
+  color: var(--accent-ink);
   box-shadow: 0 6px 16px rgba(129, 140, 248, 0.35);
 }
 [data-theme='dark'] .btn-primary:hover {
   background: var(--grad-primary-hover);
-  color: #10162b;
+  color: var(--accent-ink);
   box-shadow: 0 8px 22px rgba(129, 140, 248, 0.42);
 }
 
