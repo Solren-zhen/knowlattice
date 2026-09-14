@@ -6,6 +6,7 @@ import { useRef, useState } from 'react';
 import MarkdownIt from 'markdown-it';
 import { docxToMarkdown, pdfToMarkdown, type ConvertResult } from '../core/convert';
 import { anydocErrorCode, anydocToMarkdown } from '../core/anydoc';
+import { ocrPdfToMarkdown } from '../core/ocr';
 import { toast } from '../core/feedback';
 import { IconConvert } from './icons';
 
@@ -25,7 +26,7 @@ export default function ConvertView({ onSave, onClose }: Props) {
   const [title, setTitle] = useState('');
   const [dir, setDir] = useState('');
   const [showPreview, setShowPreview] = useState(false);
-  const [engine, setEngine] = useState<'anydoc' | 'builtin'>('anydoc');
+  const [engine, setEngine] = useState<'anydoc' | 'builtin' | 'ocr'>('anydoc');
   const [usedEngine, setUsedEngine] = useState('');
   const [elapsed, setElapsed] = useState(0);
   const [dragOver, setDragOver] = useState(false);
@@ -49,7 +50,12 @@ export default function ConvertView({ onSave, onClose }: Props) {
         : await docxToMarkdown(file);
 
       let r: ConvertResult;
-      if (engine === 'anydoc') {
+      if (engine === 'ocr') {
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+          throw new Error('OCR 只用于 PDF 扫描件；Word 文档请用 anydoc 或内置引擎');
+        }
+        r = await ocrPdfToMarkdown(file, (p) => setProgress(`${file.name} · ${p.label}`));
+      } else if (engine === 'anydoc') {
         try {
           r = await anydocToMarkdown(file);
         } catch (err) {
@@ -67,7 +73,15 @@ export default function ConvertView({ onSave, onClose }: Props) {
       setElapsed(performance.now() - started);
       if (r.warning) toast(r.warning, 'info', 6000);
     } catch (e) {
-      toast(`转换失败：${(e as Error).message}`, 'err');
+      const msg = (e as Error).message;
+      // 扫描件是预期内的失败：直接把下一步怎么做说清楚，而不是只丢一句报错
+      toast(
+        engine !== 'ocr' && /OCR/i.test(msg)
+          ? `${msg}。把上方「引擎」切换成「OCR 扫描件」再试一次即可。`
+          : `转换失败：${msg}`,
+        'err',
+        10000,
+      );
     } finally {
       setBusy(false);
       setProgress('');
@@ -140,15 +154,16 @@ export default function ConvertView({ onSave, onClose }: Props) {
                 <>
                   <b>点击选择，或把文件拖到这里</b>
                   <span className="muted">支持 .pdf 与 .docx，全程本地处理，不上传任何数据</span>
-                  <span className="muted">PDF 依据文字层重建标题 / 段落 / 列表；扫描版需先 OCR</span>
+                  <span className="muted">PDF 依据文字层重建标题 / 段落 / 列表；扫描版请把引擎切到「OCR 扫描件」</span>
                 </>
               )}
             </div>
             <div className="convert-engine">
               <span className="muted">引擎</span>
-              <select value={engine} onChange={(e) => setEngine(e.target.value as 'anydoc' | 'builtin')}>
+              <select value={engine} onChange={(e) => setEngine(e.target.value as 'anydoc' | 'builtin' | 'ocr')}>
                 <option value="anydoc">anydoc (WASM - 本地)</option>
                 <option value="builtin">内置启发式</option>
+                <option value="ocr">OCR 扫描件 (本地识别)</option>
               </select>
             </div>
             <input
