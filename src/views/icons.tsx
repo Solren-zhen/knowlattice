@@ -209,8 +209,8 @@ export const IconLogo = ({ size = 24 }: P) => {
     <svg {...base(size)} stroke="none" fill="none">
       <defs>
         <linearGradient id={`${id}-g`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#4b3fd8" />
-          <stop offset="1" stop-color="#8a6bff" />
+          <stop offset="0" stopColor="#4b3fd8" />
+          <stop offset="1" stopColor="#8a6bff" />
         </linearGradient>
       </defs>
       {/* 深色圆角底 */}
