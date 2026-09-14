@@ -25,6 +25,11 @@
   --accent-ring: rgba(79, 70, 229, 0.28);
   /* 主色填充之上的文字色：浅色用白，深色反转为深墨，两主题均 ≥4.5:1 */
   --accent-ink: #ffffff;
+  /* 主按钮渐变（此前在 8 处硬编码复制，其中 .btn-primary 的覆盖块写的是旧色 #818cf8→#6366f1，
+     白字实测仅 3.64:1）。顶档取 Indigo-500 而非更浅的 #7c7cf5：白字落在渐变顶部时
+     后者只有 4.37:1，仍不达 AA；#6366f1 顶档全程 ≥5.11:1。 */
+  --grad-primary: linear-gradient(180deg, #6366f1 0%, var(--accent) 100%);
+  --grad-primary-hover: linear-gradient(180deg, #4f46e5 0%, var(--accent-hover) 100%);
 
   /* ---- 状态色 ---- */
   --danger: #dc2626;
@@ -171,7 +176,7 @@ button { font-family: inherit; }
 }
 .btn-primary {
   display: block; width: 100%;
-  background: linear-gradient(180deg, #7c7cf5 0%, var(--accent) 100%);
+  background: var(--grad-primary);
   color: #fff;
   border: none; border-radius: var(--r-md);
   padding: 12px 0; font-size: 15px; font-weight: 600;
@@ -180,7 +185,7 @@ button { font-family: inherit; }
   transition: all var(--t-med) var(--ease);
 }
 .btn-primary:hover {
-  background: linear-gradient(180deg, #6d6df0 0%, var(--accent-hover) 100%);
+  background: var(--grad-primary-hover);
   box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .btn-primary:active { transform: scale(0.985); }
@@ -220,7 +225,7 @@ kbd {
 .new-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   border: 1px solid transparent; color: #fff;
-  background: linear-gradient(180deg, #7c7cf5 0%, var(--accent) 100%);
+  background: var(--grad-primary);
   border-radius: var(--r-md);
   padding: 0 12px; height: 28px;   /* 与同排的 .btn-icon 对齐 */
   font-size: 12.5px; font-weight: 600; font-family: inherit;
@@ -230,7 +235,7 @@ kbd {
   transition: all var(--t-fast) var(--ease);
 }
 .new-btn:hover {
-  background: linear-gradient(180deg, #6d6df0 0%, var(--accent-hover) 100%);
+  background: var(--grad-primary-hover);
   box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.22);
   transform: translateY(-1px);
 }
@@ -1216,11 +1221,11 @@ a.wikilink.missing::after {
 }
 .mv-confirm-actions button:hover { border-color: var(--border-accent); background: var(--accent-soft); }
 .mv-confirm-actions .mv-confirm-ok {
-  background: linear-gradient(180deg, #7c7cf5 0%, var(--accent) 100%);
+  background: var(--grad-primary);
   border-color: transparent; color: #fff;
   box-shadow: var(--glow-accent);
 }
-.mv-confirm-actions .mv-confirm-ok:hover { filter: brightness(1.06); background: linear-gradient(180deg, #6d6df0 0%, var(--accent-hover) 100%); }
+.mv-confirm-actions .mv-confirm-ok:hover { filter: brightness(1.06); background: var(--grad-primary-hover); }
 .mv-confirm-actions .mv-confirm-ok.danger {
   background: linear-gradient(180deg, #f87171 0%, #ef4444 100%);
   box-shadow: 0 2px 10px rgba(239, 68, 68, 0.35);
@@ -2087,7 +2092,7 @@ a.wikilink.missing::after {
 /* 主按钮 → 蓝渐变胶囊 + 柔和投影（yunwu 的 Sign in 样式） */
 .btn-primary {
   display: block; width: 100%;
-  background: linear-gradient(180deg, #818cf8 0%, #6366f1 100%);
+  background: var(--grad-primary);
   color: #fff; border: none;
   border-radius: 999px;
   padding: 12px 0;
@@ -2097,7 +2102,7 @@ a.wikilink.missing::after {
   transition: background var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease), transform var(--t-fast) var(--ease);
 }
 .btn-primary:hover {
-  background: linear-gradient(180deg, #818cf8 0%, #4f46e5 100%);
+  background: var(--grad-primary-hover);
   box-shadow: 0 8px 22px rgba(79, 70, 229, 0.36);
   transform: translateY(-1px);
 }
@@ -2383,6 +2388,9 @@ a.wikilink.missing::after {
   --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.45);
   --glow-accent: 0 2px 10px rgba(129, 140, 248, 0.3);
+  /* 深色下主按钮：极光靛蓝渐变 + 深墨文字（浅紫底配白字对比度不足，实测 7.38:1） */
+  --grad-primary: linear-gradient(180deg, #a5b4fc 0%, #818cf8 100%);
+  --grad-primary-hover: linear-gradient(180deg, #c7d2fe 0%, #a5b4fc 100%);
 }
 /* 深色下：Night 蓝黑底 + 紫色医学几何背景 */
 [data-theme='dark'] body {
@@ -2406,12 +2414,12 @@ a.wikilink.missing::after {
 
 /* 深色下主按钮：极光靛蓝渐变 + 深墨文字（浅紫底配白字对比度不足） */
 [data-theme='dark'] .btn-primary {
-  background: linear-gradient(180deg, #a5b4fc 0%, #818cf8 100%);
+  background: var(--grad-primary);
   color: #10162b;
   box-shadow: 0 6px 16px rgba(129, 140, 248, 0.35);
 }
 [data-theme='dark'] .btn-primary:hover {
-  background: linear-gradient(180deg, #c7d2fe 0%, #a5b4fc 100%);
+  background: var(--grad-primary-hover);
   color: #10162b;
   box-shadow: 0 8px 22px rgba(129, 140, 248, 0.42);
 }
