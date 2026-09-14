@@ -1,0 +1,20 @@
+KnowLattice - brain atlas module - third-party notices
+
+1. Harvard-Oxford Structural Atlas (cortical lateralized + subcortical)
+   Source : FSL / FMRIB, University of Oxford
+   Files  : public/brain/ho_cortical_dseg.nii.gz, ho_subcortical_dseg.nii.gz
+   Terms  : distributed with FSL for research and educational use.
+            Check the FSL atlas terms before any commercial redistribution.
+   URL    : https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/Atlases
+
+2. MNI152 template (tpl-MNI152NLin2009cAsym, res-02, T1w)
+   Source : TemplateFlow - https://templateflow.org
+   Files  : public/brain/mni152_t1_2mm.nii.gz
+   Terms  : MNI template terms, research use.
+
+3. Viewer library
+   niivue - https://github.com/niivue/niivue - BSD-2-Clause
+
+Region names come from the FSL atlas XML files (HarvardOxford-Cortical-Lateralized.xml,
+HarvardOxford-Subcortical.xml). Region coordinates are centroids computed offline from
+the atlas label volumes and are expressed in MNI152 millimetres.

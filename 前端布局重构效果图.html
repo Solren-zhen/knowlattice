@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>晶格 · 布局重构效果图 v2（三套布局方案 + 新按钮/图标系统）</title>
+<style>
+/* ============================================================
+   晶格 KnowLattice · 布局重构效果图 v2
+   三套结构性布局方案 + 全新按钮形状体系 + 双色描边图标系统
+   ============================================================ */
+
+/* ---------- 设计令牌：浅色（极光临床蓝紫） ---------- */
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --panel: #f1f5f9;
+  --panel-2: #e9eef5;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --text-2: #334155;
+  --muted: #64748b;
+  --dim: #94a3b8;
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-soft: rgba(99, 102, 241, 0.09);
+  --accent-ring: rgba(99, 102, 241, 0.3);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.08);
+  --success: #10b981;
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-2: 0 4px 14px rgba(15, 23, 42, 0.07);
+  --shadow-3: 0 14px 40px rgba(15, 23, 42, 0.13);
+  --glass: rgba(248, 250, 252, 0.78);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+/* ---------- 设计令牌：深色（深邃生物舱） ---------- */
+body.dark {
+  --bg: #090d16;
+  --surface: #0f1522;
+  --panel: #131a29;
+  --panel-2: #1a2334;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --text: #f1f5f9;
+  --text-2: #cbd5e1;
+  --muted: #7c8aa5;
+  --dim: #64748b;
+  --accent: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-soft: rgba(129, 140, 248, 0.15);
+  --accent-ring: rgba(129, 140, 248, 0.4);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.12);
+  --success: #34d399;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 14px 40px rgba(0, 0, 0, 0.65);
+  --glass: rgba(9, 13, 22, 0.78);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  padding-bottom: 80px;
+}
+
+/* ============================================================
+   顶部控制台
+   ============================================================ */
+.console {
+  position: sticky; top: 0; z-index: 900;
+  background: rgba(9, 13, 22, 0.94);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 12px 22px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  color: #e2e8f0;
+}
+.console .tag {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.09em;
+  text-transform: uppercase; color: #fff;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  padding: 5px 11px; border-radius: 999px;
+}
+.console .title { font-size: 13.5px; font-weight: 600; }
+.console .spacer { flex: 1; }
+.seg-switch {
+  display: flex; gap: 3px; padding: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+}
+.seg-switch button {
+  font: inherit; font-size: 12px; font-weight: 600;
+  color: #cbd5e1; background: transparent; border: none;
+  padding: 7px 15px; border-radius: 9px; cursor: pointer;
+  transition: all 0.18s var(--ease);
+}
+.seg-switch button:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+.seg-switch button.on {
+  background: #6366f1; color: #fff;
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.5);
+}
+.theme-btn {
+  font: inherit; font-size: 12px; font-weight: 600;
+  color: #e2e8f0; background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 7px 14px; border-radius: 10px; cursor: pointer;
+}
+.theme-btn:hover { background: rgba(255, 255, 255, 0.15); }
+
+/* ============================================================
+   方案说明卡
+   ============================================================ */
+.brief {
+  max-width: 1480px; margin: 22px auto 14px; padding: 0 22px;
+}
+.brief-inner {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 20px 24px; box-shadow: var(--shadow-2);
+  display: flex; gap: 20px; align-items: flex-start;
+  border-left: 4px solid var(--accent);
+}
+.brief h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.01em; }
+.brief p { font-size: 13px; color: var(--muted); line-height: 1.75; max-width: 900px; }
+.brief .kv { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.chip {
+  font-size: 11.5px; font-weight: 600; color: var(--accent);
+  background: var(--accent-soft); border: 1px solid var(--accent-ring);
+  padding: 3px 10px; border-radius: 999px;
+}
+
+/* ============================================================
+   画框舞台
+   ============================================================ */
+.stage-wrap { max-width: 1480px; margin: 0 auto 26px; padding: 0 22px; }
+.window {
+  height: 840px; overflow: hidden; position: relative;
+  background: var(--bg);
+  border: 1px solid var(--border); border-radius: 18px;
+  box-shadow: var(--shadow-3);
+  display: flex; flex-direction: column;
+}
+
+/* ---------- 通用：图标 ---------- */
+.ic { width: 19px; height: 19px; display: block; flex-shrink: 0; }
+.ic-sm { width: 15px; height: 15px; }
+.ic-lg { width: 22px; height: 22px; }
+
+/* ---------- 通用：垂直图标栏（导航轨） ---------- */
+.rail {
+  width: 66px; flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 12px 0 10px; gap: 4px;
+}
+.rail-logo {
+  width: 40px; height: 40px; border-radius: 13px;
+  background: linear-gradient(140deg, #6366f1, #8b5cf6);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.42), inset 0 1px 0 rgba(255,255,255,.28);
+  margin-bottom: 10px;
+}
+.rail-sep { width: 26px; height: 1px; background: var(--border); margin: 7px 0; }
+.rail-spacer { flex: 1; }
+/* 按钮形状 ①：超椭圆图标钮（squircle icon button） */
+.rail-btn {
+  position: relative;
+  width: 42px; height: 42px; border-radius: 14px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.18s var(--ease);
+}
+.rail-btn:hover {
+  background: var(--panel); color: var(--text);
+  transform: translateY(-1px);
+}
+.rail-btn.on {
+  background: var(--accent-soft); color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
+/* 选中态左侧短发光指示条 */
+.rail-btn.on::before {
+  content: ""; position: absolute; left: -12px; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 20px; border-radius: 0 3px 3px 0;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+.rail-badge {
+  position: absolute; top: 4px; right: 4px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 999px; background: var(--danger); color: #fff;
+  font-size: 9.5px; font-weight: 800; line-height: 16px; text-align: center;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+/* ---------- 通用：卡片面板 ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-1);
+  display: flex; flex-direction: column;
+  overflow: hidden; min-width: 0;
+}
+.card-head {
+  height: 44px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 9px;
+  padding: 0 14px; border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 650;
+}
+.card-head .spacer { flex: 1; }
+.card-body { flex: 1; overflow-y: auto; min-height: 0; }
+
+/* ---------- 通用：新按钮谱系 ---------- */
+.btn {
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-2); cursor: pointer;
+  padding: 7px 13px; border-radius: 11px;
+  transition: all 0.16s var(--ease);
+  white-space: nowrap;
+}
+.btn:hover {
+  border-color: var(--accent-ring); color: var(--accent);
+  background: var(--accent-soft); transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(99, 102, 241, 0.16);
+}
+/* 形状 ②：主操作（渐变实底 + 内高光） */
+.btn-primary {
+  border-color: transparent; color: #fff;
+  background: linear-gradient(180deg, #7c7cf5, var(--accent));
+  box-shadow: 0 3px 12px rgba(99, 102, 241, 0.34), inset 0 1px 0 rgba(255,255,255,.22);
+}
+.btn-primary:hover {
+  color: #fff;
+  background: linear-gradient(180deg, #6d6df0, var(--accent-hover));
+  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.44), inset 0 1px 0 rgba(255,255,255,.22);
+}
+/* 形状 ③：方形图标钮（squircle） */
+.btn-icon {
+  width: 34px; height: 34px; padding: 0; border-radius: 11px;
+  color: var(--muted);
+}
+.btn-icon.lg { width: 40px; height: 40px; border-radius: 13px; }
+.btn-icon.sm { width: 28px; height: 28px; border-radius: 9px; }
+.btn-icon.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-ring); }
+.btn-icon.danger:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); box-shadow: none; }
+/* 形状 ④：纯文字幽灵钮 */
+.btn-ghost { border-color: transparent; background: transparent; box-shadow: none; }
+.btn-ghost:hover { border-color: transparent; background: var(--accent-soft); transform: none; box-shadow: none; }
+/* 形状 ⑤：分段控件（segmented control） */
+.segmented {
+  display: inline-flex; gap: 2px; padding: 3px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+}
+.segmented button {
+  font: inherit; font-size: 12px; font-weight: 600;
+  border: none; background: transparent; color: var(--muted);
+  padding: 6px 12px; border-radius: 9px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px;
+  transition: all 0.16s var(--ease);
+}
+.segmented button:hover { color: var(--text); }
+.segmented button.on {
+  background: var(--surface); color: var(--accent);
+  box-shadow: var(--shadow-1);
+}
+/* 形状 ⑥：分裂按钮（主操作 + 下拉） */
+.split { display: inline-flex; }
+.split .main {
+  border-radius: 11px 0 0 11px; border-right-width: 0;
+}
+.split .caret {
+  border-radius: 0 11px 11px 0; padding: 0 9px;
+}
+/* 形状 ⑦：悬浮动作钮（FAB） */
+.fab {
+  width: 54px; height: 54px; border-radius: 19px;
+  border: none; color: #fff; cursor: pointer;
+  background: linear-gradient(150deg, #7c7cf5, #6366f1 55%, #8b5cf6);
+  box-shadow: 0 10px 26px rgba(99, 102, 241, 0.46), inset 0 1px 0 rgba(255,255,255,.3);
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s var(--ease);
+}
+.fab:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 14px 32px rgba(99,102,241,.55), inset 0 1px 0 rgba(255,255,255,.3); }
+/* 徽标 / kbd */
+.kbd {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  background: var(--panel); border: 1px solid var(--border);
+  border-bottom-width: 2px; border-radius: 5px;
+  padding: 1px 6px; color: var(--muted);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 7px var(--accent); }
+
+/* ---------- 通用：目录树 ---------- */
+.tree { padding: 8px 9px; }
+.tree-group + .tree-group { margin-top: 8px; }
+.tree-dir {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 8px; border-radius: 9px;
+  font-size: 12px; font-weight: 650; color: var(--muted);
+  cursor: pointer;
+}
+.tree-dir:hover { background: var(--panel); color: var(--text); }
+.tree-dir .cnt {
+  margin-left: auto; font-size: 10px; font-weight: 700;
+  background: var(--panel); color: var(--dim);
+  padding: 1px 7px; border-radius: 999px;
+}
+.tree-items { margin: 2px 0 0 13px; padding-left: 8px; border-left: 1.5px solid var(--border); }
+.tree-file {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px; border-radius: 9px; margin-bottom: 1px;
+  font-size: 12.5px; color: var(--text-2); cursor: pointer;
+}
+.tree-file:hover { background: var(--panel); }
+.tree-file.on {
+  background: var(--accent-soft); color: var(--accent); font-weight: 650;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ---------- 通用：编辑器 ---------- */
+.ed-fm {
+  margin: 0 0 18px; padding: 11px 14px;
+  border: 1px dashed var(--border-strong); border-radius: 12px;
+  background: var(--panel); font-family: var(--mono);
+  font-size: 11.5px; line-height: 1.95; color: var(--muted);
+}
+.ed-fm b { color: var(--accent); font-weight: 700; }
+.ed-h1 { font-size: 23px; font-weight: 750; letter-spacing: -0.02em; margin-bottom: 14px; }
+.ed-line { display: flex; gap: 12px; font-family: var(--mono); font-size: 13px; line-height: 1.95; }
+.ed-ln { width: 22px; text-align: right; color: var(--dim); user-select: none; flex-shrink: 0; font-size: 11.5px; }
+.ed-key { color: var(--accent); font-weight: 700; }
+.wl {
+  color: var(--accent); background: var(--accent-soft);
+  border-radius: 6px; padding: 0 6px; font-weight: 600;
+  font-family: var(--font); font-size: 12.5px;
+}
+/* 格式工具条 */
+.fmtbar {
+  height: 38px; flex-shrink: 0; display: flex; align-items: center; gap: 3px;
+  padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.fmtbar .sep { width: 1px; height: 16px; background: var(--border-strong); margin: 0 6px; }
+.fmt-btn {
+  font: inherit; font-size: 12px; font-weight: 600; font-family: var(--mono);
+  min-width: 28px; height: 27px; padding: 0 8px;
+  border: 1px solid transparent; background: transparent; color: var(--text-2);
+  border-radius: 9px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.fmt-btn:hover { background: var(--surface); border-color: var(--accent-ring); color: var(--accent); }
+
+/* ---------- 通用：预览排版 ---------- */
+.pv { padding: 26px 30px; }
+.pv-hero { padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.pv-badges { display: flex; gap: 7px; margin-bottom: 10px; flex-wrap: wrap; }
+.pv-badge {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em;
+  padding: 3px 10px; border-radius: 999px;
+}
+.b-purple { background: rgba(124,58,237,.13); color: #7c3aed; }
+.b-green { background: rgba(16,185,129,.14); color: #059669; }
+.b-cyan { background: rgba(2,132,199,.13); color: #0284c7; }
+body.dark .b-purple { background: rgba(167,139,250,.18); color: #c4b5fd; }
+body.dark .b-green { background: rgba(52,211,153,.16); color: #6ee7b7; }
+body.dark .b-cyan { background: rgba(56,189,248,.16); color: #7dd3fc; }
+.pv-title { font-size: 24px; font-weight: 750; letter-spacing: -0.02em; }
+.pv-meta { font-size: 12px; color: var(--muted); margin-top: 7px; }
+.prop {
+  display: flex; gap: 14px; padding: 12px 15px; margin-bottom: 9px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.prop-lab { font-size: 11.5px; font-weight: 750; color: var(--accent); min-width: 62px; flex-shrink: 0; padding-top: 1px; }
+.prop-val { font-size: 13px; line-height: 1.7; color: var(--text-2); }
+.callout {
+  margin: 18px 0; padding: 15px 17px; border-radius: 13px;
+  background: linear-gradient(135deg, var(--accent-soft), rgba(139,92,246,.07));
+  border: 1px solid var(--accent-ring);
+}
+.callout-head {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 7px;
+}
+.callout p { font-size: 13px; line-height: 1.75; color: var(--text-2); }
+.blk-title {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted); margin: 22px 0 10px;
+}
+.blk {
+  padding: 11px 14px; border-radius: 12px; margin-bottom: 8px;
+  background: var(--panel); border: 1px solid var(--border); cursor: pointer;
+}
+.blk:hover { border-color: var(--accent-ring); background: var(--surface); }
+.blk b { font-size: 12.5px; color: var(--accent); font-weight: 650; }
+.blk p { font-size: 11.5px; color: var(--muted); margin-top: 4px; line-height: 1.6; }
+
+/* ---------- 通用：标签页条 ---------- */
+.tabstrip {
+  height: 46px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 9px 7px 12px; border-radius: 11px;
+  font-size: 12.5px; font-weight: 600; color: var(--muted);
+  border: 1px solid transparent; cursor: pointer; max-width: 190px;
+}
+.tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab:hover { background: var(--panel); color: var(--text); }
+.tab.on {
+  background: var(--accent-soft); color: var(--accent);
+  border-color: var(--accent-ring);
+}
+.tab .x {
+  width: 17px; height: 17px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--dim); opacity: 0;
+}
+.tab:hover .x, .tab.on .x { opacity: 1; }
+.tab .x:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* ---------- 通用：状态栏 ---------- */
+.statusbar {
+  height: 30px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 14px; background: var(--surface);
+  border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--muted);
+}
+.statusbar .spacer { flex: 1; }
+.statusbar b { font-weight: 650; color: var(--text-2); }
+.status-live { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-weight: 650; }
+
+/* ---------- 通用：悬浮命令胶囊 ---------- */
+.cmdpill {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 40;
+  width: min(520px, 52%);
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px 9px 15px;
+  background: var(--glass); backdrop-filter: blur(16px);
+  border: 1px solid var(--border); border-radius: 999px;
+  box-shadow: var(--shadow-2);
+  color: var(--muted); font-size: 13px;
+  cursor: pointer;
+}
+.cmdpill:hover { border-color: var(--accent-ring); box-shadow: 0 6px 22px rgba(99,102,241,.2); }
+.cmdpill .kbd { margin-left: auto; }
+
+/* ---------- 标注气泡 ---------- */
+.note-tag {
+  position: absolute; z-index: 60;
+  font-size: 10.5px; font-weight: 700; color: #fff;
+  background: #0f172a; border: 1px solid rgba(255,255,255,.2);
+  padding: 3px 9px; border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.28);
+  pointer-events: none; white-space: nowrap;
+}
+body.dark .note-tag { background: #6366f1; border-color: rgba(255,255,255,.3); }
+
+/* ============================================================
+   布局 A · 悬浮指挥台
+   结构：[图标导航轨 66px] + 内容区（三张悬浮卡片，间距 12px）
+         无顶栏；⌘K 命令胶囊悬浮于内容之上
+   ============================================================ */
+.lay-a { display: flex; flex: 1; min-height: 0; }
+.lay-a .deck {
+  flex: 1; min-width: 0; position: relative;
+  padding: 14px; display: flex; gap: 12px;
+}
+.lay-a .deck .card { flex: 1; }
+.lay-a .c-tree { flex: 0 0 244px; }
+.lay-a .c-edit { flex: 1.12; }
+.lay-a .c-prev { flex: 1.04; }
+
+/* ============================================================
+   布局 B · 标签工作台
+   结构：顶部标签页条 + [轨 66] [树 236] [编辑 1fr] [检查器 300] + 底部状态栏
+   ============================================================ */
+.lay-b { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.lay-b .work { display: flex; flex: 1; min-height: 0; }
+.lay-b .c-tree { flex: 0 0 236px; border-right: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; }
+.lay-b .c-edit { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--border); }
+.lay-b .c-insp { flex: 0 0 306px; display: flex; flex-direction: column; background: var(--surface); }
+.lay-b .crumb {
+  height: 40px; flex-shrink: 0; display: flex; align-items: center; gap: 9px;
+  padding: 0 14px; border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--muted);
+}
+.lay-b .crumb b { color: var(--text); font-weight: 650; }
+
+/* ============================================================
+   布局 C · 沉浸卡片流
+   结构：无固定轨（左侧悬停条）+ 居中文档卡片 + 右浮层检查器 + FAB
+   ============================================================ */
+.lay-c { flex: 1; min-height: 0; position: relative; display: flex; justify-content: center; padding: 16px 16px 16px 30px; }
+.lay-c .edge {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 14px;
+  display: flex; align-items: center; justify-content: center;
+  border-right: 1px solid var(--border); background: var(--panel);
+}
+.lay-c .edge-handle {
+  width: 26px; height: 44px; border-radius: 0 12px 12px 0;
+  background: var(--surface); border: 1px solid var(--border); border-left: none;
+  color: var(--muted); display: flex; align-items: center; justify-content: center;
+  cursor: pointer; box-shadow: var(--shadow-1);
+}
+.lay-c .edge-handle:hover { color: var(--accent); border-color: var(--accent-ring); }
+.lay-c .doc { flex: 1; max-width: 760px; }
+.lay-c .doc-inner { padding: 34px 44px; }
+.lay-c .float-insp {
+  position: absolute; right: 22px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 8px; background: var(--glass); backdrop-filter: blur(14px);
+  border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-2);
+}
+.lay-c .fab-wrap { position: absolute; right: 26px; bottom: 24px; z-index: 30; }
+.lay-c .topbar-mini {
+  position: absolute; top: 16px; left: 34px; z-index: 30;
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 12px; background: var(--glass); backdrop-filter: blur(14px);
+  border: 1px solid var(--border); border-radius: 999px;
+  font-size: 12px; color: var(--muted); box-shadow: var(--shadow-1);
+}
+.lay-c .drawer {
+  position: absolute; left: 14px; top: 16px; bottom: 16px; width: 268px; z-index: 50;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  box-shadow: var(--shadow-3); display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* ============================================================
+   控件与图标总览区
+   ============================================================ */
+.gallery { max-width: 1480px; margin: 0 auto; padding: 0 22px; }
+.gal-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 18px; }
+.gal-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 20px 22px; box-shadow: var(--shadow-2);
+}
+.gal-card h3 {
+  font-size: 14px; font-weight: 700; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 8px;
+}
+.gal-card > p { font-size: 12.5px; color: var(--muted); margin-bottom: 16px; line-height: 1.7; }
+.gal-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.gal-label { font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
+.icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; }
+.icon-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 12px 4px 9px; border-radius: 12px;
+  border: 1px solid transparent; color: var(--text-2);
+}
+.icon-cell:hover { background: var(--panel); border-color: var(--border); color: var(--accent); }
+.icon-cell span { font-size: 10px; color: var(--muted); font-weight: 600; }
+.palette { display: flex; gap: 8px; flex-wrap: wrap; }
+.sw { width: 62px; }
+.sw i { display: block; height: 40px; border-radius: 10px; border: 1px solid var(--border); }
+.sw span { display: block; font-size: 9.5px; color: var(--muted); margin-top: 5px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+
+<!-- ================= 图标精灵：双色描边（duotone）系统 ================= -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-note" viewBox="0 0 24 24">
+      <path d="M5.5 3.5h9L19 8v12.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1z" fill="currentColor" opacity=".16"/>
+      <path d="M5.5 3.5h9L19 8v12.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M14 3.6V8h4.4M8 12.5h7M8 16h4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24">
+      <circle cx="10.8" cy="10.8" r="6.3" fill="currentColor" opacity=".16"/>
+      <circle cx="10.8" cy="10.8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="m20.5 20.5-4.6-4.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-graph" viewBox="0 0 24 24">
+      <path d="M6.6 7.4 12 17.6M17.4 8.6 12 17.6M7.4 6.6l9.2 1.4" stroke="currentColor" stroke-width="1.6" opacity=".45"/>
+      <circle cx="6.2" cy="6.2" r="3" fill="currentColor" opacity=".2"/><circle cx="6.2" cy="6.2" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="17.8" cy="8" r="3" fill="currentColor" opacity=".2"/><circle cx="17.8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="12" cy="18" r="3" fill="currentColor" opacity=".2"/><circle cx="12" cy="18" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </symbol>
+    <symbol id="i-body" viewBox="0 0 24 24">
+      <path d="M4 8V6.5A2.5 2.5 0 0 1 6.5 4H8M16 4h1.5A2.5 2.5 0 0 1 20 6.5V8M20 16v1.5a2.5 2.5 0 0 1-2.5 2.5H16M8 20H6.5A2.5 2.5 0 0 1 4 17.5V16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <circle cx="12" cy="9.6" r="2.7" fill="currentColor" opacity=".18"/>
+      <circle cx="12" cy="9.6" r="2.7" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M6.8 18.4a5.4 5.4 0 0 1 10.4 0" fill="currentColor" opacity=".14"/>
+      <path d="M6.8 18.4a5.4 5.4 0 0 1 10.4 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-cards" viewBox="0 0 24 24">
+      <rect x="3" y="7.5" width="13" height="13" rx="3" fill="currentColor" opacity=".16"/>
+      <rect x="3" y="7.5" width="13" height="13" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M8 3.6h9.4A3.6 3.6 0 0 1 21 7.2v9.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M6.6 12.2h6M6.6 15.8h3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-target" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.6" fill="currentColor" opacity=".14"/>
+      <circle cx="12" cy="12" r="8.6" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="12" cy="12" r="4.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="12" cy="12" r="1.3" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-quiz" viewBox="0 0 24 24">
+      <rect x="4.5" y="3" width="15" height="18" rx="3" fill="currentColor" opacity=".14"/>
+      <rect x="4.5" y="3" width="15" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M8.5 8h7M9 14.6l2.1 2.1 4-4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-todo" viewBox="0 0 24 24">
+      <rect x="3.5" y="4" width="17" height="16.5" rx="3.4" fill="currentColor" opacity=".14"/>
+      <rect x="3.5" y="4" width="17" height="16.5" rx="3.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M8 10.4l1.9 1.9 3.6-3.8M8 16.4h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24">
+      <path d="M11.6 3.6H19a1.4 1.4 0 0 1 1.4 1.4v7.4a2 2 0 0 1-.6 1.4l-6.6 6.6a1.4 1.4 0 0 1-2 0l-6.6-6.6a1.4 1.4 0 0 1 0-2l6.6-6.6a2 2 0 0 1 1.4-.6z" fill="currentColor" opacity=".15"/>
+      <path d="M11.6 3.6H19a1.4 1.4 0 0 1 1.4 1.4v7.4a2 2 0 0 1-.6 1.4l-6.6 6.6a1.4 1.4 0 0 1-2 0l-6.6-6.6a1.4 1.4 0 0 1 0-2l6.6-6.6a2 2 0 0 1 1.4-.6z" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="15.6" cy="8.4" r="1.5" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3.4" fill="currentColor" opacity=".13"/>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M8 16.5v-4M12 16.5v-7M16 16.5v-2.5" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-ai" viewBox="0 0 24 24">
+      <path d="M12 3.2 14.1 9 20 11l-5.9 2L12 18.8 9.9 13 4 11l5.9-2z" fill="currentColor" opacity=".2"/>
+      <path d="M12 3.2 14.1 9 20 11l-5.9 2L12 18.8 9.9 13 4 11l5.9-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M18.6 15.4l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z" fill="currentColor" opacity=".55"/>
+    </symbol>
+    <symbol id="i-wand" viewBox="0 0 24 24">
+      <path d="M4.5 19.5 15 9l0 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M13.4 7.4 16.6 10.6 19.5 7.7a2.2 2.2 0 0 0-3.1-3.1z" fill="currentColor" opacity=".2"/>
+      <path d="M13.4 7.4 16.6 10.6 19.5 7.7a2.2 2.2 0 0 0-3.1-3.1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M5.5 5.5v3M4 7h3M18 17v2.6M16.7 18.3h2.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-book" viewBox="0 0 24 24">
+      <path d="M4 5.6A2.6 2.6 0 0 1 6.6 3H20v15.4H6.6A2.6 2.6 0 0 0 4 21z" fill="currentColor" opacity=".15"/>
+      <path d="M4 5.6A2.6 2.6 0 0 1 6.6 3H20v15.4H6.6A2.6 2.6 0 0 0 4 21z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M4 18.4A2.6 2.6 0 0 1 6.6 16H20" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24">
+      <path d="M12 5.5v13M5.5 12h13" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-save" viewBox="0 0 24 24">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" fill="currentColor" opacity=".15"/>
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M17 21v-8H7v8M7 3v5h8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24">
+      <path d="M4.5 6.5h15M9 6.5V4.6a1.1 1.1 0 0 1 1.1-1.1h3.8A1.1 1.1 0 0 1 15 4.6v1.9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M6.5 6.5 7.4 19a2 2 0 0 0 2 1.9h5.2a2 2 0 0 0 2-1.9l.9-12.5" fill="currentColor" opacity=".13"/>
+      <path d="M6.5 6.5 7.4 19a2 2 0 0 0 2 1.9h5.2a2 2 0 0 0 2-1.9l.9-12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="M10.4 10.5v6M13.6 10.5v6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-mind" viewBox="0 0 24 24">
+      <circle cx="5.6" cy="12" r="2.4" fill="currentColor" opacity=".22"/><circle cx="5.6" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="18.4" cy="6.6" r="2.2" fill="currentColor" opacity=".22"/><circle cx="18.4" cy="6.6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="18.4" cy="17.4" r="2.2" fill="currentColor" opacity=".22"/><circle cx="18.4" cy="17.4" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M7.8 11.2c3 .6 5-3.2 8.6-4.2M7.8 12.8c3-.6 5 3.2 8.6 4.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-link" viewBox="0 0 24 24">
+      <path d="M9.6 14.4 14.4 9.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      <path d="M11.2 6.4l1.9-1.9a4.4 4.4 0 0 1 6.2 6.2l-1.9 1.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M12.8 17.6l-1.9 1.9a4.4 4.4 0 0 1-6.2-6.2l1.9-1.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="4.2" fill="currentColor" opacity=".2"/>
+      <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24">
+      <path d="M20 14.4A8.6 8.6 0 0 1 9.6 4a8.6 8.6 0 1 0 10.4 10.4z" fill="currentColor" opacity=".18"/>
+      <path d="M20 14.4A8.6 8.6 0 0 1 9.6 4a8.6 8.6 0 1 0 10.4 10.4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3" fill="currentColor" opacity=".25"/>
+      <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H1a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 2.6 7a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 7 2.6h.1A1.7 1.7 0 0 0 8.3 1V1a2 2 0 1 1 4 0v.1A1.7 1.7 0 0 0 15 2.6h.1a1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1h.1a2 2 0 1 1 0 4H21a1.7 1.7 0 0 0-1.6 1z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    </symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24">
+      <path d="M3.5 7.4A2.4 2.4 0 0 1 5.9 5h3.4l2 2.4h6.8a2.4 2.4 0 0 1 2.4 2.4v7.8a2.4 2.4 0 0 1-2.4 2.4H5.9a2.4 2.4 0 0 1-2.4-2.4z" fill="currentColor" opacity=".15"/>
+      <path d="M3.5 7.4A2.4 2.4 0 0 1 5.9 5h3.4l2 2.4h6.8a2.4 2.4 0 0 1 2.4 2.4v7.8a2.4 2.4 0 0 1-2.4 2.4H5.9a2.4 2.4 0 0 1-2.4-2.4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24">
+      <path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24">
+      <path d="M12 3.2 21 8l-9 4.8L3 8z" fill="currentColor" opacity=".18"/>
+      <path d="M12 3.2 21 8l-9 4.8L3 8z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path d="m3 12.4 9 4.8 9-4.8M3 16.6l9 4.8 9-4.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24">
+      <path d="M2.5 12S6.2 5.6 12 5.6 21.5 12 21.5 12 17.8 18.4 12 18.4 2.5 12 2.5 12z" fill="currentColor" opacity=".14"/>
+      <path d="M2.5 12S6.2 5.6 12 5.6 21.5 12 21.5 12 17.8 18.4 12 18.4 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="12" cy="12" r="2.7" fill="currentColor" opacity=".4"/>
+      <circle cx="12" cy="12" r="2.7" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </symbol>
+    <symbol id="i-back" viewBox="0 0 24 24">
+      <path d="M15 6 9 12l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-fwd" viewBox="0 0 24 24">
+      <path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ================= 顶部控制台 ================= -->
+<div class="console">
+  <span class="tag">Layout Proposal v2</span>
+  <span class="title">晶格 · 布局结构重构（三套方案 + 新按钮/图标系统）</span>
+  <span class="spacer"></span>
+  <span style="font-size:12px;color:#94a3b8">切换布局方案：</span>
+  <div class="seg-switch" id="laySwitch">
+    <button class="on" data-lay="a">A · 悬浮指挥台</button>
+    <button data-lay="b">B · 标签工作台</button>
+    <button data-lay="c">C · 沉浸卡片流</button>
+  </div>
+  <button class="theme-btn" id="themeBtn">🌙 深色预览</button>
+</div>
+
+<!-- ================= 方案说明 ================= -->
+<div class="brief">
+  <div class="brief-inner">
+    <div>
+      <h2 id="briefTitle"></h2>
+      <p id="briefText"></p>
+      <div class="kv" id="briefChips"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 画框 ================= -->
+<div class="stage-wrap">
+  <div class="window" id="stage"></div>
+</div>
+
+<!-- ================= 控件与图标总览 ================= -->
+<div class="gallery">
+  <div class="gal-grid">
+
+    <!-- 按钮形状谱系 -->
+    <div class="gal-card">
+      <h3><svg class="ic ic-sm"><use href="#i-layers"/></svg> 新按钮形状体系（7 种语义形状）</h3>
+      <p>不再只有「圆角矩形」一种。按操作权重分配形状：主操作渐变实底、次级描边、工具类超椭圆图标钮、视图切换用分段控件、新建用悬浮 FAB。</p>
+
+      <div class="gal-label">① 超椭圆图标钮 squircle icon（3 尺寸）</div>
+      <div class="gal-row">
+        <button class="btn btn-icon sm" title="小"><svg class="ic ic-sm"><use href="#i-back"/></svg></button>
+        <button class="btn btn-icon" title="中"><svg class="ic"><use href="#i-search"/></svg></button>
+        <button class="btn btn-icon" title="中/激活"><svg class="ic"><use href="#i-eye"/></svg></button>
+        <button class="btn btn-icon lg" title="大"><svg class="ic ic-lg"><use href="#i-plus"/></svg></button>
+        <button class="btn btn-primary" style="border-radius:11px"><svg class="ic ic-sm"><use href="#i-plus"/></svg> 新建原子笔记</button>
+      </div>
+
+      <div class="gal-label">② 次级按钮 / 幽灵按钮 / 危险按钮</div>
+      <div class="gal-row">
+        <button class="btn"><svg class="ic ic-sm"><use href="#i-save"/></svg> 保存 <span class="kbd">Ctrl S</span></button>
+        <button class="btn"><svg class="ic ic-sm"><use href="#i-mind"/></svg> 思维导图</button>
+        <button class="btn btn-ghost"><svg class="ic ic-sm"><use href="#i-link"/></svg> 关联 · 3</button>
+        <button class="btn btn-icon danger"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+      </div>
+
+      <div class="gal-label">③ 分段控件 segmented（视图/检查器切换）</div>
+      <div class="gal-row">
+        <div class="segmented">
+          <button class="on"><svg class="ic ic-sm"><use href="#i-note"/></svg> 预览</button>
+          <button><svg class="ic ic-sm"><use href="#i-layers"/></svg> 大纲</button>
+          <button><svg class="ic ic-sm"><use href="#i-link"/></svg> 关联</button>
+          <button><svg class="ic ic-sm"><use href="#i-cards"/></svg> 复习</button>
+        </div>
+      </div>
+
+      <div class="gal-label">④ 分裂按钮 split + 悬浮动作钮 FAB + 计数徽标</div>
+      <div class="gal-row">
+        <div class="split">
+          <button class="btn btn-primary main"><svg class="ic ic-sm"><use href="#i-plus"/></svg> 新建</button>
+          <button class="btn btn-primary caret"><svg class="ic ic-sm"><use href="#i-chev" /></svg></button>
+        </div>
+        <button class="btn"><svg class="ic ic-sm"><use href="#i-cards"/></svg> 复习</button>
+        <span style="position:relative;display:inline-flex">
+          <button class="btn btn-icon"><svg class="ic"><use href="#i-target"/></svg></button>
+          <span class="rail-badge" style="top:-4px;right:-4px">5</span>
+        </span>
+        <button class="fab" style="width:44px;height:44px;border-radius:16px"><svg class="ic"><use href="#i-plus"/></svg></button>
+      </div>
+    </div>
+
+    <!-- 图标系统 -->
+    <div class="gal-card">
+      <h3><svg class="ic ic-sm"><use href="#i-ai"/></svg> 新图标系统：双色描边 duotone</h3>
+      <p>从「单线描边」升级为「淡色填充 + 描边」双色图标。图形语言统一为 24px 网格、1.7px 描边、圆角端点，医学语义重绘（解剖=扫描框、复习=层叠卡、错题=靶心）。</p>
+      <div class="icon-grid" id="iconGrid"></div>
+    </div>
+
+  </div>
+
+  <!-- 色彩 -->
+  <div class="gal-card" style="margin-top:18px">
+    <h3><svg class="ic ic-sm"><use href="#i-chart"/></svg> 色彩令牌（沿用已落地的极光靛蓝体系）</h3>
+    <p>布局重构不改动已确认的配色，保证你已批准的视觉基调延续。</p>
+    <div class="palette" id="palette"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   方案元数据
+   ============================================================ */
+var META = {
+  a: {
+    title: "方案 A · 悬浮指挥台 Floating Command Deck",
+    text: "彻底去掉顶栏。导航收进左侧 66px 图标轨，正文变成三张悬浮卡片漂在背景之上，⌘K 命令胶囊悬浮在内容顶部。空间感最强、最「现代工具」的观感，适合大屏专注写作。",
+    chips: ["无顶栏", "66px 图标轨", "三张悬浮卡片", "悬浮命令胶囊", "卡片间距 12px"]
+  },
+  b: {
+    title: "方案 B · 标签工作台 Tabbed Workbench",
+    text: "引入 IDE 式的多标签页：同时打开多篇笔记，标签可关闭切换。右侧检查器改为分段控件（预览/大纲/关联/复习）四合一，底部增加状态栏显示字数与保存状态。信息密度最高、多笔记来回跳转最顺手。",
+    chips: ["多标签页", "图标轨 + 目录树", "右侧分段检查器", "底部状态栏", "多笔记并行"]
+  },
+  c: {
+    title: "方案 C · 沉浸卡片流 Focus Flow",
+    text: "默认隐藏一切 chrome，只留居中一份文档。左侧悬停拉出导航抽屉，右侧悬浮检查器按钮，新建为右下角 FAB，面包屑浮在左上。干扰最少，最适合背书与精读。",
+    chips: ["默认无 chrome", "抽屉式导航", "居中 760px 文档", "悬浮检查器", "右下 FAB 新建"]
+  }
+};
+
+var LAYOUTS = {
+  a: function () {
+    return ''
+    + '<div class="lay-a">'
+    +   RAIL('note')
+    +   '<div class="deck">'
+    +     '<div class="cmdpill"><svg class="ic ic-sm"><use href="#i-search"/></svg>'
+    +       '搜索笔记、解剖名词、考点…<span class="kbd">Ctrl K</span></div>'
+    +     '<div class="card c-tree">'
+    +       '<div class="card-head"><svg class="ic ic-sm"><use href="#i-folder"/></svg> 章节目录'
+    +         '<span class="spacer"></span>'
+    +         '<button class="btn btn-icon sm"><svg class="ic ic-sm"><use href="#i-plus"/></svg></button></div>'
+    +       '<div class="card-body">' + TREE() + '</div>'
+    +     '</div>'
+    +     '<div class="card c-edit">' + EDITOR_HEAD('悬浮卡片 · 无顶栏') + FMTBAR() + '<div class="card-body" style="padding:24px 28px">' + EDIT_BODY() + '</div></div>'
+    +     '<div class="card c-prev"><div class="card-head"><svg class="ic ic-sm"><use href="#i-eye"/></svg> 实时渲染'
+    +         '<span class="spacer"></span><span class="dot"></span>'
+    +       '</div><div class="card-body">' + PREVIEW() + '</div></div>'
+    +     '<div class="note-tag" style="left:290px;bottom:26px">① 卡片悬浮 · 柔和投影</div>'
+    +     '<div class="note-tag" style="left:74px;top:22px">② ⌘K 命令胶囊常驻</div>'
+    +   '</div>'
+    + '</div>';
+  },
+  b: function () {
+    return ''
+    + '<div class="lay-b">'
+    +   '<div class="tabstrip">'
+    +     '<div class="tab on"><svg class="ic ic-sm"><use href="#i-note"/></svg><span>波尔效应</span><span class="x">×</span></div>'
+    +     '<div class="tab"><svg class="ic ic-sm"><use href="#i-note"/></svg><span>氧解离曲线</span><span class="x">×</span></div>'
+    +     '<div class="tab"><svg class="ic ic-sm"><use href="#i-note"/></svg><span>心输出量</span><span class="x">×</span></div>'
+    +     '<button class="btn btn-icon sm"><svg class="ic ic-sm"><use href="#i-plus"/></svg></button>'
+    +     '<span class="spacer" style="flex:1"></span>'
+    +     '<button class="btn"><svg class="ic ic-sm"><use href="#i-save"/></svg> 保存 <span class="kbd">Ctrl S</span></button>'
+    +     '<button class="btn btn-icon"><svg class="ic"><use href="#i-mind"/></svg></button>'
+    +     '<button class="btn btn-icon danger"><svg class="ic"><use href="#i-trash"/></svg></button>'
+    +   '</div>'
+    +   '<div class="work">'
+    +     RAIL('cards')
+    +     '<div class="c-tree">'
+    +       '<div class="card-head" style="border-bottom:1px solid var(--border)"><svg class="ic ic-sm"><use href="#i-folder"/></svg> 章节目录'
+    +         '<span class="spacer"></span><button class="btn btn-icon sm"><svg class="ic ic-sm"><use href="#i-plus"/></svg></button></div>'
+    +       '<div class="card-body">' + TREE() + '</div>'
+    +     '</div>'
+    +     '<div class="c-edit">'
+    +       '<div class="crumb"><svg class="ic ic-sm"><use href="#i-note"/></svg> 01-生理学 / 呼吸 / <b>波尔效应</b>'
+    +         '<span class="spacer" style="flex:1"></span><span class="status-live"><span class="dot"></span>已保存</span></div>'
+    +       FMTBAR()
+    +       '<div class="card-body" style="padding:26px 34px">' + EDIT_BODY() + '</div>'
+    +     '</div>'
+    +     '<div class="c-insp">'
+    +       '<div style="padding:9px 12px;border-bottom:1px solid var(--border)">'
+    +         '<div class="segmented" style="width:100%">'
+    +           '<button class="on" style="flex:1;justify-content:center"><svg class="ic ic-sm"><use href="#i-eye"/></svg>预览</button>'
+    +           '<button style="flex:1;justify-content:center"><svg class="ic ic-sm"><use href="#i-layers"/></svg>大纲</button>'
+    +           '<button style="flex:1;justify-content:center"><svg class="ic ic-sm"><use href="#i-link"/></svg>关联</button>'
+    +           '<button style="flex:1;justify-content:center"><svg class="ic ic-sm"><use href="#i-cards"/></svg>复习</button>'
+    +         '</div>'
+    +       '</div>'
+    +       '<div class="card-body">' + PREVIEW(true) + '</div>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div class="statusbar">'
+    +     '<span><b>133</b> 字</span><span>3 段 · 2 双链</span>'
+    +     '<span class="status-live"><span class="dot"></span>已自动保存</span>'
+    +     '<span class="spacer"></span>'
+    +     '<span>Markdown</span><span>字体：衬线</span><span>极光靛蓝</span>'
+    +   '</div>'
+    + '</div>';
+  },
+  c: function () {
+    return ''
+    + '<div class="lay-c">'
+    +   '<div class="edge"><div class="edge-handle"><svg class="ic ic-sm"><use href="#i-chev"/></svg></div></div>'
+    +   '<div class="topbar-mini"><svg class="ic ic-sm"><use href="#i-note"/></svg> 01-生理学 / 呼吸 / <b style="color:var(--text)">波尔效应</b>'
+    +     '<span class="kbd">Ctrl K</span></div>'
+    +   '<div class="card doc"><div class="card-body doc-inner">' + EDIT_BODY(true) + '</div></div>'
+    +   '<div class="float-insp">'
+    +     '<button class="btn btn-icon on"><svg class="ic"><use href="#i-eye"/></svg></button>'
+    +     '<button class="btn btn-icon"><svg class="ic"><use href="#i-layers"/></svg></button>'
+    +     '<button class="btn btn-icon"><svg class="ic"><use href="#i-link"/></svg></button>'
+    +     '<button class="btn btn-icon"><svg class="ic"><use href="#i-cards"/></svg></button>'
+    +     '<button class="btn btn-icon"><svg class="ic"><use href="#i-mind"/></svg></button>'
+    +   '</div>'
+    +   '<div class="fab-wrap"><button class="fab"><svg class="ic ic-lg"><use href="#i-plus"/></svg></button></div>'
+    +   '<div class="drawer">'
+    +     '<div class="card-head"><svg class="ic ic-sm"><use href="#i-search"/></svg> 快速导航<span class="spacer"></span><button class="btn btn-icon sm"><svg class="ic ic-sm"><use href="#i-plus"/></svg></button></div>'
+    +     '<div class="card-body">' + TREE() + '</div>'
+    +   '</div>'
+    +   '<div class="note-tag" style="left:300px;top:22px">① 悬停左侧边缘拉出导航抽屉</div>'
+    +   '<div class="note-tag" style="right:104px;top:52%">② 检查器悬浮，可收起</div>'
+    +   '<div class="note-tag" style="right:26px;bottom:88px">③ FAB 新建</div>'
+    + '</div>';
+  }
+};
+
+/* ---------- 片段：导航轨（66px） ---------- */
+function RAIL(activeIcon) {
+  var top = [
+    ['i-note', '笔记', true, ''],
+    ['i-search', '搜索', false, ''],
+    ['i-graph', '图谱', false, ''],
+    ['i-body', '解剖', false, ''],
+    ['i-cards', '复习', false, '12'],
+    ['i-target', '错题', false, '5'],
+    ['i-quiz', '题库', false, ''],
+    ['i-todo', '待办', false, ''],
+    ['i-tag', '标签', false, ''],
+    ['i-chart', '统计', false, '']
+  ];
+  var bottom = [
+    ['i-ai', 'AI 助手', false, ''],
+    ['i-wand', '智能草稿', false, ''],
+    ['i-book', 'PDF 对照', false, '']
+  ];
+  var html = '<div class="rail">'
+    + '<div class="rail-logo"><svg class="ic ic-lg"><use href="#i-layers"/></svg></div>';
+  top.forEach(function (it, i) {
+    html += railBtn(it[0], it[1], it[2], it[3]);
+    if (i === 3) html += '<div class="rail-sep"></div>';
+  });
+  html += '<div class="rail-spacer"></div><div class="rail-sep"></div>';
+  bottom.forEach(function (it) { html += railBtn(it[0], it[1], false, ''); });
+  html += '<div class="rail-sep"></div>'
+    + railBtn('i-moon', '主题', false, '', 'id="railTheme"')
+    + railBtn('i-settings', '设置', false, '')
+    + '</div>';
+  return html;
+}
+function railBtn(icon, label, on, badge, extra) {
+  return '<button class="rail-btn' + (on ? ' on' : '') + '" title="' + label + '" ' + (extra || '') + '>'
+    + '<svg class="ic"><use href="#' + icon + '"/></svg>'
+    + (badge ? '<span class="rail-badge">' + badge + '</span>' : '')
+    + '</button>';
+}
+
+/* ---------- 片段：目录树 ---------- */
+function TREE() {
+  return ''
+  + '<div class="tree">'
+  +   '<div class="tree-group">'
+  +     '<div class="tree-dir"><svg class="ic ic-sm"><use href="#i-chev"/></svg> 01-生理学 <span class="cnt">6</span></div>'
+  +     '<div class="tree-items">'
+  +       '<div class="tree-dir" style="font-size:11.5px"><svg class="ic ic-sm" style="width:12px;height:12px"><use href="#i-chev"/></svg> 呼吸 <span class="cnt">3</span></div>'
+  +       '<div class="tree-items">'
+  +         '<div class="tree-file on"><span class="dot"></span> 波尔效应</div>'
+  +         '<div class="tree-file">氧解离曲线</div>'
+  +         '<div class="tree-file">肺牵张反射</div>'
+  +       '</div>'
+  +       '<div class="tree-dir" style="font-size:11.5px"><svg class="ic ic-sm" style="width:12px;height:12px"><use href="#i-chev"/></svg> 血液 <span class="cnt">1</span></div>'
+  +     '</div>'
+  +   '</div>'
+  +   '<div class="tree-group">'
+  +     '<div class="tree-dir"><svg class="ic ic-sm"><use href="#i-chev"/></svg> 02-生化 <span class="cnt">3</span></div>'
+  +   '</div>'
+  +   '<div class="tree-group">'
+  +     '<div class="tree-dir"><svg class="ic ic-sm"><use href="#i-chev"/></svg> 03-解剖 <span class="cnt">1</span></div>'
+  +   '</div>'
+  + '</div>';
+}
+
+/* ---------- 片段：编辑器头 + 正文 + 格式条 ---------- */
+function EDITOR_HEAD(tagText) {
+  return '<div class="card-head">'
+    + '<button class="btn btn-icon sm"><svg class="ic ic-sm"><use href="#i-back"/></svg></button>'
+    + '<button class="btn btn-icon sm"><svg class="ic ic-sm"><use href="#i-fwd"/></svg></button>'
+    + '<span style="width:1px;height:16px;background:var(--border)"></span>'
+    + '<span style="font-size:12.5px;font-weight:600">波尔效应</span>'
+    + '<span class="dot" title="未保存"></span>'
+    + '<span class="spacer"></span>'
+    + '<span style="font-size:11px;color:var(--muted)">133 字</span>'
+    + '<button class="btn"><svg class="ic ic-sm"><use href="#i-save"/></svg> 保存</button>'
+    + '<button class="btn btn-icon"><svg class="ic"><use href="#i-link"/></svg></button>'
+    + '</div>';
+}
+function FMTBAR() {
+  return '<div class="fmtbar">'
+    + '<button class="fmt-btn" title="撤销">↺</button><button class="fmt-btn" title="重做">↻</button>'
+    + '<span class="sep"></span>'
+    + '<button class="fmt-btn" style="font-weight:800">B</button><button class="fmt-btn" style="font-style:italic">I</button>'
+    + '<button class="fmt-btn">==</button><button class="fmt-btn">•</button>'
+    + '<span class="sep"></span>'
+    + '<button class="fmt-btn">[[</button><button class="fmt-btn">诀</button><button class="fmt-btn">草</button>'
+    + '<span class="spacer" style="flex:1"></span>'
+    + '<button class="fmt-btn" title="实时预览开关"><svg class="ic ic-sm"><use href="#i-eye"/></svg></button>'
+    + '</div>';
+}
+function EDIT_BODY(dense) {
+  return ''
+  + '<div class="ed-fm">'
+  +   '<div><b>aliases:</b> [Bohr effect, 波尔效应]</div>'
+  +   '<div><b>tags:</b> [生理, 呼吸, 高频考点]</div>'
+  +   '<div><b>chapter:</b> 生理学/呼吸</div>'
+  +   '<div><b>exam:</b> [2023-生理-12]</div>'
+  + '</div>'
+  + '<div class="ed-h1">波尔效应与氧解离曲线</div>'
+  + '<div class="ed-line"><span class="ed-ln">1</span><span><span class="ed-key">定义:</span> pH 降低或 PCO₂ 升高时，血红蛋白对 O₂ 亲和力下降，曲线右移。</span></div>'
+  + '<div class="ed-line"><span class="ed-ln">2</span><span><span class="ed-key">机制:</span> H⁺ 与 Hb 结合促进盐键形成，稳定 T 态，降低 O₂ 亲和力。</span></div>'
+  + '<div class="ed-line"><span class="ed-ln">3</span><span><span class="ed-key">关联:</span> <span class="wl">[[氧解离曲线]]</span> · <span class="wl">[[血氧饱和度]]</span></span></div>'
+  + '<div class="ed-line"><span class="ed-ln">4</span><span><span class="ed-key">意义:</span> 组织代谢旺盛处 pH↓、CO₂↑，促使 O₂ 释放，属生理性适应。</span></div>'
+  + (dense ? '' : '<div class="ed-line"><span class="ed-ln">5</span><span><span class="ed-key">口诀:</span> 酸高碳高温度高，曲线右移氧易抛。</span></div>');
+}
+
+/* ---------- 片段：预览 ---------- */
+function PREVIEW(compact) {
+  return ''
+  + '<div class="pv"' + (compact ? ' style="padding:20px 22px"' : '') + '>'
+  +   '<div class="pv-hero">'
+  +     '<div class="pv-badges"><span class="pv-badge b-purple">生理学 · 呼吸</span>'
+  +       '<span class="pv-badge b-green">4 天后复习</span>'
+  +       '<span class="pv-badge b-cyan">3D 解剖联动</span></div>'
+  +     '<div class="pv-title"' + (compact ? ' style="font-size:20px"' : '') + '>波尔效应与氧解离曲线</div>'
+  +     '<div class="pv-meta">2 条双链 · 1 道历年真题 · 1 张复习卡</div>'
+  +   '</div>'
+  +   '<div class="prop"><div class="prop-lab">定义</div><div class="prop-val">pH 降低或 PCO₂ 升高使血红蛋白对 O₂ 亲和力下降，氧解离曲线右移。</div></div>'
+  +   '<div class="prop" style="box-shadow:inset 2px 0 0 var(--accent)"><div class="prop-lab">机制</div><div class="prop-val">H⁺ 与血红蛋白结合促进盐键形成，稳定 T 态构象，降低 O₂ 亲和力。</div></div>'
+  +   '<div class="callout"><div class="callout-head">'
+  +     '<svg class="ic ic-sm"><use href="#i-ai"/></svg> 高频考点 · 速记口诀</div>'
+  +     '<p>酸高、碳高、温度高 → 曲线右移、氧易释放；反之左移、亲和力升高。</p></div>'
+  +   '<div class="blk-title"><span>反向链接 · 2 篇</span><span style="color:var(--accent)">查看图谱 →</span></div>'
+  +   '<div class="blk"><b>氧解离曲线</b><p>“…受 pH、PCO₂、温度与 2,3-DPG 影响，[[波尔效应]] 是其重要机制…”</p></div>'
+  +   '<div class="blk"><b>组织换气</b><p>“…代谢旺盛组织通过 [[波尔效应]] 提高氧卸载效率…”</p></div>'
+  + '</div>';
+}
+
+/* ============================================================
+   渲染
+   ============================================================ */
+var current = 'a';
+function render() {
+  var m = META[current];
+  document.getElementById('briefTitle').textContent = m.title;
+  document.getElementById('briefText').textContent = m.text;
+  document.getElementById('briefChips').innerHTML = m.chips
+    .map(function (c) { return '<span class="chip">' + c + '</span>'; }).join('');
+  document.getElementById('stage').innerHTML = LAYOUTS[current]();
+  bindRailTheme();
+}
+function bindRailTheme() {
+  var b = document.getElementById('railTheme');
+  if (b) b.addEventListener('click', toggleTheme);
+}
+function toggleTheme() {
+  document.body.classList.toggle('dark');
+  document.getElementById('themeBtn').textContent =
+    document.body.classList.contains('dark') ? '☀️ 浅色预览' : '🌙 深色预览';
+}
+document.getElementById('laySwitch').addEventListener('click', function (e) {
+  var btn = e.target.closest('button[data-lay]');
+  if (!btn) return;
+  current = btn.dataset.lay;
+  this.querySelectorAll('button').forEach(function (b) { b.classList.remove('on'); });
+  btn.classList.add('on');
+  render();
+});
+document.getElementById('themeBtn').addEventListener('click', toggleTheme);
+
+/* 图标总览 */
+var ICONS = [
+  ['i-note', '笔记'], ['i-search', '搜索'], ['i-graph', '图谱'], ['i-body', '解剖'],
+  ['i-cards', '复习'], ['i-target', '错题'], ['i-quiz', '题库'], ['i-todo', '待办'],
+  ['i-tag', '标签'], ['i-chart', '统计'], ['i-ai', 'AI'], ['i-wand', '草稿'],
+  ['i-book', 'PDF'], ['i-plus', '新建'], ['i-save', '保存'], ['i-trash', '删除'],
+  ['i-mind', '导图'], ['i-link', '双链'], ['i-layers', '大纲'], ['i-eye', '预览'],
+  ['i-folder', '目录'], ['i-back', '后退'], ['i-fwd', '前进'], ['i-sun', '浅色'],
+  ['i-moon', '深色'], ['i-settings', '设置'], ['i-chev', '展开']
+];
+document.getElementById('iconGrid').innerHTML = ICONS.map(function (it) {
+  return '<div class="icon-cell"><svg class="ic ic-lg"><use href="#' + it[0] + '"/></svg><span>' + it[1] + '</span></div>';
+}).join('');
+
+/* 色彩令牌 */
+var COLORS = [
+  ['#6366f1', 'accent'], ['#4f46e5', 'hover'], ['#8b5cf6', 'violet'], ['#818cf8', 'dark accent'],
+  ['#f8fafc', 'bg'], ['#f1f5f9', 'panel'], ['#e2e8f0', 'border'], ['#0f172a', 'text'],
+  ['#64748b', 'muted'], ['#10b981', 'success'], ['#dc2626', 'danger'], ['#0284c7', 'cyan']
+];
+document.getElementById('palette').innerHTML = COLORS.map(function (c) {
+  return '<div class="sw"><i style="background:' + c[0] + '"></i><span>' + c[1] + '</span></div>';
+}).join('');
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,1077 @@
+{
+ "space": "MNI152NLin2009cAsym (2 mm)",
+ "template": {
+  "file": "mni152_t1_2mm.nii.gz",
+  "name": "MNI152 T1 模板"
+ },
+ "attribution": "Harvard-Oxford Structural Atlas (FSL / FMRIB, University of Oxford), 25% threshold, 2 mm. MNI152 template via TemplateFlow. Research / educational use only. See NOTICE.",
+ "groups": [
+  {
+   "id": "cortical",
+   "name": "大脑皮层",
+   "file": "ho_cortical_dseg.nii.gz",
+   "regions": [
+    {
+     "value": 1,
+     "en": "Left Frontal Pole",
+     "cn": "",
+     "x": -24.9,
+     "y": 53.0,
+     "z": 7.5,
+     "voxels": 7066
+    },
+    {
+     "value": 2,
+     "en": "Right Frontal Pole",
+     "cn": "",
+     "x": 26.1,
+     "y": 52.2,
+     "z": 8.2,
+     "voxels": 8250
+    },
+    {
+     "value": 3,
+     "en": "Left Insular Cortex",
+     "cn": "",
+     "x": -36.7,
+     "y": 1.4,
+     "z": -0.2,
+     "voxels": 1160
+    },
+    {
+     "value": 4,
+     "en": "Right Insular Cortex",
+     "cn": "",
+     "x": 37.6,
+     "y": 2.6,
+     "z": -0.3,
+     "voxels": 1181
+    },
+    {
+     "value": 5,
+     "en": "Left Superior Frontal Gyrus",
+     "cn": "",
+     "x": -13.9,
+     "y": 19.0,
+     "z": 56.5,
+     "voxels": 2598
+    },
+    {
+     "value": 6,
+     "en": "Right Superior Frontal Gyrus",
+     "cn": "",
+     "x": 14.7,
+     "y": 18.9,
+     "z": 57.1,
+     "voxels": 2404
+    },
+    {
+     "value": 7,
+     "en": "Left Middle Frontal Gyrus",
+     "cn": "",
+     "x": -38.3,
+     "y": 18.6,
+     "z": 42.3,
+     "voxels": 2755
+    },
+    {
+     "value": 8,
+     "en": "Right Middle Frontal Gyrus",
+     "cn": "",
+     "x": 39.4,
+     "y": 18.8,
+     "z": 43.0,
+     "voxels": 2561
+    },
+    {
+     "value": 9,
+     "en": "Left Inferior Frontal Gyrus, pars triangularis",
+     "cn": "",
+     "x": -50.0,
+     "y": 28.6,
+     "z": 8.8,
+     "voxels": 607
+    },
+    {
+     "value": 10,
+     "en": "Right Inferior Frontal Gyrus, pars triangularis",
+     "cn": "",
+     "x": 52.3,
+     "y": 28.0,
+     "z": 7.8,
+     "voxels": 496
+    },
+    {
+     "value": 11,
+     "en": "Left Inferior Frontal Gyrus, pars opercularis",
+     "cn": "",
+     "x": -50.9,
+     "y": 14.8,
+     "z": 15.3,
+     "voxels": 729
+    },
+    {
+     "value": 12,
+     "en": "Right Inferior Frontal Gyrus, pars opercularis",
+     "cn": "",
+     "x": 52.4,
+     "y": 15.5,
+     "z": 16.1,
+     "voxels": 655
+    },
+    {
+     "value": 13,
+     "en": "Left Precentral Gyrus",
+     "cn": "",
+     "x": -33.7,
+     "y": -11.7,
+     "z": 49.5,
+     "voxels": 4368
+    },
+    {
+     "value": 14,
+     "en": "Right Precentral Gyrus",
+     "cn": "",
+     "x": 34.9,
+     "y": -10.6,
+     "z": 50.2,
+     "voxels": 4149
+    },
+    {
+     "value": 15,
+     "en": "Left Temporal Pole",
+     "cn": "",
+     "x": -40.6,
+     "y": 11.1,
+     "z": -29.7,
+     "voxels": 2350
+    },
+    {
+     "value": 16,
+     "en": "Right Temporal Pole",
+     "cn": "",
+     "x": 40.7,
+     "y": 13.1,
+     "z": -29.8,
+     "voxels": 2361
+    },
+    {
+     "value": 17,
+     "en": "Left Superior Temporal Gyrus, anterior division",
+     "cn": "",
+     "x": -56.2,
+     "y": -3.7,
+     "z": -8.3,
+     "voxels": 253
+    },
+    {
+     "value": 18,
+     "en": "Right Superior Temporal Gyrus, anterior division",
+     "cn": "",
+     "x": 57.7,
+     "y": -0.5,
+     "z": -10.2,
+     "voxels": 268
+    },
+    {
+     "value": 19,
+     "en": "Left Superior Temporal Gyrus, posterior division",
+     "cn": "",
+     "x": -60.6,
+     "y": -27.4,
+     "z": 2.4,
+     "voxels": 877
+    },
+    {
+     "value": 20,
+     "en": "Right Superior Temporal Gyrus, posterior division",
+     "cn": "",
+     "x": 60.3,
+     "y": -23.3,
+     "z": 1.6,
+     "voxels": 953
+    },
+    {
+     "value": 21,
+     "en": "Left Middle Temporal Gyrus, anterior division",
+     "cn": "",
+     "x": -57.6,
+     "y": -4.0,
+     "z": -22.4,
+     "voxels": 446
+    },
+    {
+     "value": 22,
+     "en": "Right Middle Temporal Gyrus, anterior division",
+     "cn": "",
+     "x": 57.9,
+     "y": -1.3,
+     "z": -24.7,
+     "voxels": 402
+    },
+    {
+     "value": 23,
+     "en": "Left Middle Temporal Gyrus, posterior division",
+     "cn": "",
+     "x": -61.3,
+     "y": -27.3,
+     "z": -11.5,
+     "voxels": 1270
+    },
+    {
+     "value": 24,
+     "en": "Right Middle Temporal Gyrus, posterior division",
+     "cn": "",
+     "x": 61.5,
+     "y": -22.4,
+     "z": -12.8,
+     "voxels": 1255
+    },
+    {
+     "value": 25,
+     "en": "Left Middle Temporal Gyrus, temporooccipital part",
+     "cn": "",
+     "x": -57.8,
+     "y": -53.1,
+     "z": 0.8,
+     "voxels": 853
+    },
+    {
+     "value": 26,
+     "en": "Right Middle Temporal Gyrus, temporooccipital part",
+     "cn": "",
+     "x": 58.4,
+     "y": -49.2,
+     "z": 1.5,
+     "voxels": 1151
+    },
+    {
+     "value": 27,
+     "en": "Left Inferior Temporal Gyrus, anterior division",
+     "cn": "",
+     "x": -48.3,
+     "y": -5.1,
+     "z": -39.4,
+     "voxels": 330
+    },
+    {
+     "value": 28,
+     "en": "Right Inferior Temporal Gyrus, anterior division",
+     "cn": "",
+     "x": 46.3,
+     "y": -2.4,
+     "z": -41.3,
+     "voxels": 317
+    },
+    {
+     "value": 29,
+     "en": "Left Inferior Temporal Gyrus, posterior division",
+     "cn": "",
+     "x": -53.7,
+     "y": -28.6,
+     "z": -26.0,
+     "voxels": 995
+    },
+    {
+     "value": 30,
+     "en": "Right Inferior Temporal Gyrus, posterior division",
+     "cn": "",
+     "x": 53.6,
+     "y": -23.4,
+     "z": -28.3,
+     "voxels": 947
+    },
+    {
+     "value": 31,
+     "en": "Left Inferior Temporal Gyrus, temporooccipital part",
+     "cn": "",
+     "x": -51.9,
+     "y": -53.5,
+     "z": -16.6,
+     "voxels": 696
+    },
+    {
+     "value": 32,
+     "en": "Right Inferior Temporal Gyrus, temporooccipital part",
+     "cn": "",
+     "x": 54.2,
+     "y": -49.8,
+     "z": -16.8,
+     "voxels": 774
+    },
+    {
+     "value": 33,
+     "en": "Left Postcentral Gyrus",
+     "cn": "",
+     "x": -38.5,
+     "y": -27.7,
+     "z": 51.9,
+     "voxels": 3626
+    },
+    {
+     "value": 34,
+     "en": "Right Postcentral Gyrus",
+     "cn": "",
+     "x": 38.0,
+     "y": -26.2,
+     "z": 52.6,
+     "voxels": 3246
+    },
+    {
+     "value": 35,
+     "en": "Left Superior Parietal Lobule",
+     "cn": "",
+     "x": -29.4,
+     "y": -49.6,
+     "z": 57.7,
+     "voxels": 1449
+    },
+    {
+     "value": 36,
+     "en": "Right Superior Parietal Lobule",
+     "cn": "",
+     "x": 29.3,
+     "y": -47.8,
+     "z": 59.1,
+     "voxels": 1459
+    },
+    {
+     "value": 37,
+     "en": "Left Supramarginal Gyrus, anterior division",
+     "cn": "",
+     "x": -56.9,
+     "y": -32.8,
+     "z": 37.3,
+     "voxels": 946
+    },
+    {
+     "value": 38,
+     "en": "Right Supramarginal Gyrus, anterior division",
+     "cn": "",
+     "x": 58.5,
+     "y": -27.1,
+     "z": 37.9,
+     "voxels": 796
+    },
+    {
+     "value": 39,
+     "en": "Left Supramarginal Gyrus, posterior division",
+     "cn": "",
+     "x": -54.9,
+     "y": -46.2,
+     "z": 33.4,
+     "voxels": 1052
+    },
+    {
+     "value": 40,
+     "en": "Right Supramarginal Gyrus, posterior division",
+     "cn": "",
+     "x": 55.3,
+     "y": -40.5,
+     "z": 33.8,
+     "voxels": 1207
+    },
+    {
+     "value": 41,
+     "en": "Left Angular Gyrus",
+     "cn": "",
+     "x": -50.4,
+     "y": -55.7,
+     "z": 30.0,
+     "voxels": 948
+    },
+    {
+     "value": 42,
+     "en": "Right Angular Gyrus",
+     "cn": "",
+     "x": 52.1,
+     "y": -51.8,
+     "z": 32.4,
+     "voxels": 1461
+    },
+    {
+     "value": 43,
+     "en": "Left Lateral Occipital Cortex, superior division",
+     "cn": "",
+     "x": -32.2,
+     "y": -72.9,
+     "z": 38.0,
+     "voxels": 4955
+    },
+    {
+     "value": 44,
+     "en": "Right Lateral Occipital Cortex, superior division",
+     "cn": "",
+     "x": 33.0,
+     "y": -71.1,
+     "z": 39.0,
+     "voxels": 4824
+    },
+    {
+     "value": 45,
+     "en": "Left Lateral Occipital Cortex, inferior division",
+     "cn": "",
+     "x": -45.2,
+     "y": -75.6,
+     "z": -2.0,
+     "voxels": 2044
+    },
+    {
+     "value": 46,
+     "en": "Right Lateral Occipital Cortex, inferior division",
+     "cn": "",
+     "x": 45.6,
+     "y": -74.0,
+     "z": -1.7,
+     "voxels": 2045
+    },
+    {
+     "value": 47,
+     "en": "Left Intracalcarine Cortex",
+     "cn": "",
+     "x": -10.1,
+     "y": -74.9,
+     "z": 8.1,
+     "voxels": 646
+    },
+    {
+     "value": 48,
+     "en": "Right Intracalcarine Cortex",
+     "cn": "",
+     "x": 11.9,
+     "y": -73.5,
+     "z": 8.5,
+     "voxels": 733
+    },
+    {
+     "value": 49,
+     "en": "Left Frontal Medial Cortex",
+     "cn": "",
+     "x": -5.0,
+     "y": 43.6,
+     "z": -18.3,
+     "voxels": 431
+    },
+    {
+     "value": 50,
+     "en": "Right Frontal Medial Cortex",
+     "cn": "",
+     "x": 4.4,
+     "y": 43.1,
+     "z": -18.8,
+     "voxels": 520
+    },
+    {
+     "value": 51,
+     "en": "Left Juxtapositional Lobule Cortex (formerly Supplementary Motor Cortex)",
+     "cn": "",
+     "x": -4.8,
+     "y": -2.6,
+     "z": 56.5,
+     "voxels": 752
+    },
+    {
+     "value": 52,
+     "en": "Right Juxtapositional Lobule Cortex (formerly Supplementary Motor Cortex)",
+     "cn": "",
+     "x": 6.1,
+     "y": -2.6,
+     "z": 57.7,
+     "voxels": 711
+    },
+    {
+     "value": 53,
+     "en": "Left Subcallosal Cortex",
+     "cn": "",
+     "x": -5.0,
+     "y": 20.4,
+     "z": -15.0,
+     "voxels": 537
+    },
+    {
+     "value": 54,
+     "en": "Right Subcallosal Cortex",
+     "cn": "",
+     "x": 4.6,
+     "y": 21.1,
+     "z": -15.2,
+     "voxels": 570
+    },
+    {
+     "value": 55,
+     "en": "Left Paracingulate Gyrus",
+     "cn": "",
+     "x": -5.7,
+     "y": 36.7,
+     "z": 21.5,
+     "voxels": 1518
+    },
+    {
+     "value": 56,
+     "en": "Right Paracingulate Gyrus",
+     "cn": "",
+     "x": 6.7,
+     "y": 36.7,
+     "z": 22.6,
+     "voxels": 1383
+    },
+    {
+     "value": 57,
+     "en": "Left Cingulate Gyrus, anterior division",
+     "cn": "",
+     "x": -3.7,
+     "y": 17.8,
+     "z": 24.8,
+     "voxels": 1299
+    },
+    {
+     "value": 58,
+     "en": "Right Cingulate Gyrus, anterior division",
+     "cn": "",
+     "x": 5.4,
+     "y": 19.1,
+     "z": 24.0,
+     "voxels": 1270
+    },
+    {
+     "value": 59,
+     "en": "Left Cingulate Gyrus, posterior division",
+     "cn": "",
+     "x": -5.0,
+     "y": -37.1,
+     "z": 30.3,
+     "voxels": 1225
+    },
+    {
+     "value": 60,
+     "en": "Right Cingulate Gyrus, posterior division",
+     "cn": "",
+     "x": 6.6,
+     "y": -35.9,
+     "z": 30.2,
+     "voxels": 1152
+    },
+    {
+     "value": 61,
+     "en": "Left Precuneous Cortex",
+     "cn": "",
+     "x": -7.1,
+     "y": -60.2,
+     "z": 37.6,
+     "voxels": 2757
+    },
+    {
+     "value": 62,
+     "en": "Right Precuneous Cortex",
+     "cn": "",
+     "x": 8.9,
+     "y": -58.4,
+     "z": 38.5,
+     "voxels": 2788
+    },
+    {
+     "value": 63,
+     "en": "Left Cuneal Cortex",
+     "cn": "",
+     "x": -7.4,
+     "y": -80.5,
+     "z": 27.1,
+     "voxels": 575
+    },
+    {
+     "value": 64,
+     "en": "Right Cuneal Cortex",
+     "cn": "",
+     "x": 9.2,
+     "y": -78.4,
+     "z": 28.1,
+     "voxels": 634
+    },
+    {
+     "value": 65,
+     "en": "Left Frontal Orbital Cortex",
+     "cn": "",
+     "x": -29.7,
+     "y": 23.8,
+     "z": -16.5,
+     "voxels": 1703
+    },
+    {
+     "value": 66,
+     "en": "Right Frontal Orbital Cortex",
+     "cn": "",
+     "x": 29.2,
+     "y": 23.1,
+     "z": -16.3,
+     "voxels": 1445
+    },
+    {
+     "value": 67,
+     "en": "Left Parahippocampal Gyrus, anterior division",
+     "cn": "",
+     "x": -21.9,
+     "y": -9.0,
+     "z": -30.4,
+     "voxels": 588
+    },
+    {
+     "value": 68,
+     "en": "Right Parahippocampal Gyrus, anterior division",
+     "cn": "",
+     "x": 22.2,
+     "y": -7.9,
+     "z": -30.3,
+     "voxels": 660
+    },
+    {
+     "value": 69,
+     "en": "Left Parahippocampal Gyrus, posterior division",
+     "cn": "",
+     "x": -21.9,
+     "y": -32.4,
+     "z": -17.0,
+     "voxels": 390
+    },
+    {
+     "value": 70,
+     "en": "Right Parahippocampal Gyrus, posterior division",
+     "cn": "",
+     "x": 23.0,
+     "y": -30.4,
+     "z": -17.0,
+     "voxels": 320
+    },
+    {
+     "value": 71,
+     "en": "Left Lingual Gyrus",
+     "cn": "",
+     "x": -11.9,
+     "y": -65.9,
+     "z": -5.2,
+     "voxels": 1604
+    },
+    {
+     "value": 72,
+     "en": "Right Lingual Gyrus",
+     "cn": "",
+     "x": 14.0,
+     "y": -62.8,
+     "z": -5.0,
+     "voxels": 1710
+    },
+    {
+     "value": 73,
+     "en": "Left Temporal Fusiform Cortex, anterior division",
+     "cn": "",
+     "x": -31.8,
+     "y": -4.6,
+     "z": -42.2,
+     "voxels": 316
+    },
+    {
+     "value": 74,
+     "en": "Right Temporal Fusiform Cortex, anterior division",
+     "cn": "",
+     "x": 31.1,
+     "y": -3.0,
+     "z": -42.4,
+     "voxels": 294
+    },
+    {
+     "value": 75,
+     "en": "Left Temporal Fusiform Cortex, posterior division",
+     "cn": "",
+     "x": -36.1,
+     "y": -29.5,
+     "z": -25.0,
+     "voxels": 873
+    },
+    {
+     "value": 76,
+     "en": "Right Temporal Fusiform Cortex, posterior division",
+     "cn": "",
+     "x": 36.3,
+     "y": -24.4,
+     "z": -27.7,
+     "voxels": 721
+    },
+    {
+     "value": 77,
+     "en": "Left Temporal Occipital Fusiform Cortex",
+     "cn": "",
+     "x": -33.6,
+     "y": -53.7,
+     "z": -16.1,
+     "voxels": 648
+    },
+    {
+     "value": 78,
+     "en": "Right Temporal Occipital Fusiform Cortex",
+     "cn": "",
+     "x": 35.1,
+     "y": -50.0,
+     "z": -16.7,
+     "voxels": 821
+    },
+    {
+     "value": 79,
+     "en": "Left Occipital Fusiform Gyrus",
+     "cn": "",
+     "x": -26.4,
+     "y": -76.7,
+     "z": -13.7,
+     "voxels": 926
+    },
+    {
+     "value": 80,
+     "en": "Right Occipital Fusiform Gyrus",
+     "cn": "",
+     "x": 27.3,
+     "y": -75.2,
+     "z": -12.3,
+     "voxels": 880
+    },
+    {
+     "value": 81,
+     "en": "Left Frontal Operculum Cortex",
+     "cn": "",
+     "x": -39.6,
+     "y": 18.4,
+     "z": 4.5,
+     "voxels": 362
+    },
+    {
+     "value": 82,
+     "en": "Right Frontal Operculum Cortex",
+     "cn": "",
+     "x": 41.2,
+     "y": 18.6,
+     "z": 4.7,
+     "voxels": 325
+    },
+    {
+     "value": 83,
+     "en": "Left Central Opercular Cortex",
+     "cn": "",
+     "x": -47.9,
+     "y": -8.3,
+     "z": 11.8,
+     "voxels": 984
+    },
+    {
+     "value": 84,
+     "en": "Right Central Opercular Cortex",
+     "cn": "",
+     "x": 49.3,
+     "y": -5.6,
+     "z": 11.1,
+     "voxels": 902
+    },
+    {
+     "value": 85,
+     "en": "Left Parietal Operculum Cortex",
+     "cn": "",
+     "x": -48.4,
+     "y": -31.6,
+     "z": 20.4,
+     "voxels": 576
+    },
+    {
+     "value": 86,
+     "en": "Right Parietal Operculum Cortex",
+     "cn": "",
+     "x": 48.8,
+     "y": -27.4,
+     "z": 21.4,
+     "voxels": 543
+    },
+    {
+     "value": 87,
+     "en": "Left Planum Polare",
+     "cn": "",
+     "x": -46.6,
+     "y": -5.9,
+     "z": -7.5,
+     "voxels": 360
+    },
+    {
+     "value": 88,
+     "en": "Right Planum Polare",
+     "cn": "",
+     "x": 48.1,
+     "y": -3.5,
+     "z": -7.1,
+     "voxels": 389
+    },
+    {
+     "value": 89,
+     "en": "Left Heschl's Gyrus (includes H1 and H2)",
+     "cn": "",
+     "x": -45.3,
+     "y": -20.2,
+     "z": 7.1,
+     "voxels": 320
+    },
+    {
+     "value": 90,
+     "en": "Right Heschl's Gyrus (includes H1 and H2)",
+     "cn": "",
+     "x": 46.0,
+     "y": -17.5,
+     "z": 7.0,
+     "voxels": 284
+    },
+    {
+     "value": 91,
+     "en": "Left Planum Temporale",
+     "cn": "",
+     "x": -52.5,
+     "y": -29.8,
+     "z": 10.9,
+     "voxels": 533
+    },
+    {
+     "value": 92,
+     "en": "Right Planum Temporale",
+     "cn": "",
+     "x": 54.9,
+     "y": -25.2,
+     "z": 12.1,
+     "voxels": 419
+    },
+    {
+     "value": 93,
+     "en": "Left Supracalcarine Cortex",
+     "cn": "",
+     "x": -6.2,
+     "y": -74.7,
+     "z": 14.2,
+     "voxels": 113
+    },
+    {
+     "value": 94,
+     "en": "Right Supracalcarine Cortex",
+     "cn": "",
+     "x": 9.7,
+     "y": -72.7,
+     "z": 14.8,
+     "voxels": 126
+    },
+    {
+     "value": 95,
+     "en": "Left Occipital Pole",
+     "cn": "",
+     "x": -16.3,
+     "y": -96.5,
+     "z": 6.9,
+     "voxels": 2746
+    },
+    {
+     "value": 96,
+     "en": "Right Occipital Pole",
+     "cn": "",
+     "x": 18.7,
+     "y": -95.1,
+     "z": 8.6,
+     "voxels": 2388
+    }
+   ]
+  },
+  {
+   "id": "subcortical",
+   "name": "皮层下结构",
+   "file": "ho_subcortical_dseg.nii.gz",
+   "regions": [
+    {
+     "value": 1,
+     "en": "Left Cerebral White Matter",
+     "cn": "",
+     "x": -25.3,
+     "y": -16.5,
+     "z": 18.1,
+     "voxels": 31371
+    },
+    {
+     "value": 2,
+     "en": "Left Cerebral Cortex",
+     "cn": "",
+     "x": -31.7,
+     "y": -19.0,
+     "z": 17.1,
+     "voxels": 65070
+    },
+    {
+     "value": 3,
+     "en": "Left Lateral Ventrical",
+     "cn": "",
+     "x": -12.1,
+     "y": -11.6,
+     "z": 14.2,
+     "voxels": 1145
+    },
+    {
+     "value": 4,
+     "en": "Left Thalamus",
+     "cn": "",
+     "x": -9.7,
+     "y": -19.1,
+     "z": 6.1,
+     "voxels": 1321
+    },
+    {
+     "value": 5,
+     "en": "Left Caudate",
+     "cn": "",
+     "x": -12.7,
+     "y": 9.8,
+     "z": 9.4,
+     "voxels": 487
+    },
+    {
+     "value": 6,
+     "en": "Left Putamen",
+     "cn": "",
+     "x": -24.9,
+     "y": 0.8,
+     "z": 0.2,
+     "voxels": 799
+    },
+    {
+     "value": 7,
+     "en": "Left Pallidum",
+     "cn": "",
+     "x": -19.3,
+     "y": -4.7,
+     "z": -1.3,
+     "voxels": 267
+    },
+    {
+     "value": 8,
+     "en": "Brain-Stem",
+     "cn": "",
+     "x": 0.6,
+     "y": -31.0,
+     "z": -34.3,
+     "voxels": 4890
+    },
+    {
+     "value": 9,
+     "en": "Left Hippocampus",
+     "cn": "",
+     "x": -24.9,
+     "y": -22.2,
+     "z": -14.3,
+     "voxels": 691
+    },
+    {
+     "value": 10,
+     "en": "Left Amygdala",
+     "cn": "",
+     "x": -22.6,
+     "y": -4.9,
+     "z": -18.1,
+     "voxels": 306
+    },
+    {
+     "value": 11,
+     "en": "Left Accumbens",
+     "cn": "",
+     "x": -9.5,
+     "y": 11.4,
+     "z": -7.3,
+     "voxels": 89
+    },
+    {
+     "value": 12,
+     "en": "Right Cerebral White Matter",
+     "cn": "",
+     "x": 27.2,
+     "y": -14.5,
+     "z": 17.8,
+     "voxels": 31361
+    },
+    {
+     "value": 13,
+     "en": "Right Cerebral Cortex",
+     "cn": "",
+     "x": 32.6,
+     "y": -16.8,
+     "z": 17.0,
+     "voxels": 64054
+    },
+    {
+     "value": 14,
+     "en": "Right Lateral Ventricle",
+     "cn": "",
+     "x": 13.3,
+     "y": -12.4,
+     "z": 14.4,
+     "voxels": 1019
+    },
+    {
+     "value": 15,
+     "en": "Right Thalamus",
+     "cn": "",
+     "x": 10.9,
+     "y": -18.3,
+     "z": 6.6,
+     "voxels": 1283
+    },
+    {
+     "value": 16,
+     "en": "Right Caudate",
+     "cn": "",
+     "x": 13.3,
+     "y": 10.3,
+     "z": 10.4,
+     "voxels": 511
+    },
+    {
+     "value": 17,
+     "en": "Right Putamen",
+     "cn": "",
+     "x": 25.5,
+     "y": 1.9,
+     "z": 0.2,
+     "voxels": 796
+    },
+    {
+     "value": 18,
+     "en": "Right Pallidum",
+     "cn": "",
+     "x": 20.0,
+     "y": -3.8,
+     "z": -1.1,
+     "voxels": 260
+    },
+    {
+     "value": 19,
+     "en": "Right Hippocampus",
+     "cn": "",
+     "x": 26.4,
+     "y": -20.6,
+     "z": -14.7,
+     "voxels": 700
+    },
+    {
+     "value": 20,
+     "en": "Right Amygdala",
+     "cn": "",
+     "x": 23.0,
+     "y": -3.7,
+     "z": -18.1,
+     "voxels": 366
+    },
+    {
+     "value": 21,
+     "en": "Right Accumbens",
+     "cn": "",
+     "x": 9.5,
+     "y": 12.1,
+     "z": -6.6,
+     "voxels": 84
+    }
+   ]
+  }
+ ]
+}

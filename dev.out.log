@@ -1,0 +1,11 @@
+
+> medvault@0.0.0 dev
+> vite --port 5180
+
+
+  [32m[1mVITE[22m v8.2.2[39m  [2mready in [0m[1m2904[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5180[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[2m19:22:25[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [optimizer] scanning dependencies...
+[2m19:22:27[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [optimizer] bundling dependencies...

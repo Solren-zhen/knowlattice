@@ -1,0 +1,33 @@
+# 构建产物
+dist/
+
+# 依赖
+node_modules/
+
+# 历史快照
+*.zip
+
+# 下载残留
+*.qkdownloading
+
+# 系统文件
+Thumbs.db
+.DS_Store
+
+# 编辑器会话产物
+.zcode/
+
+# Yan Agent 会话产物
+.yanagent/
+
+# 代码图谱索引（本地工具产物，约 17MB）
+.codegraph/
+
+# 浏览器自动化会话产物
+.playwright-mcp/
+
+# 代码分析产物
+.ua/
+
+# 视觉审计工作区（截图 harness / 基线图 / 演示数据，均本地生成）
+.shots/
