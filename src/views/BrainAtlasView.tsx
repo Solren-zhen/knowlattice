@@ -70,20 +70,29 @@ export default function BrainAtlasView({ onClose }: Props) {
       try {
         await nv.attachToCanvas(canvas);
         if ((st.alive as boolean) === false) return;
+        // niivue 的 addVolumesFromUrl 用 `name || url` 去判定文件扩展名，而 getFileExt()
+        // 内部是 `re.exec(fullname)[1].toUpperCase()`——没有 `|| ''` 兜底。传中文显示名
+        // （如“MNI152 T1 模板”）会得到 undefined 并抛 TypeError，三个体积文件全部加载失败。
+        // 所以这里的 name 必须是真实文件名；显示用中文名由本组件自己的 UI 承担。
         const list: VolumeSpec[] = [
-          { url: brainUrl(atlas.template.file), name: atlas.template.name, colormap: 'gray', opacity: 1 },
+          { url: brainUrl(atlas.template.file), name: atlas.template.file, colormap: 'gray', opacity: 1 },
         ];
-        if (cort) list.push({ url: brainUrl(cort.file), name: cort.name, colormap: 'actc', opacity: 0.55, cal_min: 0, cal_max: 96 });
-        if (sub) list.push({ url: brainUrl(sub.file), name: sub.name, colormap: 'random', opacity: 0.55, cal_min: 0, cal_max: 21 });
+        if (cort) list.push({ url: brainUrl(cort.file), name: cort.file, colormap: 'actc', opacity: 0.55, cal_min: 0, cal_max: 96 });
+        if (sub) list.push({ url: brainUrl(sub.file), name: sub.file, colormap: 'random', opacity: 0.55, cal_min: 0, cal_max: 21 });
         await nv.loadVolumes(list);
         if ((st.alive as boolean) === false) return;
         nv.setSliceType(nv.sliceTypeMultiplanar);
-        nv.scene.crosshairPos = [0, -18, 18];
+        // scene.crosshairPos 是**分数坐标**（0~1），不是毫米。原来直接写 [0,-18,18]
+        // 把交叉线丢到了体积之外，交互和读数都失效。用库自己的 mm2frac 换算，
+        // 并与 createOnLocationChange 内部 frac2mm(..., true) 的约定保持一致。
+        nv.scene.crosshairPos = nv.mm2frac([0, -18, 18], 0, true);
         nv.drawScene();
         nv.onLocationChange = (loc) => {
           const d = loc as { mm?: number[] };
           if (st.alive && d.mm) setMni(d.mm.map((v) => Math.round(v)));
         };
+        // 主动触发一次，让读数在打开时就显示初始位置而不是 --
+        nv.createOnLocationChange();
       } catch (e) {
         if (st.alive) setError((e as Error).message);
       }
@@ -106,8 +115,9 @@ export default function BrainAtlasView({ onClose }: Props) {
     setSelected(r);
     const nv = nvRef.current;
     if (nv === null) return;
-    nv.scene.crosshairPos = [r.x, r.y, r.z];
+    nv.scene.crosshairPos = nv.mm2frac([r.x, r.y, r.z], 0, true);
     nv.drawScene();
+    nv.createOnLocationChange();   // 同步刷新 MNI 读数
   };
 
   useEffect(() => {
