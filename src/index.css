@@ -141,7 +141,7 @@ button { font-family: inherit; }
   transition: all var(--t-fast) var(--ease);
 }
 .btn-small { padding: 5px 12px; font-size: 12px; line-height: 1; font-weight: 500; }
-.btn-icon  { width: 30px; height: 30px; padding: 0; box-shadow: var(--shadow-sm); }
+.btn-icon  { width: 28px; height: 28px; padding: 0; box-shadow: var(--shadow-sm); }
 .btn-small:hover, .btn-icon:hover {
   border-color: var(--border-accent);
   color: var(--accent);
@@ -222,7 +222,7 @@ kbd {
   border: 1px solid transparent; color: #fff;
   background: linear-gradient(180deg, #7c7cf5 0%, var(--accent) 100%);
   border-radius: var(--r-md);
-  padding: 0 12px; height: 30px;
+  padding: 0 12px; height: 28px;   /* 与同排的 .btn-icon 对齐 */
   font-size: 12.5px; font-weight: 600; font-family: inherit;
   white-space: nowrap;
   box-shadow: var(--glow-accent), inset 0 1px 0 rgba(255, 255, 255, 0.22);
@@ -353,6 +353,16 @@ kbd {
   border-bottom: 1px solid var(--border);
   min-height: 42px; flex-shrink: 0;
 }
+/* 工具栏控件统一高度。
+   此前 .btn-small 没有定高，其实际身高由内联内容决定：纯文字 24px / 内联 svg 26px /
+   内联 <kbd> 31px（kbd 是 inline-block，19px 高）。而 .btn-icon 定 30px、
+   .toolbar-search 定 28px。结果同一行出现 24 / 26 / 28 / 30 / 31 五种高度。 */
+.editor-toolbar .btn-small,
+.editor-toolbar .toolbar-search { height: 28px; }
+/* 面板头部同理：同一位置在不同界面用的是 .btn-small(24px) 或 .btn-icon(28px)，统一到 28px */
+.panel__head .btn-small { height: 28px; padding-top: 0; padding-bottom: 0; }
+/* 去掉纵向内距，给 19px 高的内联 kbd 留出行盒空间 */
+.editor-toolbar .btn-small { padding-top: 0; padding-bottom: 0; }
 .note-path {
   font-size: 13px; font-weight: 600; flex: 1;
   min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
