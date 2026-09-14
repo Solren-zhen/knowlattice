@@ -1,0 +1,16 @@
+{
+  "name": "晶格 · KnowLattice",
+  "short_name": "晶格",
+  "description": "本地优先的个人知识笔记：原子笔记 / 间隔复习 / 题库错题 / 3D 解剖图谱。为医学生而生，也适合所有学习者。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#6366f1",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "./icon.png", "sizes": "any", "type": "image/png" }
+  ]
+}

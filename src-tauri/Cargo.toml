@@ -1,0 +1,18 @@
+[package]
+name = "knowlattice"
+version = "0.1.0"
+description = "晶格 · KnowLattice - 本地优先个人知识笔记"
+authors = ["jophy"]
+edition = "2021"
+
+[lib]
+name = "knowlattice_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

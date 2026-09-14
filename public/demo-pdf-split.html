@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>效果图 · PDF 讲义对照视图</title>
+<style>
+  :root{
+    --bg:#fbfaf7; --panel:#ffffff; --border:#e2ded6; --border-strong:#d0cabf;
+    --text:#1e1d1a; --text2:#4a4840; --muted:#8a8478;
+    --accent:#0e76f7; --accent-soft:rgba(14,118,247,0.08);
+    --warn-bg:#faf3dd; --warn-border:#ecdba6; --warn-text:#7c6115;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:-apple-system,'PingFang SC','Segoe UI','Microsoft YaHei',sans-serif;
+    background:var(--bg); color:var(--text); height:100vh; overflow:hidden;
+    font-size:14px; -webkit-font-smoothing:antialiased;
+  }
+  kbd{display:inline-block;padding:1px 6px;font-size:10.5px;background:#f2f0ec;border:1px solid var(--border);border-bottom-width:2px;border-radius:3px;color:var(--muted)}
+
+  /* ── 顶栏 ── */
+  .topbar{height:46px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;padding:0 16px}
+  .back{display:flex;align-items:center;gap:6px;color:var(--text2);cursor:pointer;font-size:13px}
+  .back:hover{color:var(--accent)}
+  .file{font-weight:600;font-size:13.5px}
+  .file small{color:var(--muted);font-weight:400;margin-left:8px}
+  .spacer{flex:1}
+  .btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 12px;font-size:12.5px;color:var(--text2);cursor:pointer}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* ── 流程说明条 ── */
+  .steps{display:flex;gap:18px;align-items:center;background:var(--accent-soft);border-bottom:1px solid var(--border);padding:7px 16px;font-size:12px;color:var(--accent)}
+  .steps b{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--accent);color:#fff;font-size:10px;margin-right:6px}
+
+  /* ── 分屏 ── */
+  .split{display:flex;height:calc(100vh - 46px - 32px)}
+
+  /* 左：PDF */
+  .pdf-pane{flex:1.15;background:#e8e5de;display:flex;flex-direction:column;align-items:center;overflow:auto;padding:22px 0;position:relative}
+  .page{width:min(560px,92%);background:#fff;box-shadow:0 4px 18px rgba(30,28,22,.14);border-radius:3px;padding:46px 52px 60px;line-height:2.05;font-size:13.5px;color:#333}
+  .page h2{font-size:17px;margin-bottom:14px;color:#222}
+  .page h4{font-size:13.5px;margin:16px 0 8px;color:#333}
+  .page p{margin-bottom:8px;text-align:justify}
+  .page .fig{margin:14px 0;border:1px solid #eee;border-radius:6px;padding:10px;text-align:center;color:#999;font-size:11px;background:#fafafa}
+  .page .fig .chart{height:110px;margin-bottom:6px;position:relative}
+  mark{background:rgba(14,118,247,0.18);border-bottom:2px solid var(--accent);padding:1px 0;cursor:text}
+  /* 选中浮层 */
+  .popover{position:absolute;margin-top:-14px;margin-left:180px;background:var(--accent);color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;display:flex;gap:10px;box-shadow:0 6px 18px rgba(14,118,247,.35);cursor:pointer}
+  .popover span+span{border-left:1px solid rgba(255,255,255,.35);padding-left:10px}
+  .pager{margin-top:14px;display:flex;gap:14px;align-items:center;color:var(--text2);font-size:12.5px}
+  .pager .pbtn{width:26px;height:26px;border-radius:6px;border:1px solid var(--border-strong);background:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--muted)}
+
+  /* 右：草稿 */
+  .draft-pane{width:44%;min-width:380px;border-left:1px solid var(--border);background:rgba(255,255,255,.72);backdrop-filter:blur(12px);overflow:auto;padding:18px 20px}
+  .panel{background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 40px rgba(30,28,22,.08);overflow:hidden}
+  .panel-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:13.5px}
+  .panel-head .tag{font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);padding:2px 9px;border-radius:999px}
+  .panel-head small{color:var(--muted);font-weight:400;margin-left:auto;font-size:11px}
+  .quote{margin:12px 16px 0;background:var(--warn-bg);border:1px solid var(--warn-border);color:var(--warn-text);border-radius:8px;padding:9px 13px;font-size:12px;line-height:1.7}
+  .note-card{margin:12px 16px;border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+  .note-card h1{font-size:19px;font-weight:650;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:12px;letter-spacing:-.01em}
+  .note-card ul{list-style:none}
+  .note-card li{margin:7px 0;line-height:1.8;font-size:13.5px}
+  .note-card li::before{content:'•';color:var(--accent);margin-right:8px;font-size:10px}
+  .note-card li.sub{margin-left:22px;font-size:13px}
+  .note-card li.sub::before{content:'◦'}
+  .note-card b.k{color:var(--accent);font-weight:600}
+  .meta{display:flex;gap:8px;flex-wrap:wrap;margin:10px 16px 4px}
+  .meta span{font-size:11px;color:var(--muted);background:#f2f0ec;border-radius:999px;padding:2px 10px}
+  .actions{display:flex;gap:10px;padding:12px 16px 16px}
+  .primary{flex:1;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 0;font-size:13.5px;font-weight:500;cursor:pointer}
+  .primary:hover{background:#0b63c5}
+  .ghost{border:1px solid var(--border);background:#fff;border-radius:8px;padding:0 14px;font-size:12.5px;color:var(--text2);cursor:pointer}
+  .ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .hint{padding:0 16px 14px;font-size:11.5px;color:var(--muted);line-height:1.8}
+  .hint b{color:var(--accent)}
+
+  /* 底部提示 */
+  .footbar{height:32px;border-top:1px solid var(--border);display:flex;align-items:center;gap:16px;padding:0 16px;font-size:11.5px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="back">← 返回笔记</div>
+  <div class="file">📄 呼吸系统-生理学.pdf <small>第 12 / 38 页</small></div>
+  <div class="spacer"></div>
+  <button class="btn">🔁 换一本 PDF</button>
+</div>
+
+<div class="steps">
+  <span><b>1</b>左侧 PDF 划选重点段落</span>
+  <span><b>2</b>点「✨ 生成草稿」，自动整理成原子笔记骨架</span>
+  <span><b>3</b>右侧审核修改 → 入库为笔记（自动标注来源页码）</span>
+</div>
+
+<div class="split">
+
+  <!-- 左：PDF 原文 -->
+  <section class="pdf-pane">
+    <div class="page">
+      <h2>第五章　气体运输</h2>
+      <h4>5.3　氧解离曲线</h4>
+      <p>血红蛋白氧饱和度与血氧分压之间关系的曲线，称为氧解离曲线（ODC），呈 S 形，具有重要的生理意义。</p>
+      <div class="fig">
+        <div class="chart">
+          <svg viewBox="0 0 300 90" style="width:100%;height:100%">
+            <path d="M10 80 C 120 78 200 60 235 30 C 255 15 270 10 290 8" fill="none" stroke="#0e76f7" stroke-width="2.4"/>
+            <line x1="10" y1="80" x2="290" y2="80" stroke="#bbb"/>
+            <line x1="10" y1="80" x2="10" y2="5" stroke="#bbb"/>
+            <text x="270" y="76" font-size="8" fill="#888">PO2</text>
+            <text x="14" y="12" font-size="8" fill="#888">SO2</text>
+          </svg>
+        </div>
+        图 5-4　氧解离曲线及其影响因素
+      </div>
+      <p>曲线可人为分为三段：<b>上段</b>（PO₂ 60~100mmHg）较平坦，是肺泡 PO₂ 的安全储备；<b>中段</b>（40~60mmHg）较陡，为组织供氧的主要区间；<b>下段</b>（15~40mmHg）最陡，是提示组织缺氧的敏感指标。</p>
+      <h4>5.4　影响氧解离曲线的因素</h4>
+      <p><mark>氧解离曲线受多种因素影响：pH 降低、CO₂ 分压升高、温度升高以及 2,3-DPG 增多时，曲线右移，血红蛋白与氧的亲和力降低，有利于氧的释放；反之曲线左移。波尔效应即指 pH 与 CO₂ 对血红蛋白氧亲和力的这种影响。</mark></p>
+      <p>此外，红细胞内的 2,3-DPG 在慢性缺氧（如高原、贫血）时代偿性增多，也可使曲线右移。</p>
+    </div>
+
+    <!-- 选中浮层 -->
+    <div class="popover"><span>✨ 生成草稿</span><span>📋 复制</span></div>
+
+    <div class="pager">
+      <div class="pbtn">‹</div> 第 12 / 38 页 <div class="pbtn">›</div>
+      <span style="margin-left:10px;color:var(--muted)">滚轮缩放 · 双栏自动阅读顺序</span>
+    </div>
+  </section>
+
+  <!-- 右：智能草稿 -->
+  <section class="draft-pane">
+    <div class="panel">
+      <div class="panel-head">
+        ✨ 智能草稿 <span class="tag">来自选中段落</span>
+        <small>规则引擎 · 离线</small>
+      </div>
+      <div class="quote">“氧解离曲线受多种因素影响：pH 降低、CO₂ 分压升高、温度升高以及 2,3-DPG 增多时，曲线右移……波尔效应即指 pH 与 CO₂ 对血红蛋白氧亲和力的这种影响。”<br>—— 第 12 页</div>
+      <div class="note-card">
+        <h1>影响氧解离曲线的因素</h1>
+        <ul>
+          <li><b class="k">定义:</b> 影响血红蛋白与氧亲和力、使曲线左移或右移的各种因素</li>
+          <li><b class="k">分类:</b>
+            <ul>
+              <li class="sub">pH 降低（酸中毒）</li>
+              <li class="sub">CO₂ 分压升高</li>
+              <li class="sub">温度升高</li>
+              <li class="sub">2,3-DPG 增多</li>
+            </ul>
+          </li>
+          <li><b class="k">机制:</b> 上述因素使曲线右移，亲和力降低，利于氧释放</li>
+          <li><b class="k">鉴别:</b> 波尔效应（pH/CO₂ 的影响）vs 何尔登效应</li>
+          <li><b class="k">口诀:</b> 酸碳温热右移放氧</li>
+          <li><b class="k">我的理解:</b> </li>
+        </ul>
+      </div>
+      <div class="meta">
+        <span>📂 01-生理学/05-呼吸</span>
+        <span>📄 来源: PDF 第 12 页</span>
+        <span>🏷 生理/呼吸 · 考研高频</span>
+      </div>
+      <div class="actions">
+        <button class="primary">✅ 入库为笔记</button>
+        <button class="ghost">↻ 重新生成</button>
+        <button class="ghost">📝 手动编辑</button>
+      </div>
+      <div class="hint">
+        入库后自动：<b>章节树归类</b>（01-生理学/05-呼吸/）· <b>标注 PDF 来源页码</b> · 生成 <b>[[波尔效应]]</b> 等双链占位<br>
+        对应快捷键：<kbd>Ctrl</kbd>+<kbd>Enter</kbd> 入库 · <kbd>Esc</kbd> 关闭对照
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="footbar">
+  <span>💡 规则引擎离线生成；日后可在设置里接入大模型 API 获得更智能的整理</span>
+  <span style="margin-left:auto">本页为交互效果图 · 数据为演示</span>
+</div>
+
+</body>
+</html>

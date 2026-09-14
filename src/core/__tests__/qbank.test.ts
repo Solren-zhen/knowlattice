@@ -1,0 +1,165 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  addBank,
+  exportQbanks,
+  importQbanks,
+  loadBanks,
+  normalizeQuestions,
+  parseQuestionsFromText,
+  pickQuestions,
+  removeBank,
+  rowsToQuestions,
+  type QuizBank,
+} from '../qbank';
+
+beforeEach(() => localStorage.clear());
+
+describe('normalizeQuestions', () => {
+  it('中文字段名 + 字母答案 → 选择题', () => {
+    const qs = normalizeQuestions([
+      { 题干: '氧解离曲线右移的意义？', 选项: ['易放氧', '易结合氧'], 答案: 'A', 解析: '……' },
+    ]);
+    expect(qs[0]).toMatchObject({
+      type: 'choice',
+      stem: '氧解离曲线右移的意义？',
+      options: ['易放氧', '易结合氧'],
+      answer: 0,
+      answerText: '易放氧',
+      explanation: '……',
+    });
+  });
+
+  it('数字下标与选项原文都能命中答案（含 B. 带标点）', () => {
+    const question = { stem: '?', options: ['a', 'b', 'c'], answer: 2 };
+    expect(normalizeQuestions([question])[0].answer).toBe(2);
+    expect(normalizeQuestions([{ ...question, answer: 'c' }])[0].answer).toBe(2);
+    expect(normalizeQuestions([{ ...question, answer: 'B.' }])[0].answer).toBe(1);
+  });
+
+  it('无有效选项 → 简答题', () => {
+    expect(
+      normalizeQuestions([{ stem: '什么是熵？', answer: '混乱度的量度' }])[0]
+    ).toMatchObject({ type: 'recall', answerText: '混乱度的量度' });
+  });
+
+  it('跳过无题干条目；全部无效时抛错', () => {
+    expect(() => normalizeQuestions([{ stem: '' }])).toThrow();
+    expect(() => normalizeQuestions([{ stem: '有题干无答案' }])).toThrow();
+    expect(() => normalizeQuestions({ not: 'array' })).toThrow();
+  });
+
+  it('id 唯一且含序号', () => {
+    const qs = normalizeQuestions([
+      { stem: 'q1', answer: 'x' },
+      { stem: 'q2', answer: 'y' },
+    ]);
+    expect(qs[0].id).not.toBe(qs[1].id);
+  });
+
+  it('顶层对象含 questions 数组也能解析', () => {
+    const qs = normalizeQuestions({ questions: [{ 题目: '1+1=2 对吗', 答案: '对' }] });
+    expect(qs).toHaveLength(1);
+  });
+});
+
+describe('parseQuestionsFromText', () => {
+  it('标准排版：编号题干 + 逐行选项 + 答案/解析', () => {
+    const text = `1. 关于氧解离曲线，以下正确的是
+A. 右移说明……
+B. 左移说明……
+答案：A
+解析：右移提示氧易释放
+
+2. 第二题
+答案：B
+`;
+    const qs = parseQuestionsFromText(text);
+    expect(qs).toHaveLength(2);
+    expect(qs[0]).toMatchObject({ type: 'choice', answer: 0, answerText: '右移说明……' });
+    expect(qs[0].explanation).toBe('右移提示氧易释放');
+  });
+
+  it('内联选项一行式 A.xx B.yy 同行带 答案：B', () => {
+    const qs = parseQuestionsFromText('1. 胸外按压频率？ A.60 B.100 C.80 答案：B');
+    expect(qs[0]).toMatchObject({ type: 'choice', answer: 1 });
+    expect(qs[0].options).toEqual(['60', '100', '80']);
+  });
+
+  it('章节/笔记行与续行说明并入题干', () => {
+    const text = `1. 肺炎链球菌
+这是补充说明
+章节：呼吸
+笔记：肺炎链球菌感染
+答案：D
+`;
+    const qs = parseQuestionsFromText(text);
+    expect(qs[0].stem).toContain('这是补充说明');
+    expect(qs[0].chapter).toBe('呼吸');
+    expect(qs[0].note).toBe('肺炎链球菌感染');
+  });
+
+  it('无答案的题被跳过', () => {
+    expect(parseQuestionsFromText('1. 只有题干')).toEqual([]);
+  });
+});
+
+describe('rowsToQuestions（Excel/CSV 行）', () => {
+  it('中英文表头与 A-D 选项列', () => {
+    const qs = rowsToQuestions([
+      { stem: 'q?', A: 'a1', B: 'a2', C: 'a3', D: 'a4', answer: 'C', 解析: 'e' },
+    ]);
+    expect(qs[0]).toMatchObject({ type: 'choice', options: ['a1', 'a2', 'a3', 'a4'], answer: 2 });
+  });
+});
+
+describe('addBank/removeBank/import/export', () => {
+  const bank: QuizBank = {
+    name: '生理',
+    importedAt: 100,
+    questions: [{ id: 'q-1', type: 'recall', stem: '1?', options: [], answer: -1, answerText: 'a' }],
+  };
+
+  it('同名覆盖导入', () => {
+    addBank('生理', bank.questions);
+    addBank('生理', bank.questions.concat([{ ...bank.questions[0], id: 'q-2' }]));
+    expect(loadBanks()).toHaveLength(1);
+    expect(loadBanks()[0].questions).toHaveLength(2);
+  });
+
+  it('removeBank 只删目标', () => {
+    addBank('a', bank.questions);
+    addBank('b', bank.questions);
+    removeBank('a');
+    expect(loadBanks().map((b) => b.name)).toEqual(['b']);
+  });
+
+  it('导入备份：合并、忽略非法条目', () => {
+    addBank('existing', []);
+    const n = importQbanks([bank, { name: 42 }, { not: 'bank' }]);
+    expect(n).toBe(1);
+    expect(loadBanks().map((b) => b.name).sort()).toEqual(['existing', '生理']);
+    expect(loadBanks().find((b) => b.name === '生理')!.importedAt).toBe(100);
+  });
+
+  it('exportQbanks 与导入回环', () => {
+    addBank('回环', bank.questions);
+    const state = exportQbanks();
+    localStorage.clear();
+    expect(loadBanks()).toEqual([]);
+    expect(importQbanks(state)).toBe(1);
+    expect(loadBanks()[0].name).toBe('回环');
+  });
+});
+
+describe('pickQuestions', () => {
+  it('限流抽题且不修改原数组', () => {
+    const qs = Array.from({ length: 10 }, (_, i) => ({
+      id: `q-${i}`, type: 'recall' as const, stem: `${i}?`, options: [], answer: -1, answerText: `${i}`,
+    }));
+    const bank: QuizBank = { name: 'b', importedAt: 0, questions: qs };
+    const picked = pickQuestions(bank, 3);
+    expect(picked).toHaveLength(3);
+    expect(new Set(picked.map((q) => q.id)).size).toBe(3);
+    expect(bank.questions).toEqual(qs);
+  });
+});
