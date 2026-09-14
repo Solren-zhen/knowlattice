@@ -31,3 +31,6 @@ Thumbs.db
 
 # 视觉审计工作区（截图 harness / 基线图 / 演示数据，均本地生成）
 .shots/
+
+# 运行日志（dev server 持续写入，入库会让 git status 永远脏）
+*.log
