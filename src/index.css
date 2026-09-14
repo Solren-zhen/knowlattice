@@ -704,6 +704,25 @@ a.wikilink.missing::after {
   vertical-align: super;
 }
 
+/* ============================================================ 数学公式（KaTeX）
+   katex.min.css 在文档首次出现公式时才由 core/markdown.ts 动态注入，
+   这里只补两件它自己不管的事：跟随主题色、长公式不撑破版心。 */
+.katex { color: inherit; }
+.katex-display {
+  margin: 0.7em 0;
+  padding: 2px 0;
+  /* 长公式横向滚动而不是溢出到正文外面 */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* 深色下公式字号略降，视觉重量才和正文协调 */
+[data-theme='dark'] .katex { font-size: 1.05em; }
+.katex-error {
+  color: var(--danger, #dc2626);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+}
+
 /* ============================================================ Ctrl+K 快速搜索 */
 .qs-overlay {
   position: fixed; inset: 0;
@@ -1482,7 +1501,10 @@ a.wikilink.missing::after {
 }
 .dash-demo .muted { max-width: 420px; }
 
-/* ============================================================ 思维导图 */
+/* ============================================================ 思维导图
+   节点配色走 MindMapView.tsx 里的 theme（22 个 CSS 变量，值全部指向本项目 token，
+   深浅色自动跟随）。这里只管库没有暴露成变量的部分：画布、连线、右键菜单、
+   工具栏、缩放控件，以及节点的字体与阴影。 */
 .mindmap-overlay {
   position: fixed; inset: 0; z-index: 80;
   background: rgba(16, 18, 28, 0.5); backdrop-filter: blur(4px);
@@ -1490,21 +1512,180 @@ a.wikilink.missing::after {
 }
 .mindmap-panel {
   width: 92%; height: 88%;
-  background: var(--bg-raised); border-radius: 14px;
+  background: var(--bg-raised); border-radius: var(--r-lg);
   box-shadow: var(--shadow-modal); display: flex; flex-direction: column; overflow: hidden;
 }
 .mindmap-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 18px; border-bottom: 1px solid var(--border);
+  gap: var(--sp-3); padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border);
 }
 .mindmap-title { font-weight: 700; font-size: 15px; }
-.mindmap-actions { display: flex; gap: 8px; align-items: center; }
+.mindmap-actions { display: flex; gap: var(--sp-2); align-items: center; }
 .mindmap-body { flex: 1; min-height: 0; position: relative; }
 .mindmap-body svg { width: 100%; height: 100%; }
-/* Mind Elixir 容器：铺满 */
 .mindmap-elixir { width: 100%; min-height: 320px; height: 100%; }
 .mindmap-body .mindmap-elixir { overflow: hidden; }
-.mindmap-hint { padding: 8px 18px; font-size: 12px; border-top: 1px solid var(--border); }
+
+/* ---- 画布：极淡的点阵网格。纯色画布平移时没有参照，容易失去方位感 ---- */
+.mindmap-elixir .map-canvas {
+  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: 0 0;
+}
+
+/* ---- 节点 ----
+   库自带三层节点规则，特异性分别是：
+     .map-container .me-root .me-tpc                                0,3,0  （根）
+     .map-container .me-main>.me-wrapper>.me-parent>.me-tpc         0,4,0  （主分支）
+     .map-container .me-parent .me-tpc                              0,3,0  （子节点）
+   而 mind-elixir 的 CSS 由动态 chunk 注入，**排在 index.css 之后**——
+   同特异性时后者胜。所以下面的选择器一律带上 .map-container 提一级，
+   否则根节点会保持库默认的 25px 巨字、主分支 padding 25px，且不报任何错。 */
+.mindmap-elixir .map-container .me-tpc {
+  font-size: 13px; line-height: 1.45;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+/* 根节点：主色实心 + 辉光，是整张图的视觉锚点 */
+.mindmap-elixir .map-container .me-root > .me-tpc {
+  font-size: 15px; font-weight: 600; letter-spacing: 0.01em;
+  padding: 9px 18px;
+  border-radius: var(--r-lg);
+  border-color: transparent;
+  box-shadow: var(--shadow-md), var(--glow-accent);
+}
+
+/* 主分支：卡片形态，和正文里的卡片同一套语言。
+   边框保留 mind-elixir 按分支轮转的 palette 配色（同一条主分支同色），
+   它正好取自本项目的极光色相，等于免费拿到分支配色。
+   选择器必须写全 `> .me-nodes > .me-main > .me-wrapper > .me-parent >`：
+   主分支节点本身也带 .me-parent 类，只写 .me-parent 会连子节点一起命中。 */
+.mindmap-elixir .map-container .me-nodes > .me-main > .me-wrapper > .me-parent > .me-tpc {
+  padding: 7px 14px;
+  border-radius: var(--r-md);
+  font-size: 13px; font-weight: 500;
+  color: var(--text);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 子节点（主分支再往下）：去掉卡片感只留文字。
+   层级靠「实心 → 卡片 → 纯文字」递减，比每层都画盒子更容易一眼看出主次。 */
+.mindmap-elixir .map-container .me-children .me-parent > .me-tpc {
+  padding: 3px 7px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  color: var(--text-2);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.mindmap-elixir .map-container .me-children .me-parent > .me-tpc:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* 选中态：主色描边 + 柔光外环，不用库默认的蓝色 */
+.mindmap-elixir .map-container .me-nodes > .me-main.selected > .me-wrapper > .me-parent > .me-tpc {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md);
+}
+.mindmap-elixir .map-container .me-children .me-parent.selected > .me-tpc {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* ---- 连线：默认太细太暗，长距离分支几乎看不见 ---- */
+.mindmap-elixir .lines path, .mindmap-elixir .subLines path { stroke-width: 2; }
+.mindmap-elixir .lines path { opacity: 0.9; }
+.mindmap-elixir .subLines path { opacity: 0.7; }
+
+/* ---- 节点上的展开/收起圆点与「+」按钮 ---- */
+.mindmap-elixir .me-epd {
+  border-color: var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--muted);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.mindmap-elixir .me-epd:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* ---- 右键菜单 ---- */
+.mindmap-elixir .context-menu {
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  font-size: 13px;
+}
+.mindmap-elixir .context-menu .menu-list li {
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+  gap: var(--sp-3);
+  transition: background var(--t-fast) var(--ease);
+}
+.mindmap-elixir .context-menu .menu-list li:hover { background: var(--accent-soft); }
+.mindmap-elixir .context-menu .menu-list li .key {
+  color: var(--muted); font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* ---- 库自带的底部工具栏：对齐 .btn-small 的规格 ---- */
+.mindmap-elixir .mind-elixir-toolbar {
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--panel-glass-strong);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-md);
+  padding: 3px;
+}
+.mindmap-elixir .mind-elixir-toolbar .icon {
+  width: 26px; height: 26px; border-radius: var(--r-sm);
+  color: var(--muted);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.mindmap-elixir .mind-elixir-toolbar .icon:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* ---- 连线模式下跟随鼠标的提示气泡 ---- */
+.mindmap-elixir .tips {
+  border-radius: var(--r-sm);
+  background: var(--text);
+  color: var(--bg-raised);
+  font-size: 12px; padding: 4px 9px;
+}
+
+/* ---- 框选矩形 ---- */
+.mindmap-elixir .selection-area {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-xs);
+}
+
+/* ---- 底部快捷键提示：改成等距的胶囊排布，可扫读 ---- */
+.mindmap-hint {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4);
+  padding: 9px var(--sp-5); font-size: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-glass);
+}
+.mindmap-hint kbd, .mindmap-hint b {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px; font-weight: 600;
+  color: var(--text);
+  background: var(--panel-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  padding: 1px 5px;
+}
+.mindmap-hint span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.mindmap-hint__tip { margin-left: auto; color: var(--muted); }
 
 /* ============================================================ 知识图谱 */
 .graph-overlay {
