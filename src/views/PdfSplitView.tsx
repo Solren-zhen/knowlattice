@@ -20,7 +20,9 @@ import { normalizePdfSelection } from '../core/pdfText';
 import {
   beginGeometrySelection, clearHighlights, endGeometrySelection, selectByGeometry,
 } from '../core/pdfCharSelect';
-import { IconPlus } from './icons';
+import { IconPlus, IconClose, IconFile } from './icons';
+import { clickable } from './a11y';
+import Loading from './Loading';
 
 /** 静态资源根：base './' 时构建产物为 './'，GitHub Pages 子路径也能正确加载 */
 const BASE = import.meta.env.BASE_URL;
@@ -460,6 +462,9 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
                 <Viewer
                   fileUrl={doc.data}
                   plugins={[defaultLayoutPluginInstance]}
+                  renderLoader={(percentages: number) => (
+                    <Loading label={`PDF 渲染中… ${Math.round(percentages)}%`} />
+                  )}
                   onPageChange={(e) => { setPage(e.currentPage + 1); endGeometrySelection();
                     clearHighlights(paneRef.current); setSelected(null); }}
                 />
@@ -473,7 +478,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
             <div className="pdf-empty">
               <p>选择 PDF / Word 开始对照阅读</p>
               <p className="muted">Word 会还原原版排版；PDF 渲染原版页面。划选重点即可粘贴到右侧</p>
-              <button className="btn-small" onClick={() => fileRef.current?.click()}>📄 选择 PDF / Word</button>
+              <button className="btn-small" onClick={() => fileRef.current?.click()}><IconFile /> 选择 PDF / Word</button>
               <button
                 className="btn-small"
                 onClick={async () => {
@@ -487,18 +492,20 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
           )}
           {selected && (
             <div className="pdf-popover" style={{ left: selected.x, top: selected.y }}>
-              <span className="pdf-popover-btn" onClick={() => pasteToRight(selected.text)}>
+              <span className="pdf-popover-btn" onClick={() => pasteToRight(selected.text)} {...clickable()}>
                 <IconPlus /> 粘贴到右侧 <kbd>⏎</kbd>
               </span>
               <span
                 className="pdf-popover-btn"
                 onClick={() => { void navigator.clipboard.writeText(selected.text); setSelected(null); }}
+                {...clickable()}
               >
                 仅复制
               </span>
               <span
                 className="pdf-popover-btn"
                 onClick={() => { setSelected(null); clearPdfSelection(); }}
+                {...clickable()}
               >
                 取消
               </span>
@@ -594,7 +601,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
                     <div className="muted">《{x.file}》第 {x.page} 页 · {new Date(x.ts).toLocaleString()}</div>
                   </div>
                   <button className="btn-small" onClick={() => openExcerpt(x)}>回填</button>
-                  <button className="btn-icon" aria-label="删除摘录" onClick={() => removeExcerpt(x.id)}>✕</button>
+                  <button className="btn-icon" aria-label="删除摘录" onClick={() => removeExcerpt(x.id)}><IconClose /></button>
                 </div>
               ))}
             </div>
