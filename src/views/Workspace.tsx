@@ -43,7 +43,7 @@ import TagBrowser from './TagBrowser';
 import Dashboard from './Dashboard';
 import {
   IconSave, IconTrash, IconChevron, IconBack, IconFwd, IconSearch,
-  IconFolder, IconLink,
+  IconFolder, IconLink, IconClose,
 } from './icons';
 import Rail from './Rail';
 import { clickable } from './a11y';
@@ -533,6 +533,12 @@ export default function Workspace() {
                 <div className="card-head">
                   <IconLink size={15} />
                   <span>关联 · {vault.currentBacklinks.length}</span>
+                  <span className="spacer" />
+                  {/* 关联卡片是唯一「可关闭」的常驻卡片：窄屏它浮在编辑区之上，
+                      会盖住工具栏里的「关联」开关，所以卡片自己必须能关。 */}
+                  <button className="btn-icon" onClick={() => setShowBacklinks(false)} aria-label="关闭关联面板">
+                    <IconClose />
+                  </button>
                 </div>
                 <div className="card-body">
                   <div className="learning-panel">

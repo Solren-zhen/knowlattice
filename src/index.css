@@ -2435,7 +2435,7 @@ a.wikilink.missing::after {
 }
 .deck > .card { min-height: 0; }
 .c-tree { flex: 0 0 248px; }
-.c-edit { flex: 1.12; min-width: 320px; display: flex; flex-direction: column; }
+.c-edit { flex: 1.12; display: flex; flex-direction: column; }
 .c-insp { flex: 0 0 236px; }
 
 /* 欢迎舞台：铺满整个视口后居中 → 内容相对窗口正中，不被导轨或目录卡片挤偏。
@@ -2957,4 +2957,36 @@ a.wikilink.missing::after {
 .ai-frame-wrap > .loading-inline {
   position: absolute; inset: 0;
   background: var(--bg-raised);
+}
+
+/* ---- 9. 窄屏三卡布局：关联 / 目录在放不下时改为浮层抽屉 ----
+   说明：.c-edit 原先写的 min-width: 320px 是死声明 —— 后面的 .card{min-width:0}
+   与它同权重且在后，把它整个覆盖了。实测 768px 时编辑区只剩 274px（正文窄到不可用），
+   而且因为 min-width 实际为 0，三张卡会一直互相挤压而不会触发任何降级。
+   解法不是把 min-width 加回来（那只会让窄屏出现横向滚动条），而是让信息密度低的
+   关联卡片、再往下的目录卡片脱离 flex 流浮在编辑区之上，把宽度还给真正要做事的编辑区。
+   开关不变：关联 = 工具栏「关联」，目录 = 导航轨「目录」。 */
+/* 抽屉态下工具栏会被盖住，所以关联卡片头部补一枚自己的关闭钮；
+   与浮层头部同一枚 28px 圆形图标钮，宽度/面色一致。 */
+.card-head .btn-icon { border-radius: 999px; color: var(--muted); }
+.card-head .btn-icon:hover { color: var(--accent); }
+@media (max-width: 980px) {
+  .c-insp {
+    position: absolute;
+    top: 14px; right: 14px; bottom: 14px;
+    width: min(260px, 74vw);
+    z-index: 20;
+    box-shadow: var(--shadow-lg);
+  }
+}
+@media (max-width: 700px) {
+  .c-tree {
+    position: absolute;
+    top: 14px; left: 14px; bottom: 14px;
+    width: min(248px, 78vw);
+    z-index: 21;
+    box-shadow: var(--shadow-lg);
+  }
+  /* 目录卡片已不占位，欢迎内容不必再为它让出 276px */
+  .deck.with-tree .welcome-stage { left: 14px; }
 }
