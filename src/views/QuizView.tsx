@@ -14,7 +14,7 @@ import { recordMistake } from '../core/mistakes';
 import { toast, confirmBox } from '../core/feedback';
 import { markStudy } from '../core/stats';
 import { bankToAnki, downloadFile } from '../core/anki';
-import { IconRestore, IconTrash } from './icons';
+import { IconRestore, IconTrash, IconClose, IconHelp } from './icons';
 
 interface Props {
   docs: Map<string, string>;
@@ -174,7 +174,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">{session.bankName} · 第 {idx + 1} / {session.questions.length} 题</span>
             <span className="muted">已对 {correctCount}</span>
-            <button className="btn-icon" onClick={requestClose} aria-label="关闭">✕</button>
+            <button className="btn-icon" onClick={requestClose} aria-label="关闭"><IconClose /></button>
           </div>
           <div className="quiz-progress"><i style={{ width: `${((idx + (answered ? 1 : 0)) / session.questions.length) * 100}%` }} /></div>
 
@@ -255,7 +255,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
         <div className="panel quiz-panel" onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">练习成绩 · {session.bankName}</span>
-            <button className="btn-icon" onClick={requestClose} aria-label="关闭">✕</button>
+            <button className="btn-icon" onClick={requestClose} aria-label="关闭"><IconClose /></button>
           </div>
           <div className="quiz-result">
             <div className="score">{total ? Math.round((correctCount / total) * 100) : 0}<small>分</small></div>
@@ -294,8 +294,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
       <div className="panel quiz-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title">题库练习</span>
-          <button className="btn-icon" onClick={() => setShowHelp(!showHelp)} aria-label="格式说明" title="题库 JSON 格式说明">?</button>
-          <button className="btn-icon" onClick={requestClose} aria-label="关闭">✕</button>
+          <button className="btn-icon" onClick={() => setShowHelp(!showHelp)} aria-label="格式说明" title="题库 JSON 格式说明"><IconHelp /></button>
+          <button className="btn-icon" onClick={requestClose} aria-label="关闭"><IconClose /></button>
         </div>
 
         {showHelp && (

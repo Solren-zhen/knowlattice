@@ -5,6 +5,8 @@
  */
 import { useMemo, useState } from 'react';
 import { loadMistakes, clearMistake, chapterHeat, type MistakeMap } from '../core/mistakes';
+import { IconClose } from './icons';
+import { clickable } from './a11y';
 
 interface Props {
   onOpenPath: (path: string) => void;
@@ -39,12 +41,12 @@ export default function MistakeBook({ onOpenPath, onClose }: Props) {
           <span>
             错题本 · {items.length} 条
             {filterChapter && (
-              <span className="mistake-filter muted" onClick={() => setFilterChapter(null)}>
+              <span className="mistake-filter muted" onClick={() => setFilterChapter(null)} {...clickable('清除章节筛选')}>
                 　当前章节：{filterChapter} ✕
               </span>
             )}
           </span>
-          <button className="btn-small" onClick={onClose}>关闭</button>
+          <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
         </div>
 
         {heat.length === 0 ? (
@@ -57,7 +59,7 @@ export default function MistakeBook({ onOpenPath, onClose }: Props) {
             <div className="heat-section">
               <div className="heat-title">薄弱点热力图</div>
               {heat.map(({ chapter, count }) => (
-                <div key={chapter} className="heat-row" onClick={() => toggleFilter(chapter)}>
+                <div key={chapter} className="heat-row" onClick={() => toggleFilter(chapter)} {...clickable(`按章节筛选：${chapter}`)}>
                   <span className="heat-label">{chapter}</span>
                   <div className="heat-track">
                     <div
@@ -72,7 +74,7 @@ export default function MistakeBook({ onOpenPath, onClose }: Props) {
 
             <div className="panel__body mistake-list">
               {items.map((r) => (
-                <div key={r.path} className="mistake-item" onClick={() => onOpenPath(r.path)}>
+                <div key={r.path} className="mistake-item" onClick={() => onOpenPath(r.path)} {...clickable(`打开错题：${r.title}`)}>
                   <div className="mistake-item-main">
                     <div className="panel__title mistake-title">{r.title}</div>
                     <div className="mistake-meta muted">
@@ -88,7 +90,7 @@ export default function MistakeBook({ onOpenPath, onClose }: Props) {
                       setMistakes(clearMistake(r.path));
                     }}
                   >
-                    ✕
+                    <IconClose />
                   </button>
                 </div>
               ))}

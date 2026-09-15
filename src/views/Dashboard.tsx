@@ -9,7 +9,7 @@ import { loadMistakes } from '../core/mistakes';
 import { loadBanks } from '../core/qbank';
 import { streak, last7 } from '../core/stats';
 import { seedDemo } from '../core/demo';
-import { IconChart } from './icons';
+import { IconChart, IconClose } from './icons';
 
 interface Props {
   docs: Map<string, string>;
@@ -51,7 +51,7 @@ export default function Dashboard({ docs, onClose }: Props) {
       <div className="panel mistake-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head mistake-header">
           <span className="panel__title mistake-title"><IconChart /> 学习统计</span>
-          <button className="btn-icon" onClick={onClose} aria-label="关闭">✕</button>
+          <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
         </div>
 
         <div className="dash-cards">

@@ -4,7 +4,8 @@
  */
 import { useMemo, useState } from 'react';
 import { parseFrontmatter } from '../core/parser';
-import { IconTag } from './icons';
+import { IconTag, IconClose } from './icons';
+import { clickable } from './a11y';
 
 interface Props {
   docs: Map<string, string>;
@@ -49,7 +50,7 @@ export default function TagBrowser({ docs, onOpenPath, onClose }: Props) {
       <div className="panel mistake-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head mistake-header">
           <span className="panel__title mistake-title"><IconTag /> 标签 <span className="muted">· {tags.length} 个</span></span>
-          <button className="btn-icon" onClick={onClose} aria-label="关闭">✕</button>
+          <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
         </div>
 
         <div className="tag-search">
@@ -90,10 +91,11 @@ export default function TagBrowser({ docs, onOpenPath, onClose }: Props) {
               <h4 className="tag-note-list-title">#{sel} · {selNotes.length} 篇</h4>
               {selNotes.map((p) => {
                 const { title } = parseFrontmatter(docs.get(p) ?? '');
+                const label = title || p.replace(/\.md$/, '').split('/').pop() || p;
                 return (
-                  <div key={p} className="mistake-item tag-note-item" onClick={() => openNote(p)}>
+                  <div key={p} className="mistake-item tag-note-item" onClick={() => openNote(p)} {...clickable(`打开笔记：${label}`)}>
                     <div className="mistake-item-main">
-                      <div className="panel__title mistake-title">{title || p.replace(/\.md$/, '').split('/').pop()}</div>
+                      <div className="panel__title mistake-title">{label}</div>
                       <div className="mistake-meta muted">{p}</div>
                     </div>
                   </div>

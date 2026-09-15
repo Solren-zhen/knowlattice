@@ -52,7 +52,7 @@
   --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
   --t-fast: 120ms;
   --t-med: 200ms;
-  --t-slow: 280ms;
+  --t-slow: 240ms;
 
   /* ---- 阴影（冷调 Slate 阴影 + 靛蓝辉光层级） ---- */
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
@@ -368,6 +368,15 @@ kbd {
 .panel__head .btn-small { height: 28px; padding-top: 0; padding-bottom: 0; }
 /* 去掉纵向内距，给 19px 高的内联 kbd 留出行盒空间 */
 .editor-toolbar .btn-small { padding-top: 0; padding-bottom: 0; }
+/* 工具栏是单行控件带：不允许内部换行，也不允许被压到内容宽度以下。
+   窄屏要靠「收起次要信息」降级（见下面的 1240 / 1040 媒体查询），
+   而不是让 flex 把控件挤到文字竖排。.note-path 是唯一的弹性项，负责吃剩余宽度。 */
+.editor-toolbar { flex-wrap: nowrap; }
+.editor-toolbar > * { flex-shrink: 0; }
+.editor-toolbar > .note-path { flex-shrink: 1; }
+.editor-toolbar .btn-small,
+.editor-toolbar .btn-icon,
+.editor-toolbar .toolbar-search { white-space: nowrap; }
 .note-path {
   font-size: 13px; font-weight: 600; flex: 1;
   min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -397,6 +406,8 @@ kbd {
 /* 格式工具栏：给新手的可视化语法按钮 */
 .cm-toolbar {
   display: flex; align-items: center; gap: 3px;
+  /* 与编辑器工具栏同一策略：控件不压缩，宽度不够时整条折行 */
+  flex-wrap: wrap; row-gap: 3px;
   padding: 4px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-glass);
@@ -404,6 +415,7 @@ kbd {
 }
 .cm-tool-btn {
   min-width: 26px; height: 24px;
+  flex-shrink: 0; white-space: nowrap;
   border: 1px solid transparent;
   background: none;
   color: var(--text-2);
@@ -2490,10 +2502,23 @@ a.wikilink.missing::after {
   .c-insp { flex-basis: 204px; }
   .toolbar-search span { display: none; }
   .toolbar-search { padding: 0 9px; }
+  /* 工具栏降级第一级：只收起快捷键提示（Ctrl K / Ctrl S），动作控件全部保留 */
+  .editor-toolbar { gap: 6px; padding: 8px 12px; }
+  .toolbar-search kbd,
+  .editor-toolbar .btn-small kbd { display: none; }
+  /* 格式工具栏右侧那串快捷键说明与按钮 tooltip 重复，窄屏收掉，让按钮保持单行 */
+  .cm-toolbar-hint { display: none; }
 }
 @media (max-width: 1040px) {
   .c-tree { flex-basis: 188px; }
   .c-insp { flex-basis: 180px; }
+  /* 降级第二级：收起字数与分组竖线，把宽度让给文件名和动作本身 */
+  .editor-toolbar .toolbar-divider,
+  .editor-toolbar .word-count { display: none; }
+}
+/* 降级第三级：确实放不下了就折成两行，绝不再压缩控件 */
+@media (max-width: 900px) {
+  .editor-toolbar { flex-wrap: wrap; row-gap: 6px; }
 }
 
 /* ============================================================ Hero 空状态（首屏欢迎页）
@@ -2584,10 +2609,9 @@ a.wikilink.missing::after {
   background-color: var(--bg);
   color-scheme: dark;
 }
-[data-theme='dark'] .sidebar-header,
-[data-theme='dark'] .editor-toolbar {
-  font-family: ui-serif, Georgia, Cambria, 'Times New Roman', Times, 'Noto Serif SC', serif;
-}
+/* 工具类界面（侧栏头部 / 编辑器工具栏）不随主题换字族：
+   这两处全是按钮、标签与数据，深色下切成衬线体属于「显示字体用在 UI 标签上」，
+   且同一个工具栏在浅/深之间字族不同，一致性直接断掉。编辑性标题仍保留衬线。 */
 [data-theme='dark'] h1, [data-theme='dark'] h2, [data-theme='dark'] h3,
 [data-theme='dark'] .hero-title, [data-theme='dark'] .review-front h2,
 [data-theme='dark'] .quiz-stem, [data-theme='dark'] .anatomy-title {
@@ -2753,4 +2777,184 @@ a.wikilink.missing::after {
   .brain-side { width: 100%; max-height: 42%; border-right: none; border-bottom: 1px solid var(--border); }
   .brain-stage { min-height: 320px; }
   .brain-legend { display: none; }
+}
+
+/* ============================================================
+   统一精修（Operate 工艺层）
+   同一角色只允许一种写法：一个次级按钮、一个浮层头部、一个关闭按钮、一个空态。
+   本层只统一外观（颜色 / 尺寸 / 状态），不改布局结构、不改功能与数据流。
+   ============================================================ */
+
+/* ---- 1. 次级按钮基类 ----
+   欢迎页的「知识图谱」用 className="btn"，但 .btn 从未定义任何基类样式，
+   于是它渲染成浏览器原生按钮（系统灰底 + 系统描边）——与旁边的
+   .btn-primary / .btn-small 不是同一套控件语言。这里补上它本该有的定义。 */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--text-2);
+  border-radius: var(--r-md);
+  padding: 9px 18px;
+  font-family: inherit; font-size: 13.5px; font-weight: 500; line-height: 1.2;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--t-fast) var(--ease);
+}
+.btn:hover {
+  border-color: var(--border-accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--glow-accent);
+  transform: translateY(-1px);
+}
+.btn:active { transform: scale(0.97); transition-duration: 60ms; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* ---- 2. 欢迎页英雄区 ----
+   （a）`.preview.placeholder` 是 flex:0 0 auto，不会收缩：窗口不够宽时它仍按
+       max-content 撑到 760px，溢出舞台并在页面底部留下一条横向滚动条。
+       改成对舞台取 100% 上限，居中逻辑不变。
+   （b）教学步骤竖排 4 行把首屏拉得很长，且每行宽度随文案浮动、右边缘参差。
+       改成等宽网格后块面整齐、可一眼扫完；窄窗口退回单列避免挤压换行。 */
+.welcome-stage > .preview.placeholder { max-width: min(760px, 100%); }
+/* 副标题在窄窗口必然换行：用 balance 让两行长度接近，避免末行只剩几个字 */
+.preview.placeholder .hero-title,
+.preview.placeholder .hero-sub { text-wrap: balance; }
+.welcome-stage > .preview.placeholder .teach-steps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+  width: min(560px, 100%);
+  margin: 30px auto 0;
+  text-align: left;
+}
+.preview.placeholder .teach-step { padding: 10px 14px; gap: 10px; font-size: 13px; }
+/* 修键标签等宽：[[ / == / Tab / 回车 宽度一致，两列才对得上 */
+.preview.placeholder .teach-step kbd {
+  min-width: 40px; padding: 3px 8px; text-align: center;
+}
+@media (max-width: 900px) {
+  .welcome-stage > .preview.placeholder .teach-steps { grid-template-columns: 1fr; }
+}
+
+/* ---- 3. 浮层头部统一：一个高度 / 一个内距 / 一个底面 ----
+   .panel__head 已经定义了 52px 规格，但各面板又用 quiz-header / mistake-header
+   等旧类把内距改成 16px 上下，于是同类头部在不同面板里高度是 44~62px 不等
+   （pdf-topbar 固定 44px、quiz-header 54px、mistake-header 62px）。
+   这里只统一几何（高度 / 内距 / 列间距），底面按「卡片型 = 实底、画布型 = 玻璃」
+   分两组：图谱与 PDF 对照的头部本来就压在画布上，保留各自的面色。
+   注：此前一版把 graph-header 也拉成实底，等于把它的玻璃面吃掉，已修正。 */
+.panel__head.quiz-header,
+.panel__head.mistake-header,
+.panel__head.mindmap-header,
+.panel__head.review-header,
+.panel__head.anatomy-topbar,
+.panel__head.graph-header,
+.panel__head.pdf-topbar {
+  min-height: var(--panel-head-h);
+  padding: 0 var(--sp-5);
+  gap: var(--sp-3);
+}
+/* 卡片型浮层头部：与 .panel__head 同一张脸（实底 + 分隔线） */
+.panel__head.quiz-header,
+.panel__head.mistake-header,
+.panel__head.mindmap-header,
+.panel__head.review-header,
+.panel__head.anatomy-topbar {
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+/* 画布型全屏头部：保留各自的玻璃面，只跟随上面统一的几何 */
+.panel__head.graph-header,
+.panel__head.pdf-topbar {
+  background: var(--panel-glass-strong);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---- 4. 关闭按钮统一：所有浮层用同一个 28px 圆形图标钮 ---- */
+.panel__head .btn-icon {
+  width: 28px; height: 28px; border-radius: 999px;
+  border-color: var(--border);
+  color: var(--muted);
+}
+.panel__head .btn-icon:hover { color: var(--accent); }
+
+/* ---- 5. 空态统一：同一套居中排版与标题层级 ----
+   此前 8 处空态的 padding 在 16~48px 之间、标题字号 13~22px 之间各写各的。
+   这 7 个空态形状一致（一行标题 + 一行 muted 说明，可选一个动作按钮），
+   统一到一套排版；侧栏 .tree-empty 是窄栏内联提示，不套用居中版式。 */
+.anatomy-empty, .mistake-empty, .quiz-empty, .qs-empty,
+.graph-empty, .pdf-empty, .pdf-draft-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 6px; padding: 44px 24px;
+  text-align: center; color: var(--muted);
+  font-size: 12.5px; line-height: 1.75;
+}
+.pdf-draft-empty { padding: 28px 24px; font-weight: 400; }
+.anatomy-empty > p:first-child,
+.mistake-empty > h2,
+.quiz-empty > h2,
+.quiz-empty > p:first-child,
+.graph-empty > p:first-child,
+.pdf-empty > p:first-child,
+.pdf-draft-empty > p:first-child {
+  margin: 0;
+  font-size: 15px; font-weight: 600;
+  color: var(--text-2); letter-spacing: -0.01em;
+}
+/* 空态里的动作按钮：从标题堆里脱开一点，不要和说明文字黏在一起 */
+.pdf-empty > .btn-small { margin-top: 10px; }
+
+/* ---- 6. 导航轨 hover 修正确 ----
+   轨道底色就是 var(--panel)，而 hover 又写成 var(--panel)，
+   等于悬浮时底色完全没变化，只剩 1px 位移在提示可点。 */
+.rail-btn:hover { background: var(--panel-deep); color: var(--text); }
+
+/* ---- 7. 加载态：骨架条，不用内容区转圈 ----
+   Suspense 兜底与「正在打开知识库」都是整片浮层级的加载，属于内容位；
+   用一条会扫光的骨架条代替居中转圈：既标明「在动」，又不抢注意力，
+   并且与页面的圆角/面色同源。 */
+.loading {
+  flex-direction: column; gap: 14px;
+  letter-spacing: 0.02em;
+}
+.loading::after {
+  content: '';
+  width: 148px; height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg,
+    var(--panel-deep) 0%, var(--border-strong) 45%, var(--panel-deep) 90%);
+  background-size: 220% 100%;
+  animation: mv-sheen 1.15s var(--ease) infinite;
+}
+@keyframes mv-sheen {
+  from { background-position: 130% 0; }
+  to   { background-position: -130% 0; }
+}
+
+/* ---- 8. 内联载入语汇：面板内的异步等待统一用「骨架条 + 一句说明」 ----
+   PDF 渲染、OCR 识别、内嵌 AI 页此前各写各的灰字（或干脆没提示）。
+   与整片浮层的 .loading 同源（同一套 mv-sheen 扫光），只是内联排布。 */
+.loading-inline {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 22px 16px;
+  color: var(--muted); font-size: 12.5px; letter-spacing: 0.02em;
+}
+.loading-inline--compact { padding: 8px 0; }
+.loading-inline__bar {
+  width: 56px; height: 6px; flex-shrink: 0; border-radius: 999px;
+  background: linear-gradient(90deg,
+    var(--panel-deep) 0%, var(--border-strong) 45%, var(--panel-deep) 90%);
+  background-size: 220% 100%;
+  animation: mv-sheen 1.15s var(--ease) infinite;
+}
+
+/* 内嵌 AI 页：iframe 首屏白屏期间盖上同一套载入语汇 */
+.ai-frame-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
+.ai-frame-wrap > .ai-frame { flex: 1; min-height: 0; }
+.ai-frame-wrap > .loading-inline {
+  position: absolute; inset: 0;
+  background: var(--bg-raised);
 }

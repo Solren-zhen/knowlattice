@@ -8,7 +8,8 @@ import { docxToMarkdown, pdfToMarkdown, type ConvertResult } from '../core/conve
 import { anydocErrorCode, anydocToMarkdown } from '../core/anydoc';
 import { ocrPdfToMarkdown } from '../core/ocr';
 import { toast } from '../core/feedback';
-import { IconConvert } from './icons';
+import { IconConvert, IconClose } from './icons';
+import Loading from './Loading';
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
 
@@ -126,7 +127,7 @@ export default function ConvertView({ onSave, onClose }: Props) {
       <div className="quiz-panel convert-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title">格式转换 · PDF / Word → Markdown</span>
-          <button className="btn-icon" onClick={onClose} aria-label="关闭">✕</button>
+          <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
         </div>
 
         {!result ? (
@@ -149,7 +150,7 @@ export default function ConvertView({ onSave, onClose }: Props) {
             >
               <IconConvert size={30} />
               {busy ? (
-                <b>{progress || '转换中…'}</b>
+                <Loading label={progress || '转换中…'} compact />
               ) : (
                 <>
                   <b>点击选择，或把文件拖到这里</b>
