@@ -318,3 +318,31 @@ export const IconHistory = ({ size = 15 }: P) => (
     <path d="M3.8 5.2v4h4M20.2 18.8v-4h-4" strokeWidth={1.8} />
   </svg>
 );
+
+/** 关闭：全站浮层统一的「退出/关闭」图形。
+    此前 17 处直接用文字字符 ✕——字形宽度、笔画粗细与光学中心都随字体走，
+    和这里的 1.7px 描边图标不是同一套笔。 */
+export const IconClose = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <path d="M7 7 17 17M17 7 7 17" strokeWidth={1.9} />
+  </svg>
+);
+
+/** 文件：PDF / Word 的选取入口（取代按钮里的 📄 emoji） */
+export const IconFile = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <path d="M6.6 3.9h7.1l4.7 4.7v11.5a1.9 1.9 0 0 1-1.9 1.9H6.6a1.9 1.9 0 0 1-1.9-1.9V5.8a1.9 1.9 0 0 1 1.9-1.9z" {...tint} opacity="0.16" />
+    <path d="M6.6 3.9h7.1l4.7 4.7v11.5a1.9 1.9 0 0 1-1.9 1.9H6.6a1.9 1.9 0 0 1-1.9-1.9V5.8a1.9 1.9 0 0 1 1.9-1.9z" />
+    <path d="M13.7 3.9V8.6h4.7" />
+  </svg>
+);
+
+/** 帮助：圆形问号，用于「格式说明」这类就地提示入口（取代裸字符 ?） */
+export const IconHelp = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <circle cx="12" cy="12" r="9.2" {...tint} opacity="0.14" />
+    <circle cx="12" cy="12" r="9.2" />
+    <path d="M9.7 9.5a2.4 2.4 0 1 1 3.3 2.2c-.7.3-1 .9-1 1.7v.3" strokeWidth={1.8} />
+    <circle cx="12" cy="16.9" r="0.95" {...tint} opacity="1" />
+  </svg>
+);

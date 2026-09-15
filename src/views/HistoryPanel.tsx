@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { listSnapshots, listSnapshotPaths, type Snapshot } from '../core/history';
 import { toast, confirmBox } from '../core/feedback';
-import { IconHistory } from './icons';
+import { IconHistory, IconClose } from './icons';
 
 interface Props {
   currentPath: string | null;
@@ -81,7 +81,7 @@ export default function HistoryPanel({ currentPath, existingPaths, onRestore, on
       <div className="quiz-panel history-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title">历史版本 · 快照与找回</span>
-          <button className="btn-icon" onClick={onClose} aria-label="关闭">✕</button>
+          <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
         </div>
 
         <div className="history-body">

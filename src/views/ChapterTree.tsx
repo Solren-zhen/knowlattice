@@ -14,6 +14,7 @@ import type { TreeNode } from '../core/vault';
 import { NOTE_TYPE_LABELS, type NoteType } from '../core/parser';
 import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore } from './icons';
 import { toast, confirmBox } from '../core/feedback';
+import { clickable } from './a11y';
 
 interface Props {
   tree: TreeNode[];
@@ -239,6 +240,13 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
     setCreating(false);
   };
 
+  /** 导出 md 文件夹：先收起菜单，再等导出完成并回报篇数 */
+  const exportFolder = async () => {
+    setMoreOpen(false);
+    const n = await onExportFolder();
+    toast(`已导出 ${n} 篇笔记为 md 文件夹(.zip)，可直接用 Obsidian 打开`, 'ok');
+  };
+
   return (
     <aside className="tree-panel">
       <div className="sidebar-header">
@@ -261,24 +269,24 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
               <IconMore />
             </button>
             {moreOpen && (
-              <div className="import-menu more-menu" onMouseLeave={() => setMoreOpen(false)}>
-                <div onClick={() => { setMoreOpen(false); void onExport(); }}>
+              <div
+                className="import-menu more-menu"
+                onMouseLeave={() => setMoreOpen(false)}
+                onKeyDown={(e) => { if (e.key === 'Escape') setMoreOpen(false); }}
+              >
+                <div onClick={() => { setMoreOpen(false); void onExport(); }} {...clickable()}>
                   <IconBackup /> 备份到 .json
                 </div>
-                <div onClick={async () => {
-                  setMoreOpen(false);
-                  const n = await onExportFolder();
-                  toast(`已导出 ${n} 篇笔记为 md 文件夹(.zip)，可直接用 Obsidian 打开`, 'ok');
-                }}>
+                <div onClick={() => void exportFolder()} {...clickable()}>
                   <IconFolder /> 导出 md 文件夹 (.zip)
                 </div>
-                <div onClick={() => { jsonRef.current?.click(); setMoreOpen(false); }}>
+                <div onClick={() => { jsonRef.current?.click(); setMoreOpen(false); }} {...clickable()}>
                   <IconRestore /> 从备份 .json 恢复
                 </div>
-                <div onClick={() => { folderRef.current?.click(); setMoreOpen(false); }}>
+                <div onClick={() => { folderRef.current?.click(); setMoreOpen(false); }} {...clickable()}>
                   <IconFolderIn /> 导入 md 文件夹
                 </div>
-                <div className="menu-danger" onClick={() => { setBatchMode((v) => !v); setSelected(new Set()); setMoreOpen(false); }}>
+                <div className="menu-danger" onClick={() => { setBatchMode((v) => !v); setSelected(new Set()); setMoreOpen(false); }} {...clickable()}>
                   <IconBatch /> {batchMode ? '批量删除（进行中 · 点此退出）' : '批量删除'}
                 </div>
               </div>
@@ -317,7 +325,7 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
       {creating && (
         <div className="new-note">
           {targetDir && (
-            <div className="new-note-dir" title="点击取消目录选择" onClick={() => setTargetDir('')}>
+            <div className="new-note-dir" title="点击取消目录选择" onClick={() => setTargetDir('')} {...clickable('取消目录选择')}>
               {targetDir} <span className="muted">✕</span>
             </div>
           )}

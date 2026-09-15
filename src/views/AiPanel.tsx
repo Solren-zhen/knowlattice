@@ -4,6 +4,8 @@
  * - 部分站点禁止被网页嵌入（X-Frame-Options），提供「新窗口打开」兜底
  */
 import { useEffect, useState } from 'react';
+import { IconClose } from './icons';
+import Loading from './Loading';
 
 const PRESETS = [
   { name: 'Kimi', url: 'https://kimi.moonshot.cn/', embed: true },
@@ -22,6 +24,8 @@ interface Props {
 export default function AiPanel({ onClose }: Props) {
   const [src, setSrc] = useState<string>(() => localStorage.getItem(KEY) ?? PRESETS[0].url);
   const [custom, setCustom] = useState('');
+  // 内嵌页首屏是白屏：用统一载入语汇补上「正在加载」的反馈，换站点时重置
+  const [frameLoading, setFrameLoading] = useState(true);
 
   // Esc 快捷关闭
   useEffect(() => {
@@ -33,6 +37,7 @@ export default function AiPanel({ onClose }: Props) {
   }, [onClose]);
 
   const pick = (url: string) => {
+    if (url !== src) setFrameLoading(true); // 只有真的换站点才重新进入载入态
     setSrc(url);
     localStorage.setItem(KEY, url);
   };
@@ -45,7 +50,7 @@ export default function AiPanel({ onClose }: Props) {
         <button className="btn-small" onClick={openExternal} title="部分站点禁止嵌入，可在新窗口打开">
           新窗口打开
         </button>
-        <button className="btn-icon" onClick={onClose} aria-label="关闭">✕</button>
+        <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
       </div>
       <div className="ai-sources">
         {PRESETS.map((p) => (
@@ -77,7 +82,16 @@ export default function AiPanel({ onClose }: Props) {
         </button>
       </div>
       <p className="ai-hint muted">站点若显示空白说明其禁止内嵌，点「新窗口打开」并排使用即可</p>
-      <iframe key={src} className="ai-frame" src={src} title="AI 问答" />
+      <div className="ai-frame-wrap">
+        {frameLoading && <Loading label="正在载入内嵌页面…" />}
+        <iframe
+          key={src}
+          className="ai-frame"
+          src={src}
+          title="AI 问答"
+          onLoad={() => setFrameLoading(false)}
+        />
+      </div>
     </div>
   );
 }

@@ -46,6 +46,7 @@ import {
   IconFolder, IconLink,
 } from './icons';
 import Rail from './Rail';
+import { clickable } from './a11y';
 import { toast, confirmBox } from '../core/feedback';
 
 const RECENTS_KEY = 'medvault-recents';
@@ -548,9 +549,10 @@ export default function Workspace() {
                   {vault.currentBacklinks.map((p) => {
                     const c = vault.docs.get(p) ?? '';
                     const { title } = parseFrontmatterCached(p, c);
+                    const label = title || p.replace(/\.md$/, '').split('/').pop() || p;
                     return (
-                      <div key={p} className="backlink-item" onClick={() => openNote(p)}>
-                        {title || p.replace(/\.md$/, '').split('/').pop()}
+                      <div key={p} className="backlink-item" onClick={() => openNote(p)} {...clickable(`打开反向链接笔记：${label}`)}>
+                        {label}
                         <span className="muted"> · {p}</span>
                       </div>
                     );

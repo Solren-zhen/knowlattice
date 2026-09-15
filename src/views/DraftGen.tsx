@@ -5,7 +5,7 @@
 import { useRef, useState } from 'react';
 import { generateDraft, draftToMarkdown, type Draft } from '../core/noteGen';
 import { loadPdfjs } from '../core/pdfLib';
-import { IconWand } from './icons';
+import { IconWand, IconClose } from './icons';
 import { toast } from '../core/feedback';
 
 interface Props {
@@ -81,7 +81,7 @@ export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
       <div className="quiz-panel draft-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title">智能草稿 · 讲义转原子笔记</span>
-          <button className="btn-icon" onClick={onClose} aria-label="关闭">✕</button>
+          <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
         </div>
 
         {!draft ? (

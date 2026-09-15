@@ -13,6 +13,7 @@ import { useEffect, useRef } from 'react';
 import MindElixir from 'mind-elixir';
 import 'mind-elixir/style.css';
 import type { LangPack } from 'mind-elixir/i18n';
+import { IconClose } from './icons';
 
 interface Props {
   content: string;
@@ -163,23 +164,43 @@ export default function MindMapView({ content, title, onClose, onOpenWiki, onSav
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    let disposed = false;
+    let mind: MindElixir | null = null;
     el.innerHTML = '';
     const dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const mind = new MindElixir({
-      el,
-      direction: MindElixir.SIDE,
-      // 右键菜单：开聚焦/连线，并用上面的中文文案
-      contextMenu: { focus: true, link: true, locale: ZH },
-      toolBar: true,
-      keypress: true,
-      overflowHidden: false,
-      mouseSelectionButton: 0,
-      theme: medvaultTheme(dark),
-    });
     const data = mdToMind(content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, ''));
-    mind.init(data as never).catch((e: unknown) => console.error('思维导图初始化失败：', e));
-    mindRef.current = mind;
-    return () => { mind.destroy(); mindRef.current = null; };
+
+    const boot = () => {
+      if (disposed) return;
+      mind = new MindElixir({
+        el,
+        direction: MindElixir.SIDE,
+        // 右键菜单：开聚焦/连线，并用上面的中文文案
+        contextMenu: { focus: true, link: true, locale: ZH },
+        toolBar: true,
+        keypress: true,
+        overflowHidden: false,
+        mouseSelectionButton: 0,
+        theme: medvaultTheme(dark),
+      });
+      mind.init(data as never).catch((e: unknown) => console.error('思维导图初始化失败：', e));
+      mindRef.current = mind;
+    };
+
+    // React StrictMode 会在同一批同步执行「挂载 → 销毁 → 再挂载」。
+    // 而 mind-elixir 的 init 是 async：内部先 await document.fonts.ready，之后才建 this.map 并跑
+    // linkDiv()。若实例在这之前被 destroy，它会把 map / el 置为 undefined，init 的尾巴继续执行
+    // 就会抛「Cannot read properties of undefined (reading 'querySelector')」。
+    // 把实例化推迟一个微任务：第一轮那个注定被丢弃的实例根本不会被创建，报错从根上消失。
+    queueMicrotask(boot);
+
+    return () => {
+      disposed = true;
+      if (mind) {
+        mind.destroy();
+        if (mindRef.current === mind) mindRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content]);
 
@@ -225,7 +246,7 @@ export default function MindMapView({ content, title, onClose, onOpenWiki, onSav
           <span className="panel__title mindmap-title">思维导图 · {title}</span>
           <div className="mindmap-actions">
             <button className="btn-small" onClick={save}>保存并写回笔记</button>
-            <button className="btn-icon" onClick={onClose} aria-label="关闭">✕</button>
+            <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
           </div>
         </div>
         <div className="panel__body mindmap-body">

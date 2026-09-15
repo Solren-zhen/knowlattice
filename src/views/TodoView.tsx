@@ -3,7 +3,7 @@
  * 增 / 勾完成 / 删 / 全部·进行中·已完成过滤 / 清空已完成。
  */
 import { useEffect, useState } from 'react';
-import { IconTrash, IconTodo } from './icons';
+import { IconTrash, IconTodo, IconClose } from './icons';
 
 interface Todo {
   id: string;
@@ -81,7 +81,7 @@ export default function TodoView({ onClose }: { onClose: () => void }) {
       <div className="panel mistake-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head mistake-header">
           <span className="panel__title mistake-title"><IconTodo /> 待办清单 <span className="muted">· {list.length} 项</span></span>
-          <button className="btn-icon" onClick={onClose} aria-label="关闭">✕</button>
+          <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
         </div>
 
         <div className="todo-add">

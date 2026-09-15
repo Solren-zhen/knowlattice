@@ -16,7 +16,7 @@ import {
   brainUrl, loadBrainAtlas, matchRegion, regionLabel, regionSide,
   type BrainAtlas, type BrainGroup, type BrainRegion,
 } from '../core/brainAtlas';
-import { IconBrain } from './icons';
+import { IconBrain, IconClose } from './icons';
 
 interface Props {
   onClose: () => void;
@@ -151,7 +151,7 @@ export default function BrainAtlasView({ onClose }: Props) {
       <div className="panel quiz-panel brain-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title"><IconBrain /> 脑图谱 · MRI 对照</span>
-          <button className="btn-icon" onClick={onClose} aria-label="close">✕</button>
+          <button className="btn-icon" onClick={onClose} aria-label="close"><IconClose /></button>
         </div>
         <div className="panel__body brain-body">
           <div className="brain-side">
