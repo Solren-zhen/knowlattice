@@ -62,14 +62,19 @@ const Row = memo(function Row({
   onToggle: (node: TreeNode) => void;
 }) {
   if (node.type === 'file') {
+    const name = node.name.replace(/\.md$/, '');
+    const label = batchMode
+      ? `${sel ? '取消选择' : '选择'}：${name}`
+      : `打开笔记：${name}`;
     return (
       <div
         className={`tree-row file ${currentPath === node.path ? 'active' : ''}`}
         style={{ paddingLeft: depth * 14 + 12 }}
         onClick={() => (batchMode ? onToggle(node) : onOpen(node.path))}
+        {...clickable(label)}
       >
         {batchMode && <span className={`ck ${sel ? 'on' : ''}`}>✓</span>}
-        {node.name.replace(/\.md$/, '')}
+        {name}
       </div>
     );
   }
@@ -82,6 +87,11 @@ const Row = memo(function Row({
         onPickDir(node.path);
         onToggle(node); // 非批量时 onToggle 仅用于切换展开
       }}
+      {...clickable(
+        batchMode
+          ? `${sel ? '取消选择' : '选择'}：${node.name}`
+          : `${open ? '收起' : '展开'}目录：${node.name}`,
+      )}
     >
       {batchMode && <span className={`ck ${sel ? 'on' : ''}`}>✓</span>}
       <IconChevron open={open} /> {node.name} <span className="dir-count">{count}</span>
