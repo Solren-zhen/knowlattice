@@ -12,6 +12,8 @@ import {
   type AnatomyManifest,
   type ManifestOrgan,
 } from '../core/anatomy';
+import type { KeyboardEvent } from 'react';
+import { clickable } from './a11y';
 
 // ---------- 系统中英文映射 ----------
 
@@ -125,6 +127,25 @@ export default function AnatomyBrowser({ manifest, selectedId, onSelectStructure
     );
   }
 
+  /**
+   * 结构列表的键盘导航：整棵树有上千行，逐行给 tabindex 会造出上千个 Tab 停靠点，
+   * 所以这里用标准 listbox 的 roving tabindex —— 每个系统组在 Tab 顺序里只占一个点，
+   * 组内用上下键/Home/End 移动。选中项所在组把停靠点给选中项，否则给该组第一项。
+   */
+  const onOrganKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const rows = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('.anatomy-organ'));
+    if (!rows.length) return;
+    e.preventDefault();
+    const cur = rows.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === 'ArrowDown' ? (cur < 0 ? 0 : Math.min(rows.length - 1, cur + 1))
+      : e.key === 'ArrowUp' ? Math.max(0, cur < 0 ? 0 : cur - 1)
+      : e.key === 'Home' ? 0
+      : rows.length - 1;
+    rows[next]?.focus();
+  };
+
   return (
     <div className="anatomy-panel">
       <div className="anatomy-header">
@@ -149,6 +170,7 @@ export default function AnatomyBrowser({ manifest, selectedId, onSelectStructure
           const count = (groups[sys] ?? []).length;
           const isOpen = openSystem.has(sys) || !!query.trim();
           const sysOrgans = filteredGroups[sys] ?? [];
+          const tabStopId = sysOrgans.some((o) => o.organ_id === selectedId) ? selectedId : sysOrgans[0]?.organ_id;
           return (
             <div key={sys} className="anatomy-system">
               <div
@@ -159,6 +181,7 @@ export default function AnatomyBrowser({ manifest, selectedId, onSelectStructure
                   else next.add(sys);
                   setOpenSystem(next);
                 }}
+                {...clickable(`${isOpen ? '收起' : '展开'}系统：${SYSTEM_NAMES[sys] ?? sys}`)}
               >
                 <span className="system-chevron">{isOpen ? '▾' : '▸'}</span>
                 <span className="system-name">{SYSTEM_NAMES[sys] ?? sys}</span>
@@ -166,15 +189,26 @@ export default function AnatomyBrowser({ manifest, selectedId, onSelectStructure
                 <span className="system-count">{query.trim() ? sysOrgans.length : count}</span>
               </div>
               {isOpen && (
-                <div className="anatomy-organ-list">
+                <div
+                  className="anatomy-organ-list"
+                  role="listbox"
+                  aria-label={`${SYSTEM_NAMES[sys] ?? sys} 结构`}
+                  onKeyDown={onOrganKeyDown}
+                >
                   {sysOrgans.map((o) => {
                     const zhn = zhName(o.name_en);
                     return (
                       <div
                         key={o.organ_id}
                         className={`anatomy-organ ${selectedId === o.organ_id ? 'selected' : ''}`}
+                        role="option"
+                        aria-selected={selectedId === o.organ_id}
+                        tabIndex={o.organ_id === tabStopId ? 0 : -1}
                         onClick={() => onSelectStructure(selectedId === o.organ_id ? null : o)}
                         onDoubleClick={() => onOpenNote(o)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); }
+                        }}
                         title={`${o.name_en}\n${o.ta2_latin}\n${o.path.join(' > ')}`}
                       >
                         <span className="organ-name">{zhn ?? organLabel(o)}</span>
