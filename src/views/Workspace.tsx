@@ -99,7 +99,10 @@ export default function Workspace() {
   // Ctrl+K 全局唤起快速搜索
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      // 编辑器里的 Mod-<键> 绑定会先 preventDefault：全局快捷键只认「正好是 Ctrl+K」，
+      // 不抢已被处理的按键，避免编辑器里的快捷键被这里顺手当成搜索。
+      if (e.defaultPrevented) return;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchOpen(true);
       }
