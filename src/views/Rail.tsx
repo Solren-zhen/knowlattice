@@ -8,7 +8,7 @@ import {
   type Font, type Theme,
 } from '../core/theme';
 import {
-  IconLogo, IconFolder, IconSearch, IconHistory, IconBody, IconBrain, IconGraph, IconCards,
+  IconLogo, IconTree, IconSearch, IconHistory, IconBody, IconBrain, IconGraph, IconCards,
   IconTarget, IconQuiz, IconTodo, IconTag, IconChart, IconAi, IconWand, IconBook,
   IconConvert, IconSun, IconMoon,
 } from './icons';
@@ -51,7 +51,7 @@ export default function Rail(p: Props) {
         aria-pressed={p.treeOpen}
         onClick={p.onToggleTree}
       >
-        <IconFolder />
+        <IconTree />
       </button>
       <button className="rail-btn" data-tip="快速搜索（Ctrl+K）" aria-label="搜索" onClick={p.onSearch}>
         <IconSearch />

@@ -51,6 +51,17 @@ below. Keep this file, plus the per-asset NOTICE files, when redistributing.
 
 Tauri (Apache-2.0 / MIT) is used for the optional desktop shell.
 
+## Icon geometry
+
+All UI icons in `src/views/icons.tsx` are drawn for this project on a 24 px grid
+(1.75 px stroke) except one:
+
+- `IconBrain` (brain-atlas navigation entry): outline adapted from
+  **Tabler Icons** (https://github.com/tabler/tabler-icons), MIT license.
+  The remaining icons are original.
+
 Region coordinates in public/brain/regions.json are centroids computed offline
 from the Harvard-Oxford label volumes. Region names come from the FSL atlas XML
-files (HarvardOxford-Cortical-Lateralized.xml, HarvardOxford-Subcortical.xml).
+files (HarvardOxford-Cortical-Lateralized.xml, HarvardOxford-Subcortical.xml);
+Chinese names were added by this project and follow standard Chinese
+neuroanatomy terminology (人卫《系统解剖学》《神经解剖学》译名).
