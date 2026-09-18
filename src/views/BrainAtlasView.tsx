@@ -155,7 +155,7 @@ export default function BrainAtlasView({ onClose }: Props) {
         </div>
         <div className="panel__body brain-body">
           <div className="brain-side">
-            <input className="brain-search" placeholder="搜索脑区" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <input className="brain-search" placeholder="搜索脑区（中文 / English）" value={query} onChange={(e) => setQuery(e.target.value)} />
             <div className="brain-tabs">
               {groups.map((g) => (
                 <button key={g.id} className={`btn-small${g.id === active?.id ? ' active' : ''}`} onClick={() => setGroupId(g.id)}>
@@ -170,6 +170,8 @@ export default function BrainAtlasView({ onClose }: Props) {
                   key={r.value}
                   className={`brain-item${selected?.value === r.value ? ' on' : ''}`}
                   onClick={() => focus(r)}
+                  /* 中文名是主标签，英文原名留在悬停提示里——医学生两种叫法都要认 */
+                  title={r.en}
                 >
                   <span className="brain-tag">{regionSide(r)}</span>
                   <span className="brain-name">{regionLabel(r)}</span>
@@ -206,7 +208,12 @@ export default function BrainAtlasView({ onClose }: Props) {
             <div className="brain-readout">
               <span>MNI 坐标</span>
               <b>{mni === null ? '--' : `${mni[0]}, ${mni[1]}, ${mni[2]}`}</b>
-              {selected !== null && <span className="brain-readout-name">{regionLabel(selected)}</span>}
+              {selected !== null && (
+                <>
+                  <span className="brain-readout-name">{regionLabel(selected)}</span>
+                  <span className="brain-readout-en">{selected.en}</span>
+                </>
+              )}
             </div>
             <div className="brain-legend muted">数据：MNI152 模板 · Harvard-Oxford 图谱（研究用途）</div>
           </div>

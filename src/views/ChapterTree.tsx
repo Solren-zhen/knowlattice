@@ -314,7 +314,7 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
               reader.onload = async () => {
                 try {
                   const n = await onImport(reader.result as string);
-                  toast(`已恢复 ${n} 篇笔记`, 'ok');
+                  toast(`已恢复 ${n} 篇笔记（备份里的题库 / 复习进度也已一并导入）`, 'ok');
                 } catch (err) {
                   toast((err as Error).message, 'err');
                 }
