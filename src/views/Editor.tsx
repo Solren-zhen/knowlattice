@@ -1,21 +1,89 @@
 /**
  * 编辑器（M1+M3）：CodeMirror 6 + Markdown + [[双链自动补全。
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { EditorState } from '@codemirror/state';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
 import {
   autocompletion,
   closeBrackets,
   closeBracketsKeymap,
+  startCompletion,
   type CompletionContext,
 } from '@codemirror/autocomplete';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { livePreview, toggleLivePreview } from '../core/livePreview';
+import { toggleMark, wikiLink } from '../core/mdFormat';
+import { insertTable, tableSkeleton, TABLE_MAX_COLS, TABLE_MAX_ROWS, textToTable } from '../core/mdTable';
+import { toast } from '../core/feedback';
 import { IconEye } from './icons';
+
+/** 行内标记：工具栏按钮与快捷键共用同一段实现（见 applyMark / applyWikiLink）。 */
+const MARK_BOLD = ['**', '加粗内容'] as const;
+const MARK_HIGHLIGHT = ['==', '高亮内容'] as const;
+const MARK_ITALIC = ['*', '斜体内容'] as const;
+
+const applyMark = (v: EditorView, [marker, placeholder]: readonly [string, string]) => {
+  const { from, to } = v.state.selection.main;
+  v.dispatch(toggleMark(v.state.doc.toString(), from, to, marker, placeholder));
+};
+
+/** 选区的规范化边界：从右往左拖选时 CM 的 from/to 会反向，直接用会取到空串或非法区间 */
+const selBounds = (v: EditorView) => {
+  const { from, to } = v.state.selection.main;
+  return from <= to ? { from, to } : { from: to, to: from };
+};
+
+const applyWikiLink = (v: EditorView) => {
+  const { from, to } = v.state.selection.main;
+  v.dispatch(wikiLink(v.state.doc.toString(), from, to));
+  // 插入 [[]] 是程序化改动，不会触发补全的「打字激活」，于是工具栏/快捷键插入后
+  // 输入中文永远等不到候选（手打 [[ 会弹，是因为那两个键本身激活了补全）。
+  // 这里显式拉一次候选，让「插入双链就能从列表里挑笔记」名副其实。
+  if (from === to) startCompletion(v);
+};
+
+/**
+ * 写剪贴板：优先 Clipboard API；非安全上下文或未授权时退回临时 textarea + execCommand。
+ * 自定义右键菜单接管了系统菜单，复制/剪切必须自己可靠地完成。
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // 落到下面的兜底
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('aria-hidden', 'true');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 读剪贴板：只有 Clipboard API 一条路，失败返回 null 由调用方提示（按 Ctrl+V 仍可粘贴） */
+async function readClipboardText(): Promise<string | null> {
+  try {
+    if (navigator.clipboard?.readText) return await navigator.clipboard.readText();
+  } catch {
+    // 未授权 / 非安全上下文
+  }
+  return null;
+}
 
 interface Props {
   value: string;
@@ -42,6 +110,22 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   const attachRef = useRef(onAttach);
   const openLinkRef = useRef(onOpenLink);
   const readFileRef = useRef(readFile);
+  /** 右键菜单位置（视口坐标）；null = 关闭。CM 的事件处理器只建一次，用 ref 改状态 */
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const menuAtRef = useRef(setMenuAt);
+  /** 简易表格面板：点格子选行列，或把选中的多行文字一键转成表格 */
+  const [tableOpen, setTableOpen] = useState(false);
+  /** 面板打开时用到的选区文本：由 updateListener 同步，渲染期不再直接读 viewRef（保持渲染纯净） */
+  const [selText, setSelText] = useState('');
+  const tableOpenRef = useRef(false);
+  /** 菜单根节点：打开后量尺寸做视口夹紧（锚到触发按钮，不再依赖工具栏硬编码高度） */
+  const tableMenuRef = useRef<HTMLDivElement>(null);
+  /** 行列提示直接改 DOM 文本，不走 React 状态：悬停不必触发重渲染 */
+  const tableHeadRef = useRef<HTMLDivElement>(null);
+  /** 菜单根节点：打开后要量尺寸做视口夹紧，键盘唤出时还要把焦点放进去 */
+  const menuRef = useRef<HTMLDivElement>(null);
+  /** 是否键盘唤出的菜单（Shift+F10 / 菜单键）：鼠标右键不该抢走编辑器焦点 */
+  const menuFocusRef = useRef(false);
   /** 程序化同步内容时置 true：dispatch 是同步的，可拦住 updateListener 的回声 onChange */
   const applyingRef = useRef(false);
   onChangeRef.current = onChange;
@@ -52,6 +136,8 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   attachRef.current = onAttach;
   openLinkRef.current = onOpenLink;
   readFileRef.current = readFile;
+  menuAtRef.current = setMenuAt;
+  tableOpenRef.current = tableOpen;
 
   // 图片 → Blob 直接入库（不转 base64，避免内存膨胀）→ 插入 markdown 引用
   const insertImage = async (file: File) => {
@@ -97,6 +183,41 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
           lineNumbers(),
           history(),
           keymap.of([
+            // 撤销/重做无条件消费按键。CM 的 undo() 在撤销栈为空时返回 false，按键就没人拦，
+            // 浏览器会对 contenteditable 跑原生撤销：把 DOM 退回挂载时的空内容，CM 再把这次
+            // DOM 变化当成用户输入吃进文档——于是「刚打开笔记按一次 Ctrl+Z」整篇清空并被自动保存。
+            {
+              key: 'Mod-z',
+              run: (v) => { undo(v); return true; },
+            },
+            {
+              key: 'Mod-y',
+              run: (v) => { redo(v); return true; },
+            },
+            {
+              key: 'Mod-Shift-z',
+              run: (v) => { redo(v); return true; },
+            },
+            // 行内格式快捷键放在最前：Mod-b / Mod-h / Alt-k 不与 defaultKeymap、
+            // searchKeymap 里的任何绑定冲突，顺序在前保证不被覆盖。
+            {
+              key: 'Mod-b',
+              run: (v) => { applyMark(v, MARK_BOLD); return true; },
+            },
+            {
+              key: 'Mod-h',
+              run: (v) => { applyMark(v, MARK_HIGHLIGHT); return true; },
+            },
+            {
+              key: 'Mod-i',
+              run: (v) => { applyMark(v, MARK_ITALIC); return true; },
+            },
+            // 双链的主键是 Alt+K（两个键）：macOS 上 Option+K 是死键（打出 ˚），改用 ⌘+⌥+K。
+            {
+              key: 'Alt-k',
+              mac: 'Mod-Alt-k',
+              run: (v) => { applyWikiLink(v); return true; },
+            },
             ...closeBracketsKeymap,
             ...defaultKeymap,
             ...historyKeymap,
@@ -111,6 +232,14 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
           livePreview(() => readFileRef.current),
           EditorView.lineWrapping,
           EditorView.domEventHandlers({
+            // 原生撤销/重做事件同样要拦（键盘之外还有菜单等入口），否则它会绕过 CM 的撤销栈
+            beforeinput: (e) => {
+              if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
+                e.preventDefault();
+                return true;
+              }
+              return false;
+            },
             click: (e) => {
               const view = viewRef.current;
               if (!view) return false;
@@ -153,6 +282,18 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               }
               return false;
             },
+            // 选中文字后右键 → 打开格式菜单（没有选区时交回系统菜单）
+            contextmenu: (e) => {
+              const view = viewRef.current;
+              if (!view || view.state.selection.main.empty) return false;
+              e.preventDefault();
+              // 只用键盘唤出（Shift+F10 / 菜单键）时把焦点移进菜单。实测鼠标右键的 contextmenu
+              // 事件 detail 也是 0，唯一可靠的区分是 button：右键为 2，键盘触发为 -1/0。
+              // macOS 的 Ctrl+点击是鼠标手势（button 0 + ctrlKey），同样不该抢焦点。
+              menuFocusRef.current = e.button !== 2 && !e.ctrlKey;
+              menuAtRef.current({ x: e.clientX, y: e.clientY });
+              return true;
+            },
             paste: (e) => {
               const items = e.clipboardData?.items;
               if (!items) return false;
@@ -180,6 +321,13 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
           }),
           EditorView.updateListener.of((u) => {
             if (u.docChanged && !applyingRef.current) onChangeRef.current(u.state.doc.toString());
+            // 表格面板打开时同步选区，供「转成表格」入口使用：渲染期不再直接读 viewRef，
+            // 面板打开后选区变化也能即时刷新（旧写法读的是上一次渲染时的旧选区）。
+            if (u.selectionSet && tableOpenRef.current) {
+              const s = u.state.selection.main;
+              const text = s.empty ? '' : u.state.sliceDoc(s.from, s.to);
+              setSelText((prev) => (prev === text ? prev : text));
+            }
           }),
         ],
       }),
@@ -198,6 +346,9 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
       applyingRef.current = true;
       view.dispatch({
         changes: { from: 0, to: cur.length, insert: value },
+        // 装载笔记这一步不进撤销栈：否则刚打开一篇笔记按 Ctrl+Z 会把整篇撤成空白
+        // （切换笔记时撤销还会把上一篇的内容贴进这一篇），自动保存随后就把空白存下去。
+        annotations: Transaction.addToHistory.of(false),
       });
       applyingRef.current = false;
     }
@@ -207,29 +358,135 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   const draftRef = useRef(onDraft);
   draftRef.current = onDraft;
 
+  /** 关闭菜单。refocus=true 时把焦点还给编辑器（Esc、选中某一项之后），点别处则不动焦点 */
+  const closeMenu = (refocus = false) => {
+    setMenuAt(null);
+    if (refocus) viewRef.current?.focus();
+  };
+
+  // 菜单打开后：夹进视口（贴着窗口底边右键时整块菜单会跑到屏幕外），
+  // 键盘唤出时把焦点放进第一项（Shift+F10 能打开却按不到任何一项）。
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const pad = 8;
+    const r = el.getBoundingClientRect();
+    const dx = r.right > innerWidth - pad ? innerWidth - pad - r.right : r.left < pad ? pad - r.left : 0;
+    const dy = r.bottom > innerHeight - pad ? innerHeight - pad - r.bottom : r.top < pad ? pad - r.top : 0;
+    if (dx || dy) el.style.transform = `translate(${Math.round(dx)}px, ${Math.round(dy)}px)`;
+    if (menuFocusRef.current) el.querySelector<HTMLButtonElement>('.cm-ctx-item')?.focus();
+  }, [menuAt]);
+
+  /** ↑↓ / Home / End 在菜单项之间移动焦点；没有焦点时从第一项（或最后一项）开始 */
+  const moveMenuFocus = (delta: 1 | -1 | 'home' | 'end') => {
+    const el = menuRef.current;
+    if (!el) return;
+    const items = [...el.querySelectorAll<HTMLButtonElement>('.cm-ctx-item')];
+    if (items.length === 0) return;
+    if (delta === 'home') return items[0].focus();
+    if (delta === 'end') return items[items.length - 1].focus();
+    const cur = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = cur < 0 ? (delta > 0 ? 0 : items.length - 1) : (cur + delta + items.length) % items.length;
+    items[next].focus();
+  };
+
+  // 右键菜单：点别处 / Esc / 改窗口大小即关闭。菜单里按方向键不关（那是菜单自己的导航）
+  useEffect(() => {
+    if (!menuAt) return;
+    const onPointer = () => setMenuAt(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') return closeMenu(true);
+      // 焦点不在菜单里（鼠标唤出，焦点还在编辑器）：任何按键都关掉菜单，不挡打字
+      if (!menuRef.current?.contains(e.target as Node)) return setMenuAt(null);
+      // 焦点在菜单里（键盘唤出）：方向键/回车/Tab 留给菜单，其它按键关菜单并把焦点还给
+      // 编辑器，否则字母会被聚焦的按钮吞掉、菜单还赖着不走、接下来的输入也落不到正文
+      const MENU_KEYS = ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Tab', 'Enter', ' '];
+      if (!MENU_KEYS.includes(e.key)) closeMenu(true);
+    };
+    const onBlur = () => setMenuAt(null);
+    window.addEventListener('pointerdown', onPointer);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('resize', onBlur);
+    return () => {
+      window.removeEventListener('pointerdown', onPointer);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('resize', onBlur);
+    };
+  }, [menuAt]);
+
   // ---------- 格式工具栏：让新手点按钮完成语法操作（鼠标按下不抢编辑器焦点） ----------
   const withView = (fn: (v: EditorView) => void) => () => {
     const v = viewRef.current;
     if (v) fn(v);
   };
+
+  /** 表格面板：点外部或 Esc 关闭（与右键菜单同一套交互约定） */
+  useEffect(() => {
+    if (!tableOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest?.('.cm-table-menu') || t.closest?.('[data-table-btn]')) return;
+      setTableOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setTableOpen(false); };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [tableOpen]);
+
+  // 表格菜单：打开后夹进视口（按钮靠右时菜单会溢出到屏幕外），与右键菜单同一套处理
+  useLayoutEffect(() => {
+    const el = tableMenuRef.current;
+    if (!el) return;
+    const pad = 8;
+    const r = el.getBoundingClientRect();
+    const dx = r.right > innerWidth - pad ? innerWidth - pad - r.right : r.left < pad ? pad - r.left : 0;
+    const dy = r.bottom > innerHeight - pad ? innerHeight - pad - r.bottom : r.top < pad ? pad - r.top : 0;
+    if (dx || dy) el.style.transform = `translate(${Math.round(dx)}px, ${Math.round(dy)}px)`;
+  }, [tableOpen]);
+
+  /** 插一张空白表格：光标处另起一段，光标选中表头第一格 */
+  const insertEmptyTable = (rows: number, cols: number) => {
+    const v = viewRef.current;
+    if (!v) return;
+    const { from, to } = selBounds(v);
+    v.dispatch(insertTable(v.state.doc.toString(), from, to, tableSkeleton(rows, cols)));
+    setTableOpen(false);
+    if (tableHeadRef.current) tableHeadRef.current.textContent = '拖选行列';
+    v.focus();
+  };
+
+  /** 把选中的多行文字按分隔符转成表格 */
+  const convertSelectionToTable = () => {
+    const v = viewRef.current;
+    if (!v) return;
+    const { from, to } = selBounds(v);
+    const table = textToTable(v.state.sliceDoc(from, to));
+    if (!table) return;
+    v.dispatch(insertTable(v.state.doc.toString(), from, to, table));
+    setTableOpen(false);
+    v.focus();
+  };
+
   const toolbarActions: Array<{ label: ReactNode; title: string; run: (v: EditorView) => void }> = [
     { label: '↺', title: '撤销（Ctrl/⌘+Z）', run: (v) => undo(v) },
     { label: '↻', title: '重做（Ctrl/⌘+Shift+Z 或 Ctrl+Y）', run: (v) => redo(v) },
     {
-      label: <b>B</b>, title: '加粗（选中后点击，或手动 **文字**）',
-      run: (v) => {
-        const { from, to, empty } = v.state.selection.main;
-        const text = empty ? '加粗内容' : v.state.sliceDoc(from, to);
-        v.dispatch(v.state.replaceSelection(`**${text}**`));
-      },
+      label: <b>B</b>, title: '加粗（Ctrl/⌘+B，再按一次取消）',
+      run: (v) => applyMark(v, MARK_BOLD),
     },
     {
-      label: '==', title: '高亮（选中后点击，或手动 ==文字==）',
-      run: (v) => {
-        const { from, to, empty } = v.state.selection.main;
-        const text = empty ? '高亮内容' : v.state.sliceDoc(from, to);
-        v.dispatch(v.state.replaceSelection(`==${text}==`));
-      },
+      label: '==', title: '高亮（Ctrl/⌘+H，再按一次取消）',
+      run: (v) => applyMark(v, MARK_HIGHLIGHT),
+    },
+    {
+      label: <i>I</i>, title: '斜体（Ctrl/⌘+I，再按一次取消）',
+      run: (v) => applyMark(v, MARK_ITALIC),
     },
     {
       label: '•', title: '本行变为条目（- 开头，再点一次取消）',
@@ -242,12 +499,8 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
     { label: '⇥', title: '缩进一层（Tab）', run: (v) => indentMore(v) },
     { label: '⇤', title: '反缩进（Shift+Tab）', run: (v) => indentLess(v) },
     {
-      label: '[[', title: '插入双链，接着输入笔记名可自动补全',
-      run: (v) => {
-        v.dispatch(v.state.replaceSelection('[[]]'));
-        const pos = v.state.selection.main.head - 2; // 光标落在 [[ 和 ]] 之间
-        v.dispatch({ selection: { anchor: pos } });
-      },
+      label: '[[', title: '插入双链（Alt+K），接着输入笔记名可自动补全',
+      run: (v) => applyWikiLink(v),
     },
     {
       label: '诀', title: '插入口诀行',
@@ -262,6 +515,50 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
       },
     },
   ];
+
+  /** 选中文字后的右键菜单：格式一栏（另一种施加方式是快捷键），都不需要手打标记符 */
+  const CTX_ACTIONS: Array<{ label: string; keys: string; run: (v: EditorView) => void }> = [
+    { label: '加粗', keys: 'Ctrl+B', run: (v) => applyMark(v, MARK_BOLD) },
+    { label: '高亮', keys: 'Ctrl+H', run: (v) => applyMark(v, MARK_HIGHLIGHT) },
+    { label: '斜体', keys: 'Ctrl+I', run: (v) => applyMark(v, MARK_ITALIC) },
+    { label: '插入双链', keys: 'Alt+K', run: (v) => applyWikiLink(v) },
+  ];
+
+  /** 接管了系统右键菜单，就得把它最常用的三项补回来，否则选中文字后点不到复制/粘贴 */
+  const CTX_EDIT: Array<{ label: string; keys: string; run: (v: EditorView) => void }> = [
+    {
+      label: '复制', keys: 'Ctrl+C',
+      run: (v) => {
+        const { from, to } = selBounds(v);
+        void copyText(v.state.sliceDoc(from, to)).then((ok) => {
+          if (!ok) toast('复制失败：浏览器没有授权剪贴板', 'err');
+        });
+      },
+    },
+    {
+      label: '剪切', keys: 'Ctrl+X',
+      run: (v) => {
+        const { from, to } = selBounds(v);
+        void copyText(v.state.sliceDoc(from, to)).then((ok) => {
+          if (ok) v.dispatch({ changes: { from, to, insert: '' } });
+          else toast('剪切失败：浏览器没有授权剪贴板', 'err');
+        });
+      },
+    },
+    {
+      label: '粘贴', keys: 'Ctrl+V',
+      run: (v) => {
+        void readClipboardText().then((text) => {
+          if (text) v.dispatch(v.state.replaceSelection(text));
+          else toast('读不到剪贴板，直接按 Ctrl+V 即可粘贴', 'info');
+        });
+      },
+    },
+  ];
+
+  const selLines = selText ? selText.split(/\r?\n/).filter((l) => l.trim()).length : 0;
+  /** 面板打开且选区能拆成表格时，给出「转成表格」入口 */
+  const convertible = tableOpen && selLines >= 2 ? textToTable(selText) : null;
 
   return (
     <div className="editor-wrap">
@@ -278,6 +575,60 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
             {a.label}
           </button>
         ))}
+        <span className="cm-table-anchor">
+          <button
+            className={`cm-tool-btn ${tableOpen ? 'on' : ''}`}
+            data-table-btn="1"
+            data-tip="插入表格：点格子选行列；选中多行文字可一键转成表格"
+            aria-label="插入表格"
+            aria-expanded={tableOpen}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              if (!tableOpen) {
+                const v = viewRef.current;
+                const s = v?.state.selection.main;
+                setSelText(s && !s.empty && v ? v.state.sliceDoc(s.from, s.to) : '');
+              }
+              setTableOpen((o) => !o);
+            }}
+          >
+            ▦
+          </button>
+          {tableOpen && (
+            <div className="cm-table-menu" ref={tableMenuRef} role="dialog" aria-label="插入表格">
+              <div className="cm-table-head" ref={tableHeadRef}>拖选行列</div>
+              <div className="cm-table-grid" onMouseLeave={() => { if (tableHeadRef.current) tableHeadRef.current.textContent = '拖选行列'; }}>
+                {Array.from({ length: TABLE_MAX_ROWS }, (_, r) => (
+                  <div className="cm-table-row" key={r}>
+                    {Array.from({ length: TABLE_MAX_COLS }, (_, c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        className="cm-table-cell"
+                        aria-label={`${r + 1} 行 ${c + 1} 列`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onMouseEnter={() => { if (tableHeadRef.current) tableHeadRef.current.textContent = `${r + 1} × ${c + 1} 表格`; }}
+                        onFocus={() => { if (tableHeadRef.current) tableHeadRef.current.textContent = `${r + 1} × ${c + 1} 表格`; }}
+                        onClick={() => insertEmptyTable(r + 1, c + 1)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+              {convertible && (
+                <button
+                  type="button"
+                  className="cm-table-convert"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={convertSelectionToTable}
+                >
+                  把选中的 {selLines} 行转成表格
+                </button>
+              )}
+              <div className="cm-table-hint muted">点格子插入表格；选中多行文字可一键转表格</div>
+            </div>
+          )}
+        </span>
         <button
           className={`cm-tool-btn ${liveOn ? 'on' : ''}`}
           data-tip="实时预览：光标所在行显示源码，其余行显示排版效果（关闭则全部显示源码）"
@@ -291,9 +642,53 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
         >
           <IconEye />
         </button>
-        <span className="cm-toolbar-hint muted">Ctrl+Z 撤销 · Ctrl+Y 重做 · Tab 缩进 · [[ 双链 · **加粗** · ==高亮== · Ctrl+S 保存</span>
+        <span className="cm-toolbar-hint muted">选中文字后右键，或按 Ctrl+B 加粗 / Ctrl+H 高亮 / Ctrl+I 斜体 / Alt+K 双链（标记符不会显示在正文里）</span>
       </div>
       <div className="editor-host" ref={hostRef} />
+      {menuAt && (
+        <div
+          className="cm-ctx-menu"
+          ref={menuRef}
+          style={{ left: menuAt.x, top: menuAt.y }}
+          role="menu"
+          aria-label="选中文字的格式与编辑"
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); moveMenuFocus(1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); moveMenuFocus(-1); }
+            else if (e.key === 'Home') { e.preventDefault(); moveMenuFocus('home'); }
+            else if (e.key === 'End') { e.preventDefault(); moveMenuFocus('end'); }
+          }}
+        >
+          {CTX_ACTIONS.map((a) => (
+            <button
+              key={a.label}
+              className="cm-ctx-item"
+              type="button"
+              role="menuitem"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { withView(a.run)(); closeMenu(true); }}
+            >
+              <span>{a.label}</span>
+              <kbd>{a.keys}</kbd>
+            </button>
+          ))}
+          <div className="cm-ctx-sep" role="separator" />
+          {CTX_EDIT.map((a) => (
+            <button
+              key={a.label}
+              className="cm-ctx-item"
+              type="button"
+              role="menuitem"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { withView(a.run)(); closeMenu(true); }}
+            >
+              <span>{a.label}</span>
+              <kbd>{a.keys}</kbd>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

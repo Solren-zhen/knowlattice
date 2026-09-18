@@ -9,6 +9,8 @@
  * 也不该让每篇不含公式的笔记都去下载数学字体。
  */
 
+import { isPathwayLang, renderPathwaySvg } from './pathway';
+
 type MdInstance = InstanceType<(typeof import('markdown-it'))['default']>;
 
 let plainPromise: Promise<MdInstance> | null = null;
@@ -42,6 +44,14 @@ async function build(withMath: boolean): Promise<MdInstance> {
     const plugin = inner?.default ?? wrapper.default;
     md.use(plugin as never);
   }
+  const fenceRule = md.renderer.rules.fence;
+  md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+    const info = (tokens[idx].info || '').trim().split(/\s+/)[0];
+    if (isPathwayLang(info)) return renderPathwaySvg(tokens[idx].content);
+    return fenceRule
+      ? fenceRule(tokens, idx, options, env, self)
+      : self.renderToken(tokens, idx, options);
+  };
   return md;
 }
 

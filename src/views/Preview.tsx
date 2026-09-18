@@ -125,7 +125,7 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
           <div className="teach-step"><kbd>回车</kbd><span>自动续写下一条，不用输任何符号</span></div>
           <div className="teach-step"><kbd>Tab</kbd><span>缩进一层，就是子要点</span></div>
           <div className="teach-step"><kbd>[[</kbd><span>链接到其他笔记，形成知识网</span></div>
-          <div className="teach-step"><kbd>==</kbd><span>高亮重点；**文字** 加粗关键词</span></div>
+          <div className="teach-step"><kbd>Ctrl+B</kbd><span>加粗关键词；Ctrl+H 高亮重点。选中文字后右键也行，不用手打符号</span></div>
         </div>
         <p className="muted shortcut-hint">
           <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存 · <kbd>Alt</kbd>+<kbd>←→</kbd> 后退前进
