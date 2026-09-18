@@ -4,7 +4,7 @@
  * 点任何位置即回到源码可编辑，无需学习任何 md 语法。
  *
  * 支持渲染：标题 / 列表（有序自动编号）/ 引用块 / 分割线 /
- * **加粗** / *斜体* / ==高亮== / `行内代码` / 围栏代码块 /
+ * **加粗** / *斜体* / ***粗斜体*** / ==高亮== / `行内代码` / 围栏代码块 /
  * 图片 ![](路径) / Obsidian 嵌入 ![[图片.png]] / ![[笔记]] / 标准链接 / [[双链]] / 「属性: 」键加粗。
  * 标记符（** == ` *）一律隐藏，只留排版效果。
  * 未覆盖的语法保持源码原样显示，不破坏可编辑性。
@@ -19,6 +19,7 @@
  */
 import { EditorState, StateEffect, StateField, RangeSet, type Extension, type Range } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
+import { isPathwayLang, renderPathwaySvg } from './pathway';
 
 export type ReadFileFn = (path: string) => string | undefined;
 
@@ -52,23 +53,96 @@ class HrWidget extends WidgetType {
   }
 }
 
-/** 行内排版部件：整段替换，标记符随之隐藏（加粗/斜体/高亮/行内代码） */
-class InlineMarkWidget extends WidgetType {
-  private cls: string;
-  private text: string;
-  constructor(cls: string, text: string) {
-    super();
-    this.cls = cls;
-    this.text = text;
-  }
-  ignoreEvent() { return false; }
-  eq(o: InlineMarkWidget) { return o.cls === this.cls && o.text === this.text; }
+/**
+ * 行内标记的零宽部件：只吃掉「首尾标记符」本身（`**` / `==` / `` ` ``），
+ * 中间内容保持原文本、只是加一层样式。
+ *
+ * 关键差异：以前是「整段 replace」——内容变成原子的，光标进不去，只能靠「光标行显示源码」
+ * 让人看得见、改得动，于是 `**` 就露出来了。现在标记符单独吃掉、内容不原子，
+ * 光标可以自由落进加粗文字里继续改字，标记符在任何行（含光标行）都不显示。
+ */
+class ZeroWidget extends WidgetType {
+  eq() { return true; }
   toDOM() {
     const s = document.createElement('span');
-    s.className = this.cls;
-    s.textContent = this.text;
+    s.className = 'lp-mark-hidden';
     return s;
   }
+}
+
+// ---------- 行内语法扫描（纯函数，便于单测） ----------
+
+/** 行内语法种类：前四种整段变成原子部件，后五种只吃掉标记符、内容仍可编辑 */
+export type InlineKind = 'embed' | 'img' | 'wiki' | 'link' | 'tri' | 'bold' | 'code' | 'highlight' | 'italic';
+
+/** 命中一段行内语法：位置 + 种类 + 优先级 + 两个捕获组（去重叠与渲染由调用方负责） */
+export interface InlineHit {
+  from: number;
+  to: number;
+  prio: number;
+  kind: InlineKind;
+  a: string;
+  b: string;
+}
+
+/** 只吃标记符的种类的标记长度：做嵌套判定时要扣掉外层标记符本身，避免两层标记符相撞 */
+const DELIM_LEN: Partial<Record<InlineKind, number>> = { tri: 3, bold: 2, code: 1, highlight: 2, italic: 1 };
+
+/** 原子部件（嵌入/图片/双链/链接）：内部没有可标注的文本，光标也进不去 */
+const ATOMIC: ReadonlySet<InlineKind> = new Set<InlineKind>(['embed', 'img', 'wiki', 'link']);
+
+/**
+ * 扫描一行里所有行内语法候选，按优先级排序（数值小的先渲染）。
+ * 优先级：嵌入 > 标准图片 > 双链 > 链接 > 粗斜体 > 加粗 > 行内代码 > 高亮 > 斜体。
+ *
+ * 加粗的内容为什么不是 `\*\*([^*]+)\*\*`：那种写法遇到「内容里带单个星号」（`**a*b**`）
+ * 或「三星号粗斜体」（`***x***`）就匹配不上，星号会裸露在正文里——而 `***…***` 正是
+ * Word 转换器（convert.ts）会产出的写法。这里改成「非星号字符 或 单个星号（后面不跟
+ * 星号）」的内容式，并在开闭处用 `(?<!\*)` / `(?!\*)` 卡住边界：三星号整段交给 tri，
+ * `**a*b**` 交给 bold，两边都不再漏标记符。
+ */
+export function scanInline(lineText: string): InlineHit[] {
+  const rules: Array<[RegExp, number, InlineKind]> = [
+    [/!\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]/g, 0, 'embed'],
+    [/!\[([^\]]*)\]\(([^)]+)\)/g, 1, 'img'],
+    [/(?<!!)\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]/g, 2, 'wiki'],
+    [/(?<!!)\[([^\]\n]+?)\]\(([^)]+)\)/g, 3, 'link'],
+    [/(?<!\*)\*\*\*(?!\*)((?:[^*\n]|\*(?!\*\*))+?)\*\*\*(?!\*)/g, 4, 'tri'],
+    [/(?<!\*)\*\*(?!\*)((?:[^*\n]|\*(?!\*))+?)\*\*(?!\*)/g, 5, 'bold'],
+    [/`([^`\n]+)`/g, 6, 'code'],
+    [/==([^=\n]+)==/g, 7, 'highlight'],
+    [/(?<!\*)\*(?!\*)(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/g, 8, 'italic'],
+  ];
+  const hits: InlineHit[] = [];
+  for (const [re, prio, kind] of rules) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(lineText))) {
+      hits.push({ from: m.index, to: m.index + m[0].length, prio, kind, a: m[1] ?? '', b: m[2] ?? '' });
+    }
+  }
+  hits.sort((x, y) => x.prio - y.prio || x.from - y.from);
+  return hits;
+}
+
+/**
+ * 从候选里挑出真正要渲染的那些（顺序即渲染顺序）：与已接受范围重叠的丢弃，
+ * 唯一例外是「只吃标记符」的两层嵌套——`==*高亮*==` 的内层星号必须一起吃掉。
+ * 嵌套要求内层完全落在外层的内容区间（扣掉外层标记符）里：两层标记符一旦重叠，
+ * CM 的 replace 装饰会直接抛错。这段判定单独抽出来就是为了能单测。
+ */
+export function pickInline(hits: InlineHit[], editable = false): InlineHit[] {
+  const taken: InlineHit[] = [];
+  for (const c of hits) {
+    if (editable && ATOMIC.has(c.kind)) continue;
+    const clash = taken.some((t) => {
+      if (!(c.from < t.to && c.to > t.from)) return false;
+      const d = DELIM_LEN[t.kind] ?? 0;
+      return !(d > 0 && DELIM_LEN[c.kind] && c.from >= t.from + d && c.to <= t.to - d);
+    });
+    if (clash) continue;
+    taken.push(c);
+  }
+  return taken;
 }
 
 /** 表格块：整块替换为真实 <table>（跨多行，须为块级部件 + block 装饰） */
@@ -210,8 +284,24 @@ class CodeBlockWidget extends WidgetType {
   }
 }
 
-const isTableRow = (t: string) => /^\s*\|.*\|\s*$/.test(t);
-/** 分隔行：形如 | --- | :---: | ---: |，须含至少一个连字符 */
+/** 通路图部件：```pathway 块 → 内联 SVG（节点可点击跳笔记，事件委托同 .lp-wiki） */
+class PathwayWidget extends WidgetType {
+  private text: string;
+  constructor(text: string) {
+    super();
+    this.text = text;
+  }
+  ignoreEvent() { return false; }
+  eq(o: PathwayWidget) { return o.text === this.text; }
+  toDOM() {
+    const wrap = document.createElement('div');
+    wrap.className = 'lp-pathway';
+    wrap.innerHTML = renderPathwaySvg(this.text);
+    return wrap;
+  }
+}
+
+const isTableRow = (t: string) => /^\s*\|.*\|\s*$/.test(t);/** 分隔行：形如 | --- | :---: | ---: |，须含至少一个连字符 */
 const isTableSep = (t: string) => /^\s*\|[\s:|-]+\|\s*$/.test(t) && /-/.test(t);
 
 // ---------- 开关 ----------
@@ -237,46 +327,25 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
   const pushMark = (from: number, to: number, cls: string) => ranges.push(Decoration.mark({ class: cls }).range(from, to));
   const pushReplace = (from: number, to: number, w: WidgetType, block = false) =>
     ranges.push(Decoration.replace({ widget: w, block }).range(from, to));
+  /** 行内标记：首尾标记符换成零宽部件，中间内容原样保留并加样式（见 ZeroWidget） */
+  const pushDelim = (from: number, to: number, dlen: number, cls: string) => {
+    if (to - from <= dlen * 2) return; // 空内容不成对，保持源码
+    pushReplace(from, from + dlen, new ZeroWidget());
+    pushMark(from + dlen, to - dlen, cls);
+    pushReplace(to - dlen, to, new ZeroWidget());
+  };
   const readFile = getReadFile?.();
   /** 嵌入名 → 附件内容（先按原名，再按 _attachments/ 约定路径） */
   const resolveImage = (name: string): string | undefined =>
     readFile?.(name) ?? readFile?.(`_attachments/${name}`);
 
   /**
-   * 行内标记：收集候选 → 按优先级去重叠（replace 部件不允许互相嵌套）→ 渲染。
-   * 优先级：嵌入 > 标准图片 > 双链 > 链接 > 加粗 > 行内代码 > 高亮 > 斜体。
+   * 行内标记：scanInline 扫候选 → pickInline 去重叠 → 渲染。
+   * editable=true（光标所在行）：只渲染「标记符被吃掉、内容仍可编辑」的行内样式；
+   * 嵌入/图片/双链/链接会变成原子部件、光标进不去，那一行就不渲染它们，保留源码。
    */
-  const inlineMarks = (lineText: string, start: number) => {
-    const embedRe = /!\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]/g;
-    const imgRe = /!\[([^\]]*)\]\(([^)]+)\)/g;
-    const wikiRe = /(?<!!)\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]/g;
-    const linkRe = /(?<!!)\[([^\]\n]+?)\]\(([^)]+)\)/g;
-    const boldRe = /\*\*([^*\n]+)\*\*/g;
-    const codeRe = /`([^`\n]+)`/g;
-    const hlRe = /==([^=\n]+)==/g;
-    const itRe = /\*(?!\s)([^*\n]+?)(?<!\s)\*/g;
-
-    type Cand = { from: number; to: number; prio: number; kind: string; a: string; b: string };
-    const cands: Cand[] = [];
-    const collect = (re: RegExp, prio: number, kind: string) => {
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(lineText))) cands.push({ from: m.index, to: m.index + m[0].length, prio, kind, a: m[1] ?? '', b: m[2] ?? '' });
-    };
-    collect(embedRe, 0, 'embed');
-    collect(imgRe, 1, 'img');
-    collect(wikiRe, 2, 'wiki');
-    collect(linkRe, 3, 'link');
-    collect(boldRe, 4, 'bold');
-    collect(codeRe, 5, 'code');
-    collect(hlRe, 6, 'highlight');
-    collect(itRe, 7, 'italic');
-
-    cands.sort((x, y) => x.prio - y.prio || x.from - y.from);
-    const taken: Array<{ from: number; to: number }> = [];
-    const hits = (from: number, to: number) => taken.some((t) => from < t.to && to > t.from);
-    for (const c of cands) {
-      if (hits(c.from, c.to)) continue;
-      taken.push({ from: c.from, to: c.to });
+  const inlineMarks = (lineText: string, start: number, editable = false) => {
+    for (const c of pickInline(scanInline(lineText), editable)) {
       const f = start + c.from;
       const to = start + c.to;
       switch (c.kind) {
@@ -297,10 +366,11 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
         }
         case 'wiki': pushReplace(f, to, new WikiWidget(c.b || c.a, c.a)); break;
         case 'link': pushReplace(f, to, new LinkWidget(c.a, c.b)); break;
-        case 'bold': pushReplace(f, to, new InlineMarkWidget('lp-bold', c.a)); break;
-        case 'code': pushReplace(f, to, new InlineMarkWidget('lp-code', c.a)); break;
-        case 'highlight': pushReplace(f, to, new InlineMarkWidget('lp-highlight', c.a)); break;
-        case 'italic': pushReplace(f, to, new InlineMarkWidget('lp-italic', c.a)); break;
+        case 'tri': pushDelim(f, to, 3, 'lp-bold lp-italic'); break;
+        case 'bold': pushDelim(f, to, 2, 'lp-bold'); break;
+        case 'code': pushDelim(f, to, 1, 'lp-code'); break;
+        case 'highlight': pushDelim(f, to, 2, 'lp-highlight'); break;
+        case 'italic': pushDelim(f, to, 1, 'lp-italic'); break;
       }
     }
   };
@@ -309,16 +379,33 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
   let ordered: { indent: number; num: number } | null = null;
 
   for (let ln = 1; ln <= doc.lines; ln++) {
-    if (ln === activeLine) continue; // 活动行显示源码
     const line = doc.line(ln);
     const t = line.text;
     if (!t.trim()) { ordered = null; continue; }
 
-    // ---------- 围栏代码块：``` / ~~~ → 整块 <pre>（block 部件） ----------
-    const fenceM = /^(\s*)(```+|~~~+)/.exec(t);
+    // 光标行：结构源码照旧显示（#、-、表格便于编辑），但行内标记仍然渲染——
+    // 标记符只是被吃掉的零宽字符、内容照旧可编辑，所以 ** 在任何行都不会露出来。
+    if (ln === activeLine) {
+      const lm = /^(\s*)(?:[-*]|\d+\.)\s+/.exec(t);
+      const base = lm ? lm[0].length : 0;
+      const km = /^([^:：\s][^:：]{0,13}?)\s*[:：]/.exec(t.slice(base));
+      if (km && !km[1].includes('[') && !km[1].includes(']')) {
+        pushMark(line.from + base, line.from + base + km[0].length, 'lp-key');
+      } else if (!lm) {
+        const pk = /^([^:：\-*#> ][^:：]{0,13}?)\s*[:：]/.exec(t);
+        if (pk) pushMark(line.from, line.from + pk[0].length, 'lp-key');
+      }
+      inlineMarks(t.slice(base), line.from + base, true);
+      ordered = null;
+      continue;
+    }
+
+    // ---------- 围栏代码块：``` / ~~~ → 整块 <pre>；```pathway → 通路图（block 部件） ----------
+    const fenceM = /^(\s*)(```+|~~~+)\s*([^\s`]*)/.exec(t);
     if (fenceM) {
       const ch = fenceM[2][0];
       const len = fenceM[2].length;
+      const info = (fenceM[3] ?? '').toLowerCase();
       let end = ln; // 开围栏行
       const codeLines: string[] = [];
       while (end + 1 <= doc.lines) {
@@ -330,7 +417,13 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
       }
       // 光标落在代码块内时不渲染（显示源码，可编辑）
       if (activeLine >= ln && activeLine <= end) { ordered = null; ln = end; continue; }
-      pushReplace(line.from, doc.line(end).to, new CodeBlockWidget(codeLines.join('\n')), true);
+      const code = codeLines.join('\n');
+      pushReplace(
+        line.from,
+        doc.line(end).to,
+        isPathwayLang(info) ? new PathwayWidget(code) : new CodeBlockWidget(code),
+        true,
+      );
       ordered = null;
       ln = end;
       continue;

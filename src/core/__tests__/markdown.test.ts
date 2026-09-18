@@ -64,3 +64,23 @@ describe('数学公式（KaTeX）', () => {
     expect(typeof html).toBe('string');
   });
 });
+
+describe('通路图（```pathway 围栏块）', () => {
+  it('围栏块渲染为内联 SVG，而不是 <pre><code>', async () => {
+    const html = await renderMarkdown('```pathway\n葡萄糖 -> 6-磷酸葡萄糖 : 己糖激酶\n```');
+    expect(html).toContain('<svg');
+    expect(html).toContain('己糖激酶');
+    expect(html).not.toContain('language-pathway');
+  });
+
+  it('biochem 别名同样生效', async () => {
+    const html = await renderMarkdown('```biochem\nA -> B\n```');
+    expect(html).toContain('<svg');
+  });
+
+  it('普通围栏语言仍走代码块', async () => {
+    const html = await renderMarkdown('```js\nconst a = 1;\n```');
+    expect(html).toContain('language-js');
+    expect(html).not.toContain('<svg');
+  });
+});

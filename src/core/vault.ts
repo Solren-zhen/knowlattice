@@ -108,12 +108,18 @@ const getMeta = parseFrontmatterCached;
 /** 首次使用引导笔记：空库自动创建（只建一次，删除后不再重生） */
 const ONBOARD_PATH = '00-三分钟上手.md';
 const ONBOARD_FLAG = 'medvault-onboarded';
-const ONBOARD_CONTENT = `---
+
+/**
+ * 上一版引导笔记的原文。作用只有一个：判断用户库里那篇「三分钟上手」是否还是
+ * 我们当初塞进去的原样——原样才升级成新版本文档，用户改过一个字就不动。
+ * created 行随创建当天变化，比较前先用 normCreated 抹掉（见下方加载逻辑）。
+ */
+const ONBOARD_CONTENT_V1 = `---
 aliases: [新手指南]
 tags: [指南]
 chapter: 指南
 source: 内置
-created: ${new Date().toISOString().slice(0, 10)}
+created: (创建日期)
 ---
 
 # 三分钟上手
@@ -145,6 +151,88 @@ created: ${new Date().toISOString().slice(0, 10)}
 - 删除本篇: 顶部工具栏的垃圾桶图标
 - 数据都在本机浏览器里，「备份」图标可导出 .json 随身携带
 `;
+
+const ONBOARD_CONTENT = `---
+aliases: [新手指南, 快速开始, 上手]
+tags: [指南]
+chapter: 指南
+source: 内置
+created: ${new Date().toISOString().slice(0, 10)}
+---
+
+# 三分钟上手
+
+晶格把医学生的日常压成四个动作：**写下来 → 连起来 → 背下来 → 考出来**。
+下面按这个顺序走一遍，每条都写清「点哪里、按哪个键」。
+
+## 一、先建第一篇笔记
+
+- 点左上角 **＋ 新建**，先选类型：概念 / 疾病 / 机制 / 检查 / 口诀
+- 骨架自动生成，你只负责填空；写的时候停止输入约 1 秒会自动保存，也可以随时 \`Ctrl+S\`
+- 章节层级靠缩进表达，不靠文件夹：**一文件一知识点**
+
+## 二、写原子笔记：只有三个动作
+
+- 回车: 自动续写下一条，不用输任何符号
+	- Tab 缩进一层，就是子要点（这一行就是）
+	- Shift+Tab 反缩进回来
+- 属性: 冒号开头的行会自动加粗，用来标注结构，例如「机制: 缺氧导致…」「口诀: 一嗅二视三动眼」
+- 双链: 输入两个左中括号 \`[[\` 会弹出笔记名补全（连别名一起搜），回车就把两篇笔记连上
+
+## 三、快捷键总表
+
+| 操作 | 快捷键 | 说明 |
+| --- | --- | --- |
+| 加粗 | Ctrl+B | 再按一次取消；没选中文字时会插入占位内容并选中 |
+| 高亮 | Ctrl+H | 同上，语法是两个等号夹住重点 |
+| 插入双链 | Alt+K | 插入一对左中括号，并弹出笔记名候选，回车选中 |
+| 撤销 / 重做 | Ctrl+Z / Ctrl+Y | |
+| 保存 | Ctrl+S | 不按也不会丢，自动保存已经在跑 |
+| 缩进 / 反缩进 | Tab / Shift+Tab | 段落层级就是知识层级 |
+| 快速搜索全库 | Ctrl+K | 标题匹配 + 全文（中文分词），支持最近打开排序 |
+| 笔记前进 / 后退 | Alt+← / Alt+→ | 按打开顺序回退，误关的笔记能找回来 |
+| 关闭当前面板 | Esc | |
+
+加粗与高亮的标记分别是两个星号、两个等号（\`**重点**\`、\`==重点==\`）；双链是两个左中括号。这些符号只存在文件里，编辑时不会显示——要加粗就选中文字按 Ctrl+B，或右键「加粗」，都不必手打符号。
+
+## 四、把讲义变成笔记（两条路）
+
+- **PDF / Word 对照**: 左侧原文（可选中文字层、缩放、搜索），划选重点 → 「粘贴到右」生成原文摘录；可以连续追加到同一篇笔记，摘录历史里能看到每条是否已入库
+- **智能草稿**: 粘贴教材段落，或导入 PDF 讲义，一键拆成原子笔记骨架（识别 定义 / 来源 / 机制 / 作用 / 分类 / 鉴别 等语义），人工审核后再入库
+
+## 五、背下来：间隔复习
+
+- 原子笔记自动生成复习卡：正面 = 标题 + 属性键，背面 = 内容
+- 左侧卡片图标进入复习队列，FSRS 遗忘曲线安排每天该背的卡
+- 答「忘了」会自动收进**错题本**，薄弱章节在热力图上一眼可见
+
+## 六、考出来：题库与错题
+
+- 「题库练习」支持导入 JSON / Word / Excel 题库（字段格式见面板内说明），随机组卷作答
+- 答错且题目标注了关联笔记 → 自动进错题本，结果页一点直达笔记
+- 复习数据可导出为 Anki 文件（.txt / .apkg），带去手机继续背
+
+## 七、看见知识的形状
+
+- **知识图谱**: 全库双链网络图，节点大小 = 连接度，颜色 = 一级章节，点节点直达笔记
+- **3D 解剖图谱**: 12 系统 × 3478 结构，点结构 ↔ 笔记双向打通
+- **脑图谱**: MNI152 模板 MRI + Harvard-Oxford 117 个脑区的中英文对照，点脑区定位到 MNI 坐标
+
+## 八、数据是你自己的
+
+- 全部数据存在本机浏览器（IndexedDB），不联网、不上传
+- 目录卡片右上角 **⋯** → \`备份到 .json\` / \`从备份 .json 恢复\`（含复习进度、题库、错题）
+- **⋯** → \`导出 md 文件夹 (.zip)\`: 真实的 Markdown 目录结构 + 图片附件，Obsidian、记事本都能直接打开，数据永不锁定
+- 换设备或清理浏览器数据前，记得先备份
+
+## 九、这篇笔记怎么处理
+
+看完可以直接删掉（顶部工具栏的垃圾桶图标）——删掉之后不会再自动生成。
+想留作速查表也行，第三节的快捷键表是最常回来看的部分。
+`;
+
+/** created 行随创建当天变化，比对旧笔记时先抹掉这一行 */
+const normCreated = (s: string) => s.replace(/^created: .*$/m, 'created:');
 
 export function useVault() {
   const [docs, setDocs] = useState<Map<string, string>>(new Map());
@@ -186,6 +274,11 @@ export function useVault() {
         await adapter.write(ONBOARD_PATH, ONBOARD_CONTENT);
         fileMap.set(ONBOARD_PATH, ONBOARD_CONTENT);
         localStorage.setItem(ONBOARD_FLAG, '1');
+      } else if (normCreated(fileMap.get(ONBOARD_PATH) ?? '') === normCreated(ONBOARD_CONTENT_V1)) {
+        // 老用户的「三分钟上手」若还是当初生成的原样（一个字没改），静默升级成新版本文档；
+        // 改过、或已被删除，都不动它。
+        await adapter.write(ONBOARD_PATH, ONBOARD_CONTENT);
+        fileMap.set(ONBOARD_PATH, ONBOARD_CONTENT);
       }
       setLinkIndex(rebuildLinkIndex(fileMap));
       setDocs(fileMap);
