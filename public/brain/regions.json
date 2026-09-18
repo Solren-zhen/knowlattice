@@ -14,7 +14,7 @@
     {
      "value": 1,
      "en": "Left Frontal Pole",
-     "cn": "",
+     "cn": "左额极",
      "x": -24.9,
      "y": 53.0,
      "z": 7.5,
@@ -23,7 +23,7 @@
     {
      "value": 2,
      "en": "Right Frontal Pole",
-     "cn": "",
+     "cn": "右额极",
      "x": 26.1,
      "y": 52.2,
      "z": 8.2,
@@ -32,7 +32,7 @@
     {
      "value": 3,
      "en": "Left Insular Cortex",
-     "cn": "",
+     "cn": "左岛叶皮质",
      "x": -36.7,
      "y": 1.4,
      "z": -0.2,
@@ -41,7 +41,7 @@
     {
      "value": 4,
      "en": "Right Insular Cortex",
-     "cn": "",
+     "cn": "右岛叶皮质",
      "x": 37.6,
      "y": 2.6,
      "z": -0.3,
@@ -50,7 +50,7 @@
     {
      "value": 5,
      "en": "Left Superior Frontal Gyrus",
-     "cn": "",
+     "cn": "左额上回",
      "x": -13.9,
      "y": 19.0,
      "z": 56.5,
@@ -59,7 +59,7 @@
     {
      "value": 6,
      "en": "Right Superior Frontal Gyrus",
-     "cn": "",
+     "cn": "右额上回",
      "x": 14.7,
      "y": 18.9,
      "z": 57.1,
@@ -68,7 +68,7 @@
     {
      "value": 7,
      "en": "Left Middle Frontal Gyrus",
-     "cn": "",
+     "cn": "左额中回",
      "x": -38.3,
      "y": 18.6,
      "z": 42.3,
@@ -77,7 +77,7 @@
     {
      "value": 8,
      "en": "Right Middle Frontal Gyrus",
-     "cn": "",
+     "cn": "右额中回",
      "x": 39.4,
      "y": 18.8,
      "z": 43.0,
@@ -86,7 +86,7 @@
     {
      "value": 9,
      "en": "Left Inferior Frontal Gyrus, pars triangularis",
-     "cn": "",
+     "cn": "左额下回三角部",
      "x": -50.0,
      "y": 28.6,
      "z": 8.8,
@@ -95,7 +95,7 @@
     {
      "value": 10,
      "en": "Right Inferior Frontal Gyrus, pars triangularis",
-     "cn": "",
+     "cn": "右额下回三角部",
      "x": 52.3,
      "y": 28.0,
      "z": 7.8,
@@ -104,7 +104,7 @@
     {
      "value": 11,
      "en": "Left Inferior Frontal Gyrus, pars opercularis",
-     "cn": "",
+     "cn": "左额下回岛盖部",
      "x": -50.9,
      "y": 14.8,
      "z": 15.3,
@@ -113,7 +113,7 @@
     {
      "value": 12,
      "en": "Right Inferior Frontal Gyrus, pars opercularis",
-     "cn": "",
+     "cn": "右额下回岛盖部",
      "x": 52.4,
      "y": 15.5,
      "z": 16.1,
@@ -122,7 +122,7 @@
     {
      "value": 13,
      "en": "Left Precentral Gyrus",
-     "cn": "",
+     "cn": "左中央前回",
      "x": -33.7,
      "y": -11.7,
      "z": 49.5,
@@ -131,7 +131,7 @@
     {
      "value": 14,
      "en": "Right Precentral Gyrus",
-     "cn": "",
+     "cn": "右中央前回",
      "x": 34.9,
      "y": -10.6,
      "z": 50.2,
@@ -140,7 +140,7 @@
     {
      "value": 15,
      "en": "Left Temporal Pole",
-     "cn": "",
+     "cn": "左颞极",
      "x": -40.6,
      "y": 11.1,
      "z": -29.7,
@@ -149,7 +149,7 @@
     {
      "value": 16,
      "en": "Right Temporal Pole",
-     "cn": "",
+     "cn": "右颞极",
      "x": 40.7,
      "y": 13.1,
      "z": -29.8,
@@ -158,7 +158,7 @@
     {
      "value": 17,
      "en": "Left Superior Temporal Gyrus, anterior division",
-     "cn": "",
+     "cn": "左颞上回前部",
      "x": -56.2,
      "y": -3.7,
      "z": -8.3,
@@ -167,7 +167,7 @@
     {
      "value": 18,
      "en": "Right Superior Temporal Gyrus, anterior division",
-     "cn": "",
+     "cn": "右颞上回前部",
      "x": 57.7,
      "y": -0.5,
      "z": -10.2,
@@ -176,7 +176,7 @@
     {
      "value": 19,
      "en": "Left Superior Temporal Gyrus, posterior division",
-     "cn": "",
+     "cn": "左颞上回后部",
      "x": -60.6,
      "y": -27.4,
      "z": 2.4,
@@ -185,7 +185,7 @@
     {
      "value": 20,
      "en": "Right Superior Temporal Gyrus, posterior division",
-     "cn": "",
+     "cn": "右颞上回后部",
      "x": 60.3,
      "y": -23.3,
      "z": 1.6,
@@ -194,7 +194,7 @@
     {
      "value": 21,
      "en": "Left Middle Temporal Gyrus, anterior division",
-     "cn": "",
+     "cn": "左颞中回前部",
      "x": -57.6,
      "y": -4.0,
      "z": -22.4,
@@ -203,7 +203,7 @@
     {
      "value": 22,
      "en": "Right Middle Temporal Gyrus, anterior division",
-     "cn": "",
+     "cn": "右颞中回前部",
      "x": 57.9,
      "y": -1.3,
      "z": -24.7,
@@ -212,7 +212,7 @@
     {
      "value": 23,
      "en": "Left Middle Temporal Gyrus, posterior division",
-     "cn": "",
+     "cn": "左颞中回后部",
      "x": -61.3,
      "y": -27.3,
      "z": -11.5,
@@ -221,7 +221,7 @@
     {
      "value": 24,
      "en": "Right Middle Temporal Gyrus, posterior division",
-     "cn": "",
+     "cn": "右颞中回后部",
      "x": 61.5,
      "y": -22.4,
      "z": -12.8,
@@ -230,7 +230,7 @@
     {
      "value": 25,
      "en": "Left Middle Temporal Gyrus, temporooccipital part",
-     "cn": "",
+     "cn": "左颞中回颞枕部",
      "x": -57.8,
      "y": -53.1,
      "z": 0.8,
@@ -239,7 +239,7 @@
     {
      "value": 26,
      "en": "Right Middle Temporal Gyrus, temporooccipital part",
-     "cn": "",
+     "cn": "右颞中回颞枕部",
      "x": 58.4,
      "y": -49.2,
      "z": 1.5,
@@ -248,7 +248,7 @@
     {
      "value": 27,
      "en": "Left Inferior Temporal Gyrus, anterior division",
-     "cn": "",
+     "cn": "左颞下回前部",
      "x": -48.3,
      "y": -5.1,
      "z": -39.4,
@@ -257,7 +257,7 @@
     {
      "value": 28,
      "en": "Right Inferior Temporal Gyrus, anterior division",
-     "cn": "",
+     "cn": "右颞下回前部",
      "x": 46.3,
      "y": -2.4,
      "z": -41.3,
@@ -266,7 +266,7 @@
     {
      "value": 29,
      "en": "Left Inferior Temporal Gyrus, posterior division",
-     "cn": "",
+     "cn": "左颞下回后部",
      "x": -53.7,
      "y": -28.6,
      "z": -26.0,
@@ -275,7 +275,7 @@
     {
      "value": 30,
      "en": "Right Inferior Temporal Gyrus, posterior division",
-     "cn": "",
+     "cn": "右颞下回后部",
      "x": 53.6,
      "y": -23.4,
      "z": -28.3,
@@ -284,7 +284,7 @@
     {
      "value": 31,
      "en": "Left Inferior Temporal Gyrus, temporooccipital part",
-     "cn": "",
+     "cn": "左颞下回颞枕部",
      "x": -51.9,
      "y": -53.5,
      "z": -16.6,
@@ -293,7 +293,7 @@
     {
      "value": 32,
      "en": "Right Inferior Temporal Gyrus, temporooccipital part",
-     "cn": "",
+     "cn": "右颞下回颞枕部",
      "x": 54.2,
      "y": -49.8,
      "z": -16.8,
@@ -302,7 +302,7 @@
     {
      "value": 33,
      "en": "Left Postcentral Gyrus",
-     "cn": "",
+     "cn": "左中央后回",
      "x": -38.5,
      "y": -27.7,
      "z": 51.9,
@@ -311,7 +311,7 @@
     {
      "value": 34,
      "en": "Right Postcentral Gyrus",
-     "cn": "",
+     "cn": "右中央后回",
      "x": 38.0,
      "y": -26.2,
      "z": 52.6,
@@ -320,7 +320,7 @@
     {
      "value": 35,
      "en": "Left Superior Parietal Lobule",
-     "cn": "",
+     "cn": "左顶上小叶",
      "x": -29.4,
      "y": -49.6,
      "z": 57.7,
@@ -329,7 +329,7 @@
     {
      "value": 36,
      "en": "Right Superior Parietal Lobule",
-     "cn": "",
+     "cn": "右顶上小叶",
      "x": 29.3,
      "y": -47.8,
      "z": 59.1,
@@ -338,7 +338,7 @@
     {
      "value": 37,
      "en": "Left Supramarginal Gyrus, anterior division",
-     "cn": "",
+     "cn": "左缘上回前部",
      "x": -56.9,
      "y": -32.8,
      "z": 37.3,
@@ -347,7 +347,7 @@
     {
      "value": 38,
      "en": "Right Supramarginal Gyrus, anterior division",
-     "cn": "",
+     "cn": "右缘上回前部",
      "x": 58.5,
      "y": -27.1,
      "z": 37.9,
@@ -356,7 +356,7 @@
     {
      "value": 39,
      "en": "Left Supramarginal Gyrus, posterior division",
-     "cn": "",
+     "cn": "左缘上回后部",
      "x": -54.9,
      "y": -46.2,
      "z": 33.4,
@@ -365,7 +365,7 @@
     {
      "value": 40,
      "en": "Right Supramarginal Gyrus, posterior division",
-     "cn": "",
+     "cn": "右缘上回后部",
      "x": 55.3,
      "y": -40.5,
      "z": 33.8,
@@ -374,7 +374,7 @@
     {
      "value": 41,
      "en": "Left Angular Gyrus",
-     "cn": "",
+     "cn": "左角回",
      "x": -50.4,
      "y": -55.7,
      "z": 30.0,
@@ -383,7 +383,7 @@
     {
      "value": 42,
      "en": "Right Angular Gyrus",
-     "cn": "",
+     "cn": "右角回",
      "x": 52.1,
      "y": -51.8,
      "z": 32.4,
@@ -392,7 +392,7 @@
     {
      "value": 43,
      "en": "Left Lateral Occipital Cortex, superior division",
-     "cn": "",
+     "cn": "左枕外侧皮质上部",
      "x": -32.2,
      "y": -72.9,
      "z": 38.0,
@@ -401,7 +401,7 @@
     {
      "value": 44,
      "en": "Right Lateral Occipital Cortex, superior division",
-     "cn": "",
+     "cn": "右枕外侧皮质上部",
      "x": 33.0,
      "y": -71.1,
      "z": 39.0,
@@ -410,7 +410,7 @@
     {
      "value": 45,
      "en": "Left Lateral Occipital Cortex, inferior division",
-     "cn": "",
+     "cn": "左枕外侧皮质下部",
      "x": -45.2,
      "y": -75.6,
      "z": -2.0,
@@ -419,7 +419,7 @@
     {
      "value": 46,
      "en": "Right Lateral Occipital Cortex, inferior division",
-     "cn": "",
+     "cn": "右枕外侧皮质下部",
      "x": 45.6,
      "y": -74.0,
      "z": -1.7,
@@ -428,7 +428,7 @@
     {
      "value": 47,
      "en": "Left Intracalcarine Cortex",
-     "cn": "",
+     "cn": "左距状沟内皮质",
      "x": -10.1,
      "y": -74.9,
      "z": 8.1,
@@ -437,7 +437,7 @@
     {
      "value": 48,
      "en": "Right Intracalcarine Cortex",
-     "cn": "",
+     "cn": "右距状沟内皮质",
      "x": 11.9,
      "y": -73.5,
      "z": 8.5,
@@ -446,7 +446,7 @@
     {
      "value": 49,
      "en": "Left Frontal Medial Cortex",
-     "cn": "",
+     "cn": "左额内侧皮质",
      "x": -5.0,
      "y": 43.6,
      "z": -18.3,
@@ -455,7 +455,7 @@
     {
      "value": 50,
      "en": "Right Frontal Medial Cortex",
-     "cn": "",
+     "cn": "右额内侧皮质",
      "x": 4.4,
      "y": 43.1,
      "z": -18.8,
@@ -464,7 +464,7 @@
     {
      "value": 51,
      "en": "Left Juxtapositional Lobule Cortex (formerly Supplementary Motor Cortex)",
-     "cn": "",
+     "cn": "左邻接小叶皮质（原辅助运动皮质）",
      "x": -4.8,
      "y": -2.6,
      "z": 56.5,
@@ -473,7 +473,7 @@
     {
      "value": 52,
      "en": "Right Juxtapositional Lobule Cortex (formerly Supplementary Motor Cortex)",
-     "cn": "",
+     "cn": "右邻接小叶皮质（原辅助运动皮质）",
      "x": 6.1,
      "y": -2.6,
      "z": 57.7,
@@ -482,7 +482,7 @@
     {
      "value": 53,
      "en": "Left Subcallosal Cortex",
-     "cn": "",
+     "cn": "左胼胝体下皮质",
      "x": -5.0,
      "y": 20.4,
      "z": -15.0,
@@ -491,7 +491,7 @@
     {
      "value": 54,
      "en": "Right Subcallosal Cortex",
-     "cn": "",
+     "cn": "右胼胝体下皮质",
      "x": 4.6,
      "y": 21.1,
      "z": -15.2,
@@ -500,7 +500,7 @@
     {
      "value": 55,
      "en": "Left Paracingulate Gyrus",
-     "cn": "",
+     "cn": "左扣带旁回",
      "x": -5.7,
      "y": 36.7,
      "z": 21.5,
@@ -509,7 +509,7 @@
     {
      "value": 56,
      "en": "Right Paracingulate Gyrus",
-     "cn": "",
+     "cn": "右扣带旁回",
      "x": 6.7,
      "y": 36.7,
      "z": 22.6,
@@ -518,7 +518,7 @@
     {
      "value": 57,
      "en": "Left Cingulate Gyrus, anterior division",
-     "cn": "",
+     "cn": "左扣带回前部",
      "x": -3.7,
      "y": 17.8,
      "z": 24.8,
@@ -527,7 +527,7 @@
     {
      "value": 58,
      "en": "Right Cingulate Gyrus, anterior division",
-     "cn": "",
+     "cn": "右扣带回前部",
      "x": 5.4,
      "y": 19.1,
      "z": 24.0,
@@ -536,7 +536,7 @@
     {
      "value": 59,
      "en": "Left Cingulate Gyrus, posterior division",
-     "cn": "",
+     "cn": "左扣带回后部",
      "x": -5.0,
      "y": -37.1,
      "z": 30.3,
@@ -545,7 +545,7 @@
     {
      "value": 60,
      "en": "Right Cingulate Gyrus, posterior division",
-     "cn": "",
+     "cn": "右扣带回后部",
      "x": 6.6,
      "y": -35.9,
      "z": 30.2,
@@ -554,7 +554,7 @@
     {
      "value": 61,
      "en": "Left Precuneous Cortex",
-     "cn": "",
+     "cn": "左楔前叶皮质",
      "x": -7.1,
      "y": -60.2,
      "z": 37.6,
@@ -563,7 +563,7 @@
     {
      "value": 62,
      "en": "Right Precuneous Cortex",
-     "cn": "",
+     "cn": "右楔前叶皮质",
      "x": 8.9,
      "y": -58.4,
      "z": 38.5,
@@ -572,7 +572,7 @@
     {
      "value": 63,
      "en": "Left Cuneal Cortex",
-     "cn": "",
+     "cn": "左楔叶皮质",
      "x": -7.4,
      "y": -80.5,
      "z": 27.1,
@@ -581,7 +581,7 @@
     {
      "value": 64,
      "en": "Right Cuneal Cortex",
-     "cn": "",
+     "cn": "右楔叶皮质",
      "x": 9.2,
      "y": -78.4,
      "z": 28.1,
@@ -590,7 +590,7 @@
     {
      "value": 65,
      "en": "Left Frontal Orbital Cortex",
-     "cn": "",
+     "cn": "左眶额皮质",
      "x": -29.7,
      "y": 23.8,
      "z": -16.5,
@@ -599,7 +599,7 @@
     {
      "value": 66,
      "en": "Right Frontal Orbital Cortex",
-     "cn": "",
+     "cn": "右眶额皮质",
      "x": 29.2,
      "y": 23.1,
      "z": -16.3,
@@ -608,7 +608,7 @@
     {
      "value": 67,
      "en": "Left Parahippocampal Gyrus, anterior division",
-     "cn": "",
+     "cn": "左海马旁回前部",
      "x": -21.9,
      "y": -9.0,
      "z": -30.4,
@@ -617,7 +617,7 @@
     {
      "value": 68,
      "en": "Right Parahippocampal Gyrus, anterior division",
-     "cn": "",
+     "cn": "右海马旁回前部",
      "x": 22.2,
      "y": -7.9,
      "z": -30.3,
@@ -626,7 +626,7 @@
     {
      "value": 69,
      "en": "Left Parahippocampal Gyrus, posterior division",
-     "cn": "",
+     "cn": "左海马旁回后部",
      "x": -21.9,
      "y": -32.4,
      "z": -17.0,
@@ -635,7 +635,7 @@
     {
      "value": 70,
      "en": "Right Parahippocampal Gyrus, posterior division",
-     "cn": "",
+     "cn": "右海马旁回后部",
      "x": 23.0,
      "y": -30.4,
      "z": -17.0,
@@ -644,7 +644,7 @@
     {
      "value": 71,
      "en": "Left Lingual Gyrus",
-     "cn": "",
+     "cn": "左舌回",
      "x": -11.9,
      "y": -65.9,
      "z": -5.2,
@@ -653,7 +653,7 @@
     {
      "value": 72,
      "en": "Right Lingual Gyrus",
-     "cn": "",
+     "cn": "右舌回",
      "x": 14.0,
      "y": -62.8,
      "z": -5.0,
@@ -662,7 +662,7 @@
     {
      "value": 73,
      "en": "Left Temporal Fusiform Cortex, anterior division",
-     "cn": "",
+     "cn": "左颞梭状皮质前部",
      "x": -31.8,
      "y": -4.6,
      "z": -42.2,
@@ -671,7 +671,7 @@
     {
      "value": 74,
      "en": "Right Temporal Fusiform Cortex, anterior division",
-     "cn": "",
+     "cn": "右颞梭状皮质前部",
      "x": 31.1,
      "y": -3.0,
      "z": -42.4,
@@ -680,7 +680,7 @@
     {
      "value": 75,
      "en": "Left Temporal Fusiform Cortex, posterior division",
-     "cn": "",
+     "cn": "左颞梭状皮质后部",
      "x": -36.1,
      "y": -29.5,
      "z": -25.0,
@@ -689,7 +689,7 @@
     {
      "value": 76,
      "en": "Right Temporal Fusiform Cortex, posterior division",
-     "cn": "",
+     "cn": "右颞梭状皮质后部",
      "x": 36.3,
      "y": -24.4,
      "z": -27.7,
@@ -698,7 +698,7 @@
     {
      "value": 77,
      "en": "Left Temporal Occipital Fusiform Cortex",
-     "cn": "",
+     "cn": "左颞枕梭状皮质",
      "x": -33.6,
      "y": -53.7,
      "z": -16.1,
@@ -707,7 +707,7 @@
     {
      "value": 78,
      "en": "Right Temporal Occipital Fusiform Cortex",
-     "cn": "",
+     "cn": "右颞枕梭状皮质",
      "x": 35.1,
      "y": -50.0,
      "z": -16.7,
@@ -716,7 +716,7 @@
     {
      "value": 79,
      "en": "Left Occipital Fusiform Gyrus",
-     "cn": "",
+     "cn": "左枕梭状回",
      "x": -26.4,
      "y": -76.7,
      "z": -13.7,
@@ -725,7 +725,7 @@
     {
      "value": 80,
      "en": "Right Occipital Fusiform Gyrus",
-     "cn": "",
+     "cn": "右枕梭状回",
      "x": 27.3,
      "y": -75.2,
      "z": -12.3,
@@ -734,7 +734,7 @@
     {
      "value": 81,
      "en": "Left Frontal Operculum Cortex",
-     "cn": "",
+     "cn": "左额盖皮质",
      "x": -39.6,
      "y": 18.4,
      "z": 4.5,
@@ -743,7 +743,7 @@
     {
      "value": 82,
      "en": "Right Frontal Operculum Cortex",
-     "cn": "",
+     "cn": "右额盖皮质",
      "x": 41.2,
      "y": 18.6,
      "z": 4.7,
@@ -752,7 +752,7 @@
     {
      "value": 83,
      "en": "Left Central Opercular Cortex",
-     "cn": "",
+     "cn": "左中央盖皮质",
      "x": -47.9,
      "y": -8.3,
      "z": 11.8,
@@ -761,7 +761,7 @@
     {
      "value": 84,
      "en": "Right Central Opercular Cortex",
-     "cn": "",
+     "cn": "右中央盖皮质",
      "x": 49.3,
      "y": -5.6,
      "z": 11.1,
@@ -770,7 +770,7 @@
     {
      "value": 85,
      "en": "Left Parietal Operculum Cortex",
-     "cn": "",
+     "cn": "左顶盖皮质",
      "x": -48.4,
      "y": -31.6,
      "z": 20.4,
@@ -779,7 +779,7 @@
     {
      "value": 86,
      "en": "Right Parietal Operculum Cortex",
-     "cn": "",
+     "cn": "右顶盖皮质",
      "x": 48.8,
      "y": -27.4,
      "z": 21.4,
@@ -788,7 +788,7 @@
     {
      "value": 87,
      "en": "Left Planum Polare",
-     "cn": "",
+     "cn": "左极平面",
      "x": -46.6,
      "y": -5.9,
      "z": -7.5,
@@ -797,7 +797,7 @@
     {
      "value": 88,
      "en": "Right Planum Polare",
-     "cn": "",
+     "cn": "右极平面",
      "x": 48.1,
      "y": -3.5,
      "z": -7.1,
@@ -806,7 +806,7 @@
     {
      "value": 89,
      "en": "Left Heschl's Gyrus (includes H1 and H2)",
-     "cn": "",
+     "cn": "左颞横回（Heschl 回，含 H1/H2）",
      "x": -45.3,
      "y": -20.2,
      "z": 7.1,
@@ -815,7 +815,7 @@
     {
      "value": 90,
      "en": "Right Heschl's Gyrus (includes H1 and H2)",
-     "cn": "",
+     "cn": "右颞横回（Heschl 回，含 H1/H2）",
      "x": 46.0,
      "y": -17.5,
      "z": 7.0,
@@ -824,7 +824,7 @@
     {
      "value": 91,
      "en": "Left Planum Temporale",
-     "cn": "",
+     "cn": "左颞平面",
      "x": -52.5,
      "y": -29.8,
      "z": 10.9,
@@ -833,7 +833,7 @@
     {
      "value": 92,
      "en": "Right Planum Temporale",
-     "cn": "",
+     "cn": "右颞平面",
      "x": 54.9,
      "y": -25.2,
      "z": 12.1,
@@ -842,7 +842,7 @@
     {
      "value": 93,
      "en": "Left Supracalcarine Cortex",
-     "cn": "",
+     "cn": "左距状沟上皮质",
      "x": -6.2,
      "y": -74.7,
      "z": 14.2,
@@ -851,7 +851,7 @@
     {
      "value": 94,
      "en": "Right Supracalcarine Cortex",
-     "cn": "",
+     "cn": "右距状沟上皮质",
      "x": 9.7,
      "y": -72.7,
      "z": 14.8,
@@ -860,7 +860,7 @@
     {
      "value": 95,
      "en": "Left Occipital Pole",
-     "cn": "",
+     "cn": "左枕极",
      "x": -16.3,
      "y": -96.5,
      "z": 6.9,
@@ -869,7 +869,7 @@
     {
      "value": 96,
      "en": "Right Occipital Pole",
-     "cn": "",
+     "cn": "右枕极",
      "x": 18.7,
      "y": -95.1,
      "z": 8.6,
@@ -885,7 +885,7 @@
     {
      "value": 1,
      "en": "Left Cerebral White Matter",
-     "cn": "",
+     "cn": "左大脑白质",
      "x": -25.3,
      "y": -16.5,
      "z": 18.1,
@@ -894,7 +894,7 @@
     {
      "value": 2,
      "en": "Left Cerebral Cortex",
-     "cn": "",
+     "cn": "左大脑皮质",
      "x": -31.7,
      "y": -19.0,
      "z": 17.1,
@@ -903,7 +903,7 @@
     {
      "value": 3,
      "en": "Left Lateral Ventrical",
-     "cn": "",
+     "cn": "左侧脑室",
      "x": -12.1,
      "y": -11.6,
      "z": 14.2,
@@ -912,7 +912,7 @@
     {
      "value": 4,
      "en": "Left Thalamus",
-     "cn": "",
+     "cn": "左丘脑",
      "x": -9.7,
      "y": -19.1,
      "z": 6.1,
@@ -921,7 +921,7 @@
     {
      "value": 5,
      "en": "Left Caudate",
-     "cn": "",
+     "cn": "左尾状核",
      "x": -12.7,
      "y": 9.8,
      "z": 9.4,
@@ -930,7 +930,7 @@
     {
      "value": 6,
      "en": "Left Putamen",
-     "cn": "",
+     "cn": "左壳核",
      "x": -24.9,
      "y": 0.8,
      "z": 0.2,
@@ -939,7 +939,7 @@
     {
      "value": 7,
      "en": "Left Pallidum",
-     "cn": "",
+     "cn": "左苍白球",
      "x": -19.3,
      "y": -4.7,
      "z": -1.3,
@@ -948,7 +948,7 @@
     {
      "value": 8,
      "en": "Brain-Stem",
-     "cn": "",
+     "cn": "脑干",
      "x": 0.6,
      "y": -31.0,
      "z": -34.3,
@@ -957,7 +957,7 @@
     {
      "value": 9,
      "en": "Left Hippocampus",
-     "cn": "",
+     "cn": "左海马",
      "x": -24.9,
      "y": -22.2,
      "z": -14.3,
@@ -966,7 +966,7 @@
     {
      "value": 10,
      "en": "Left Amygdala",
-     "cn": "",
+     "cn": "左杏仁核",
      "x": -22.6,
      "y": -4.9,
      "z": -18.1,
@@ -975,7 +975,7 @@
     {
      "value": 11,
      "en": "Left Accumbens",
-     "cn": "",
+     "cn": "左伏隔核",
      "x": -9.5,
      "y": 11.4,
      "z": -7.3,
@@ -984,7 +984,7 @@
     {
      "value": 12,
      "en": "Right Cerebral White Matter",
-     "cn": "",
+     "cn": "右大脑白质",
      "x": 27.2,
      "y": -14.5,
      "z": 17.8,
@@ -993,7 +993,7 @@
     {
      "value": 13,
      "en": "Right Cerebral Cortex",
-     "cn": "",
+     "cn": "右大脑皮质",
      "x": 32.6,
      "y": -16.8,
      "z": 17.0,
@@ -1002,7 +1002,7 @@
     {
      "value": 14,
      "en": "Right Lateral Ventricle",
-     "cn": "",
+     "cn": "右侧脑室",
      "x": 13.3,
      "y": -12.4,
      "z": 14.4,
@@ -1011,7 +1011,7 @@
     {
      "value": 15,
      "en": "Right Thalamus",
-     "cn": "",
+     "cn": "右丘脑",
      "x": 10.9,
      "y": -18.3,
      "z": 6.6,
@@ -1020,7 +1020,7 @@
     {
      "value": 16,
      "en": "Right Caudate",
-     "cn": "",
+     "cn": "右尾状核",
      "x": 13.3,
      "y": 10.3,
      "z": 10.4,
@@ -1029,7 +1029,7 @@
     {
      "value": 17,
      "en": "Right Putamen",
-     "cn": "",
+     "cn": "右壳核",
      "x": 25.5,
      "y": 1.9,
      "z": 0.2,
@@ -1038,7 +1038,7 @@
     {
      "value": 18,
      "en": "Right Pallidum",
-     "cn": "",
+     "cn": "右苍白球",
      "x": 20.0,
      "y": -3.8,
      "z": -1.1,
@@ -1047,7 +1047,7 @@
     {
      "value": 19,
      "en": "Right Hippocampus",
-     "cn": "",
+     "cn": "右海马",
      "x": 26.4,
      "y": -20.6,
      "z": -14.7,
@@ -1056,7 +1056,7 @@
     {
      "value": 20,
      "en": "Right Amygdala",
-     "cn": "",
+     "cn": "右杏仁核",
      "x": 23.0,
      "y": -3.7,
      "z": -18.1,
@@ -1065,7 +1065,7 @@
     {
      "value": 21,
      "en": "Right Accumbens",
-     "cn": "",
+     "cn": "右伏隔核",
      "x": 9.5,
      "y": 12.1,
      "z": -6.6,
