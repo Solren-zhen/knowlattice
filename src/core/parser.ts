@@ -1,5 +1,5 @@
 /**
- * frontmatter 解析 / 序列化 —— 数据格式规范（开发计划 §2.2）。
+ * frontmatter 解析 / 序列化 —— 数据格式规范。
  * 核心字段 aliases/tags/chapter/source/created；
  * M7 起增加 exam（历年真题标记，如 `2023-生理-12`）。
  * 支持多行 YAML 列表（aliases:\n - x）与正文 #标签 收集（Obsidian 习惯）。
