@@ -47,7 +47,7 @@ interface Excerpt {
   savedPath?: string;
 }
 
-const EX_KEY = 'medvault-excerpts';
+const EX_KEY = 'knowlattice-excerpts';
 const loadExcerpts = (): Excerpt[] => {
   try { return JSON.parse(localStorage.getItem(EX_KEY) ?? '[]') as Excerpt[]; } catch { return []; }
 };
@@ -64,11 +64,11 @@ const saveExcerpts = (list: Excerpt[]) => {
 };
 
 /** 划选自动成稿开关（默认关：选中后先问要不要成稿，不再自动写入右侧） */
-const AUTODRAFT_KEY = 'medvault-pdf-autodraft';
+const AUTODRAFT_KEY = 'knowlattice-pdf-autodraft';
 /** 几何选区开关（默认开：原生划选在绝对定位的文字层上向下拖会把整页框进选区、反复闪烁） */
-const GEOMSEL_KEY = 'medvault-pdf-geomsel';
+const GEOMSEL_KEY = 'knowlattice-pdf-geomsel';
 /** Column mode (default off): middle lines stay inside the drag x band. */
-const COLMODE_KEY = 'medvault-pdf-colmode';
+const COLMODE_KEY = 'knowlattice-pdf-colmode';
 
 export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }: Props) {
   const defaultLayoutPluginInstance = useRef(defaultLayoutPlugin()).current;
@@ -359,7 +359,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'medvault-excerpts.json';
+      a.download = 'knowlattice-excerpts.json';
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {

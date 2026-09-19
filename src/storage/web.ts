@@ -8,7 +8,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import type { StorageAdapter, VaultFileMeta } from './adapter';
 
-const DB_NAME = 'medvault';
+const DB_NAME = 'knowlattice';
 const DB_VERSION = 2;
 
 interface FileRecord {

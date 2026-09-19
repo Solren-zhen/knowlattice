@@ -6,7 +6,7 @@
  * 数据都在 IndexedDB / localStorage，不经过 SW。
  * 注意：每次发布新版本请递增 VERSION——激活时会清掉旧版本缓存，否则浏览器会一直读到旧版。
  */
-const VERSION = 'medvault-v2';
+const VERSION = 'knowlattice-v2';
 
 self.addEventListener('install', () => {
   self.skipWaiting();

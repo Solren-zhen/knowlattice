@@ -19,7 +19,7 @@ describe('stats', () => {
 
   it('streak：今天没学则从昨天起算，不因当天未学清零', () => {
     const yesterday = localDate(new Date(Date.now() - 86_400_000));
-    localStorage.setItem('medvault-days', JSON.stringify({ [yesterday]: 2 }));
+    localStorage.setItem('knowlattice-days', JSON.stringify({ [yesterday]: 2 }));
     expect(streak()).toBe(1); // 仅昨天有 → 连续 1 天
     markStudy();
     expect(streak()).toBe(2); // 今天标记后 → 连续 2 天
@@ -35,12 +35,12 @@ describe('stats', () => {
   });
 
   it('studyDays 排序返回', () => {
-    localStorage.setItem('medvault-days', JSON.stringify({ b: 1, a: 2 }));
+    localStorage.setItem('knowlattice-days', JSON.stringify({ b: 1, a: 2 }));
     expect(studyDays()).toEqual(['a', 'b']);
   });
 
   it('损坏数据回退为空', () => {
-    localStorage.setItem('medvault-days', 'not-json');
+    localStorage.setItem('knowlattice-days', 'not-json');
     expect(studyDays()).toEqual([]);
     expect(streak()).toBe(0);
   });

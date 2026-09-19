@@ -2,7 +2,7 @@
  * 学习打卡 / 统计：记录每日学习行为（复习评卡、题库作答），计算连续天数与近 7 天。
  * 轻量 localStorage 存储，与 SRS/题库同策略。
  */
-const KEY = 'medvault-days';
+const KEY = 'knowlattice-days';
 
 function localDate(d = new Date()): string {
   const y = d.getFullYear();

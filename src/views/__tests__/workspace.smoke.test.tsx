@@ -32,7 +32,7 @@ const NOTE_B = {
 };
 
 async function seed() {
-  const db = await openDB('medvault', 2, {
+  const db = await openDB('knowlattice', 2, {
     upgrade(d) {
       if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath: 'path' });
       if (!d.objectStoreNames.contains('attachments')) d.createObjectStore('attachments', { keyPath: 'path' });
@@ -44,7 +44,7 @@ async function seed() {
 
 beforeAll(async () => {
   localStorage.clear();
-  localStorage.removeItem('medvault-onboarded');
+  localStorage.removeItem('knowlattice-onboarded');
   await seed();
 });
 

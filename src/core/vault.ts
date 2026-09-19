@@ -107,7 +107,7 @@ const getMeta = parseFrontmatterCached;
 
 /** 首次使用引导笔记：空库自动创建（只建一次，删除后不再重生） */
 const ONBOARD_PATH = '00-三分钟上手.md';
-const ONBOARD_FLAG = 'medvault-onboarded';
+const ONBOARD_FLAG = 'knowlattice-onboarded';
 
 /**
  * 上一版引导笔记的原文。作用只有一个：判断用户库里那篇「三分钟上手」是否还是
@@ -337,7 +337,7 @@ export function useVault() {
       .filter(([path]) => path.endsWith('.md') || path.startsWith('_attachments/'))
       .map(([path, content]) => ({ path, content }));
     const payload = {
-      app: 'medvault',
+      app: 'knowlattice',
       version: 2,
       exportedAt: new Date().toISOString(),
       files,
@@ -369,7 +369,8 @@ export function useVault() {
       qbanks?: unknown;
       mistakes?: unknown;
     };
-    if (data.app !== 'medvault' || !Array.isArray(data.files)) {
+    // 兼容旧版以 medvault 命名的备份：两版文件结构一致，只有 app 字段不同
+    if ((data.app !== 'knowlattice' && data.app !== 'medvault') || !Array.isArray(data.files)) {
       throw new Error('不是有效的 晶格 备份文件');
     }
     const valid = data.files.filter((f) => f.path && typeof f.content === 'string');

@@ -17,7 +17,7 @@ describe('loadCards', () => {
 
   it('丢弃旧版/残缺数据（无 stability 等字段）', async () => {
     localStorage.setItem(
-      'medvault-srs',
+      'knowlattice-srs',
       JSON.stringify({ good: { due: 1, reps: 1, stability: 2, difficulty: 4, state: 1 }, bad: { due: 'x' } })
     );
     const srs = await loadSrs();
@@ -39,7 +39,7 @@ describe('applyReview / dueQueue / srsStats', () => {
     const past = NOW - 10_000;
     const future = NOW + 10_000;
     localStorage.setItem(
-      'medvault-srs',
+      'knowlattice-srs',
       JSON.stringify({
         'past.md': { due: past, reps: 5, stability: 10, difficulty: 3, state: 1 },
         'future.md': { due: future, reps: 5, stability: 10, difficulty: 3, state: 1 },
@@ -53,7 +53,7 @@ describe('applyReview / dueQueue / srsStats', () => {
 
   it('srsStats 统计已学与今日到期', async () => {
     localStorage.setItem(
-      'medvault-srs',
+      'knowlattice-srs',
       JSON.stringify({
         'learned-due.md': { due: 1_000, reps: 3, stability: 5, difficulty: 3, state: 1 },
         'learned-notdue.md': { due: 1_999_999_999_999, reps: 3, stability: 5, difficulty: 3, state: 1 },

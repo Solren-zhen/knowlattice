@@ -1,6 +1,6 @@
 /**
- * pdf.js 懒加载共享模块 + 最近使用的 PDF 持久化（IndexedDB 独立库 medvault-pdfs，
- * 避免与 vault 的 medvault 库版本冲突）。
+ * pdf.js 懒加载共享模块 + 最近使用的 PDF 持久化（IndexedDB 独立库 knowlattice-pdfs，
+ * 避免与 vault 的 knowlattice 库版本冲突）。
  */
 import { openDB } from 'idb';
 
@@ -49,7 +49,7 @@ export async function detectScannedPdf(data: ArrayBuffer): Promise<boolean> {
   }
 }
 
-const PDF_DB = 'medvault-pdfs';
+const PDF_DB = 'knowlattice-pdfs';
 
 async function pdfDb() {
   return openDB(PDF_DB, 1, {
