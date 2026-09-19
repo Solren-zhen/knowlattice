@@ -4,7 +4,10 @@ import './index.css'
 import App from './App.tsx'
 import { initTooltips } from './core/tooltip'
 import { initTheme, initFont } from './core/theme'
+import { migrateLocalStorage, migrateIndexedDb } from './core/migrate'
 
+// 旧版 medvault-* 标识 → knowlattice-*：localStorage 同步迁移，须早于 initTheme / initFont。
+migrateLocalStorage()
 initTooltips()
 initTheme()
 initFont()
@@ -24,8 +27,11 @@ if ('serviceWorker' in navigator) {
 //   })
 // }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+// IndexedDB 迁移须早于 vault / 历史 / PDF 首次打开新库，否则会读到空库；迁移失败也照常渲染。
+void migrateIndexedDb().finally(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
+})

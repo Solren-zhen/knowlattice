@@ -15,7 +15,7 @@ const PRESETS = [
   { name: 'DeepSeek', url: 'https://chat.deepseek.com/', embed: false },
 ];
 
-const KEY = 'medvault-ai-src';
+const KEY = 'knowlattice-ai-src';
 
 interface Props {
   onClose: () => void;

@@ -49,7 +49,7 @@ import Rail from './Rail';
 import { clickable } from './a11y';
 import { toast, confirmBox } from '../core/feedback';
 
-const RECENTS_KEY = 'medvault-recents';
+const RECENTS_KEY = 'knowlattice-recents';
 
 function loadRecents(): string[] {
   try {

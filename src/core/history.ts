@@ -1,5 +1,5 @@
 /**
- * 笔记历史快照（IndexedDB 独立库 medvault-history，与 medvault / medvault-pdfs 互不干扰）：
+ * 笔记历史快照（IndexedDB 独立库 knowlattice-history，与 knowlattice / knowlattice-pdfs 互不干扰）：
  * - 每次保存后异步推入一条全量快照（纯文本体积小；同一内容不重复推）
  * - 每篇笔记保留最近 10 条；全库快照总量超上限时清理最旧的（防止单库无限膨胀）
  * - 删除笔记时不清理快照 → 误删的笔记可从「历史版本」面板找回
@@ -15,7 +15,7 @@ export interface Snapshot {
   content: string;
 }
 
-const DB_NAME = 'medvault-history';
+const DB_NAME = 'knowlattice-history';
 const STORE = 'snaps';
 /** 每篇笔记最多保留的快照数 */
 export const KEEP_PER_PATH = 10;
@@ -101,4 +101,3 @@ export async function listSnapshotPaths(): Promise<Map<string, number>> {
     return new Map();
   }
 }
-

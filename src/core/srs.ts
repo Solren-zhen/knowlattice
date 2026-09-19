@@ -10,7 +10,7 @@ export type Rating = 'again' | 'hard' | 'good' | 'easy';
 
 const f = fsrs(generatorParameters());
 
-const KEY = 'medvault-srs';
+const KEY = 'knowlattice-srs';
 
 /** 模块级缓存：复习界面每次渲染都会读卡（stats/当前卡），避免反复 JSON.parse 整个库 */
 let cache: Record<string, Card> | null = null;

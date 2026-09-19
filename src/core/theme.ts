@@ -12,11 +12,11 @@ export function currentTheme(): Theme {
 
 export function applyTheme(t: Theme) {
   document.documentElement.setAttribute('data-theme', t);
-  localStorage.setItem('medvault-theme', t);
+  localStorage.setItem('knowlattice-theme', t);
 }
 
 export function initTheme() {
-  const saved = localStorage.getItem('medvault-theme');
+  const saved = localStorage.getItem('knowlattice-theme');
   applyTheme(saved === 'dark' ? 'dark' : 'light');
 }
 
@@ -32,10 +32,10 @@ export function currentFont(): Font {
 
 export function applyFont(f: Font) {
   document.documentElement.setAttribute('data-font', f);
-  localStorage.setItem('medvault-font', f);
+  localStorage.setItem('knowlattice-font', f);
 }
 
 export function initFont() {
-  const saved = localStorage.getItem('medvault-font');
+  const saved = localStorage.getItem('knowlattice-font');
   applyFont(saved === 'serif' || saved === 'mono' ? saved : 'system');
 }
