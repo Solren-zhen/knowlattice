@@ -75,7 +75,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
         <button
           className="btn-small"
           title="导出全库笔记为 Anki 导入文件（.txt，可在 Anki「文件→导入」使用）"
-          onClick={() => downloadFile('medvault-笔记-anki.txt', notesToAnki(docs))}
+          onClick={() => downloadFile('knowlattice-笔记-anki.txt', notesToAnki(docs))}
         >
           导出 Anki (.txt)
         </button>
@@ -96,7 +96,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
         <button
           className="btn-small"
           title="导出复习调度数据（.json，可跨设备/备份恢复进度）"
-          onClick={() => downloadFile('medvault-复习数据.json', exportSrsJson())}
+          onClick={() => downloadFile('knowlattice-复习数据.json', exportSrsJson())}
         >
           导出复习数据
         </button>

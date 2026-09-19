@@ -59,7 +59,7 @@ paths.forEach((p, i) => {
     last_review: new Date(now - 86_400_000).toISOString(),
   };
 });
-localStorage.setItem('medvault-srs', JSON.stringify(cards));
+localStorage.setItem('knowlattice-srs', JSON.stringify(cards));
 
 const mistakes: MistakeMap = {};
 for (let i = 0; i < MISTAKES; i++) {
@@ -72,7 +72,7 @@ for (let i = 0; i < MISTAKES; i++) {
     lastFailedAt: now - i * 1000,
   };
 }
-localStorage.setItem('medvault-mistakes', JSON.stringify(mistakes));
+localStorage.setItem('knowlattice-mistakes', JSON.stringify(mistakes));
 
 // 预热模块级缓存，避免把「首次 JSON.parse 全库」算进每次迭代
 loadCards();

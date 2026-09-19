@@ -1,12 +1,12 @@
 /**
- * 打包「MedVault 离线版」：把构建产物 + 笔记/题库备份 + 零依赖启动器，组装成一个 zip。
+ * 打包「KnowLattice 离线版」：把构建产物 + 笔记/题库备份 + 零依赖启动器，组装成一个 zip。
  *
  * 用法：
- *   npm run pack                 # 先构建，再自动收集备份（应用导出的 / 根目录的 medvault-*.json）打包
+ *   npm run pack                 # 先构建，再自动收集备份（应用导出的 / 根目录的 knowlattice-*.json）打包
  *   npm run pack -- --no-build   # 跳过构建，直接用现有 dist
  *   npm run pack -- --data <文件># 指定某一份备份 .json（例如你刚在应用里导出的那份）
  *
- * 产物：仓库根目录 MedVault-离线版-YYYY-MM-DD.zip（已在 .gitignore 中忽略）
+ * 产物：仓库根目录 KnowLattice-离线版-YYYY-MM-DD.zip（已在 .gitignore 中忽略）
  * 包内全部用 ASCII 名称，避免不同解压工具把中文条目解成乱码；说明文本用 UTF-8 BOM，记事本可直接读。
  */
 import { existsSync, mkdirSync, rmSync, cpSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
@@ -41,7 +41,8 @@ if (!existsSync(join(dist, 'index.html'))) {
 const loadBackup = (p) => {
   try {
     const j = JSON.parse(readFileSync(p, 'utf8'));
-    return j && j.app === 'medvault' && Array.isArray(j.files) ? j : null;
+    // 兼容旧版以 medvault 命名的备份
+    return j && (j.app === 'knowlattice' || j.app === 'medvault') && Array.isArray(j.files) ? j : null;
   } catch {
     return null;
   }
@@ -57,15 +58,15 @@ if (explicitData) {
   }
   sources.push({ p, b });
 } else {
-  // 自动模式只取仓库根目录的 medvault-*.json（这些是应用导出的稳定副本），
+  // 自动模式只取仓库根目录的 knowlattice-*.json（这些是应用导出的稳定副本），
   // 避免误收 Downloads 里的旧备份；要带上应用里刚导出的最新版，用 --data 指定。
-  for (const f of readdirSync(repo).filter((f) => /^medvault-.*\.json$/.test(f)).sort()) {
+  for (const f of readdirSync(repo).filter((f) => /^(?:knowlattice|medvault)-.*\.json$/.test(f)).sort()) {
     const b = loadBackup(join(repo, f));
     if (b) sources.push({ p: join(repo, f), b });
   }
 }
 if (sources.length === 0) {
-  console.error('[pack] 没找到任何备份。放一份 medvault-*.json 到仓库根目录，或用 --data <文件> 指定。');
+  console.error('[pack] 没找到任何备份。放一份 knowlattice-*.json 到仓库根目录，或用 --data <文件> 指定。');
   process.exit(1);
 }
 
@@ -91,7 +92,7 @@ for (const { b } of sources) {
 }
 
 const merged = {
-  app: 'medvault',
+  app: 'knowlattice',
   version: 2,
   exportedAt: new Date().toISOString(),
   files: [...fileMap].map(([path, content]) => ({ path, content })),
@@ -105,12 +106,12 @@ const qCount = qbanks.reduce((n, q) => n + ((q && q.questions && q.questions.len
 // ---------- 3. 组装 ----------
 const staging = join(repo, '.yanagent', 'pack-staging');
 rmSync(staging, { recursive: true, force: true });
-const root = join(staging, 'MedVault-Portable');
+const root = join(staging, 'KnowLattice-Portable');
 mkdirSync(join(root, 'data'), { recursive: true });
 cpSync(dist, join(root, 'app'), { recursive: true });
 writeFileSync(join(root, 'data', 'notes-and-qbanks.json'), JSON.stringify(merged), 'utf8');
 cpSync(join(repo, 'scripts', 'pack', 'server.ps1'), join(root, 'server.ps1'));
-cpSync(join(repo, 'scripts', 'pack', 'Start-MedVault.bat'), join(root, 'Start-MedVault.bat'));
+cpSync(join(repo, 'scripts', 'pack', 'Start-KnowLattice.bat'), join(root, 'Start-KnowLattice.bat'));
 writeFileSync(join(root, 'README.txt'), '\ufeff' + readFileSync(join(repo, 'scripts', 'pack', 'README.txt'), 'utf8'), 'utf8');
 const notices = join(repo, 'THIRD-PARTY-NOTICES.md');
 if (existsSync(notices)) cpSync(notices, join(root, 'THIRD-PARTY-NOTICES.md'));
@@ -118,7 +119,7 @@ if (existsSync(notices)) cpSync(notices, join(root, 'THIRD-PARTY-NOTICES.md'));
 // ---------- 4. 压缩 ----------
 const now = new Date();
 const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-const zipPath = join(repo, `MedVault-离线版-${stamp}.zip`);
+const zipPath = join(repo, `KnowLattice-离线版-${stamp}.zip`);
 rmSync(zipPath, { force: true });
 log('压缩中（约 60 MB，请稍候）…');
 
@@ -126,7 +127,7 @@ const zipOk = () => existsSync(zipPath) && statSync(zipPath).size > 0;
 let ok = false;
 // 首选 Windows 自带的 bsdtar：写 zip 稳定，不受 Compress-Archive 的 BinaryReader 缺陷影响
 try {
-  execFileSync('tar.exe', ['-a', '-c', '-f', zipPath, '-C', staging, 'MedVault-Portable'], { cwd: repo, stdio: 'inherit' });
+  execFileSync('tar.exe', ['-a', '-c', '-f', zipPath, '-C', staging, 'KnowLattice-Portable'], { cwd: repo, stdio: 'inherit' });
   ok = zipOk();
 } catch {
   log('tar 打包失败，改用 Compress-Archive…');

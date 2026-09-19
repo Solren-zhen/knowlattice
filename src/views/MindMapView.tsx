@@ -87,9 +87,9 @@ const CSS_VARS = {
   '--map-padding': '56px 72px',
 } as const;
 
-function medvaultTheme(dark: boolean) {
+function knowlatticeTheme(dark: boolean) {
   return {
-    name: dark ? 'medvault-dark' : 'medvault-light',
+    name: dark ? 'knowlattice-dark' : 'knowlattice-light',
     type: (dark ? 'dark' : 'light') as 'dark' | 'light',
     palette: PALETTE,
     cssVar: { ...CSS_VARS },
@@ -181,7 +181,7 @@ export default function MindMapView({ content, title, onClose, onOpenWiki, onSav
         keypress: true,
         overflowHidden: false,
         mouseSelectionButton: 0,
-        theme: medvaultTheme(dark),
+        theme: knowlatticeTheme(dark),
       });
       mind.init(data as never).catch((e: unknown) => console.error('思维导图初始化失败：', e));
       mindRef.current = mind;

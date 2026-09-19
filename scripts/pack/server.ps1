@@ -1,4 +1,4 @@
-# MedVault local static server.
+# KnowLattice local static server.
 # Zero dependency: runs on the PowerShell that ships with Windows (5.1+).
 # Serves the app folder over http://127.0.0.1:<port>/ (loopback only, no LAN exposure).
 # ASCII-only source on purpose: Windows PowerShell 5.1 mis-decodes non-BOM script files.
@@ -79,7 +79,7 @@ if (-not $listener) {
 
 $url = "http://127.0.0.1:$Port/"
 Write-Host ''
-Write-Host "  MedVault is running at  $url" -ForegroundColor Green
+Write-Host "  KnowLattice is running at  $url" -ForegroundColor Green
 Write-Host '  Keep this window open while using the app.' -ForegroundColor DarkGray
 Write-Host '  Close this window to stop the server.' -ForegroundColor DarkGray
 Write-Host ''

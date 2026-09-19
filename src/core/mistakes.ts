@@ -18,7 +18,7 @@ export interface MistakeRecord {
 
 export type MistakeMap = Record<string, MistakeRecord>;
 
-const KEY = 'medvault-mistakes';
+const KEY = 'knowlattice-mistakes';
 
 /** 模块级缓存：避免渲染期反复 JSON.parse 整个错题表 */
 let cache: MistakeMap | null = null;

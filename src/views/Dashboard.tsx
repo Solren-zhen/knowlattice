@@ -26,7 +26,7 @@ export default function Dashboard({ docs, onClose }: Props) {
     const banks = loadBanks();
     const totalQ = banks.reduce((n, b) => n + b.questions.length, 0);
     let todos: TodoLite[] = [];
-    try { todos = JSON.parse(localStorage.getItem('medvault-todos') ?? '[]'); } catch { /* ignore */ }
+    try { todos = JSON.parse(localStorage.getItem('knowlattice-todos') ?? '[]'); } catch { /* ignore */ }
     const todoDone = todos.filter((t) => t.done).length;
     const s = streak();
     const days = last7();

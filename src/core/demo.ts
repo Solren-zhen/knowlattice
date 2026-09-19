@@ -1,11 +1,11 @@
 /**
  * 演示数据：一键载入一批带 [[双链]]、#标签、frontmatter 的示例笔记 + 题库/待办/错题/打卡，
  * 让用户马上体验 树/双链/标签/图谱/复习/题库/错题/待办/学习统计 全部功能。
- * 数据写入 IndexedDB(medvault.files) + localStorage；写入后调用方 reload 重新加载 vault。
+ * 数据写入 IndexedDB(knowlattice.files) + localStorage；写入后调用方 reload 重新加载 vault。
  */
 import { openDB } from 'idb';
 
-const DB_NAME = 'medvault';
+const DB_NAME = 'knowlattice';
 interface DemoNote {
   path: string;
   title: string;
@@ -161,9 +161,9 @@ export async function seedDemo(): Promise<number> {
     tx.objectStore('files').put({ path: n.path, content, mtime, size: new TextEncoder().encode(content).length });
   }
   await tx.done;
-  localStorage.setItem('medvault-qbanks', JSON.stringify([DEMO_BANK]));
-  localStorage.setItem('medvault-todos', JSON.stringify(DEMO_TODOS));
-  localStorage.setItem('medvault-mistakes', JSON.stringify(DEMO_MISTAKES));
-  localStorage.setItem('medvault-days', JSON.stringify(demoDays()));
+  localStorage.setItem('knowlattice-qbanks', JSON.stringify([DEMO_BANK]));
+  localStorage.setItem('knowlattice-todos', JSON.stringify(DEMO_TODOS));
+  localStorage.setItem('knowlattice-mistakes', JSON.stringify(DEMO_MISTAKES));
+  localStorage.setItem('knowlattice-days', JSON.stringify(demoDays()));
   return NOTES.length;
 }

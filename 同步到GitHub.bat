@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
-title MedVault 同步到 GitHub
+title KnowLattice 同步到 GitHub
 cd /d "%~dp0"
 
 echo ================================
-echo   MedVault 一键同步
+echo   KnowLattice 一键同步
 echo ================================
 echo.
 
@@ -19,7 +19,7 @@ echo 本次改动：
 git status --short
 echo.
 set /p MSG=请输入本次更新的说明（直接回车则用默认）: 
-if "%MSG%"=="" set MSG=更新 MedVault
+if "%MSG%"=="" set MSG=更新 KnowLattice
 
 echo.
 echo 正在提交并推送...

@@ -112,7 +112,7 @@ export async function exportApkg(docs: Map<string, string>, paths?: string[]): P
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `medvault-notes-${new Date().toISOString().slice(0, 10)}.apkg`;
+  a.download = `knowlattice-notes-${new Date().toISOString().slice(0, 10)}.apkg`;
   a.click();
   URL.revokeObjectURL(url);
   return count;

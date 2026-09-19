@@ -1,8 +1,8 @@
-MedVault（晶格）离线版 · 使用说明
+KnowLattice（晶格）离线版 · 使用说明
 ==================================
 
 一、启动
-  1. 双击本文件夹里的  Start-MedVault.bat
+  1. 双击本文件夹里的  Start-KnowLattice.bat
   2. 会弹出一个黑色命令窗口（这是跑在你自己电脑上的小网页服务，正常现象），
      并自动用默认浏览器打开应用。
   3. 用完直接关闭那个黑窗口即可。
@@ -25,7 +25,7 @@ MedVault（晶格）离线版 · 使用说明
   都会丢，请养成定期「⋯ → 备份到 .json」导出一份的习惯。
 
 四、常见问题
-  · 黑窗口一闪就没了：右键 Start-MedVault.bat →「以管理员身份运行」。
+  · 黑窗口一闪就没了：右键 Start-KnowLattice.bat →「以管理员身份运行」。
   · 浏览器没自动打开：查看黑窗口里显示的地址（形如 http://127.0.0.1:8790/），
     手动复制到浏览器地址栏打开。
   · 端口被占用：程序会自动换一个端口，以黑窗口里显示的地址为准。
@@ -35,5 +35,5 @@ MedVault（晶格）离线版 · 使用说明
   app/                        应用本体（静态网页，含全部功能）
   data/notes-and-qbanks.json  随包笔记与题库备份
   server.ps1                  本机小服务器（用 Windows 自带 PowerShell，无需安装任何东西）
-  Start-MedVault.bat          启动入口
+  Start-KnowLattice.bat       启动入口
   THIRD-PARTY-NOTICES.md      第三方组件与数据许可

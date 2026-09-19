@@ -33,7 +33,7 @@ Thumbs.db
 .shots/
 
 # 用户交付物（笔记/题库备份 .json，属本地数据，不入库）
-medvault-导入-*.json
+knowlattice-导入-*.json
 
 # 运行日志（dev server 持续写入，入库会让 git status 永远脏）
 *.log

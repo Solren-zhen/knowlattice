@@ -38,7 +38,7 @@ export interface QuizBank {
   questions: QuizQuestion[];
 }
 
-const KEY = 'medvault-qbanks';
+const KEY = 'knowlattice-qbanks';
 
 export function loadBanks(): QuizBank[] {
   try {

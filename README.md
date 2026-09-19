@@ -184,10 +184,10 @@ npm run pack -- --no-build   # 跳过构建，用现有 dist
 npm run pack -- --data 某份备份.json   # 指定随包资料
 ```
 
-产出仓库根目录 `MedVault-离线版-YYYY-MM-DD.zip`，结构：
+产出仓库根目录 `KnowLattice-离线版-YYYY-MM-DD.zip`，结构：
 
 ```
-Start-MedVault.bat   双击启动（内部起一个只监听 127.0.0.1 的小服务，无依赖、无需安装）
+Start-KnowLattice.bat   双击启动（内部起一个只监听 127.0.0.1 的小服务，无依赖、无需安装）
 server.ps1           该服务本体（Windows 自带 PowerShell 5.1 即可）
 app/                 构建产物（全部功能，离线可用）
 data/notes-and-qbanks.json   随包笔记 + 题库（由备份 .json 合并而来）
@@ -196,7 +196,7 @@ THIRD-PARTY-NOTICES.md
 ```
 
 - 为什么需要一个小服务：产物是 ES module + WASM，浏览器用 `file://` 打开会被 CORS 拦，必须经 HTTP 提供；服务只绑定本机回环地址，不联网、不上传数据。
-- 随包资料来自仓库根目录的 `medvault-*.json`（应用导出的备份），按 `files` 路径**去重合并**、`qbanks` 合并；因此多份备份会被合成一份。
+- 随包资料来自仓库根目录的 `knowlattice-*.json`（应用导出的备份），按 `files` 路径**去重合并**、`qbanks` 合并；因此多份备份会被合成一份。
 - 想带上「应用里刚改过的最新笔记」：先在应用里「⋯ → 备份到 .json」，再 `npm run pack -- --data <刚导出的文件>`。
 
 ### 桌面版（Tauri，可选）

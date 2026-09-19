@@ -13,7 +13,7 @@ interface Todo {
   completedAt?: number;
 }
 
-const KEY = 'medvault-todos';
+const KEY = 'knowlattice-todos';
 type Filter = 'all' | 'active' | 'done';
 
 function load(): Todo[] {
