@@ -25,6 +25,8 @@ function seedTodo(over: Record<string, unknown> = {}) {
 
 const todos = (): Array<Record<string, unknown>> => JSON.parse(localStorage.getItem('knowlattice-todos') ?? '[]');
 const records = (): Array<Record<string, unknown>> => JSON.parse(localStorage.getItem('knowlattice-pomodoros') ?? '[]');
+const composer = () => screen.getByPlaceholderText(/加一条/) as HTMLInputElement;
+const foot = () => document.querySelector('.todo-foot') as HTMLElement;
 const chip = () => document.querySelector('.wb-chip') as HTMLElement;
 /**
  * 标签页按钮。不能全局按名字取：「专注」这个词在待办行上也有一份（行上的一键去专注），
@@ -192,6 +194,34 @@ describe('番茄与待办联动', () => {
     expect(todos()[0].pomos).toBe(1);
     // 已经进入下一阶段，而不是卡在到点的专注上
     expect(chip().textContent).toContain('短休息');
+  });
+});
+
+describe('底部短语法说明', () => {
+  it('四个符号各有含义和示例', () => {
+    renderView();
+    for (const [sign, desc] of [['@', '日期'], ['!', '优先级'], ['#', '关联笔记'], ['*', '重复']]) {
+      const item = within(foot()).getByText(desc).closest('.todo-foot__item') as HTMLElement;
+      expect(within(item).getByText(sign)).toBeTruthy();
+    }
+    expect(foot().textContent).toContain('没认出来的词原样留在正文里');
+  });
+
+  it('点一下示例就插进输入框（追加式，末尾补空格）', () => {
+    renderView();
+    fireEvent.click(within(foot()).getByText('@明天'));
+    expect(composer().value).toBe('@明天 ');
+    fireEvent.click(within(foot()).getByText('!高'));
+    expect(composer().value).toBe('@明天 !高 ');
+    // 插进去的就是真语法：预览认出来了
+    fireEvent.click(within(foot()).getByText('*每周'));
+    expect(document.querySelector('.todo-chips')!.textContent).toContain('每周');
+  });
+
+  it('不再占地方列快捷键（那块地方改成解释短语法了）', () => {
+    renderView();
+    expect(foot().textContent).not.toContain('快捷键');
+    expect(foot().querySelector('kbd')).toBeNull();
   });
 });
 
