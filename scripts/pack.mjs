@@ -306,6 +306,9 @@ copyTree(dist, join(root, 'app'));
 writeFileSync(join(root, 'data', 'notes-and-qbanks.json'), JSON.stringify(merged), 'utf8');
 copyTree(join(repo, 'scripts', 'pack', 'server.ps1'), join(root, 'server.ps1'));
 copyTree(join(repo, 'scripts', 'pack', 'Start-KnowLattice.bat'), join(root, 'Start-KnowLattice.bat'));
+// macOS / Linux：同一个服务器的 Python 版（行为与 server.ps1 对齐）+ 双击入口
+copyTree(join(repo, 'scripts', 'pack', 'server.py'), join(root, 'server.py'));
+copyTree(join(repo, 'scripts', 'pack', 'start-knowlattice.command'), join(root, 'start-knowlattice.command'));
 writeFileSync(join(root, 'README.txt'), '\ufeff' + readFileSync(join(repo, 'scripts', 'pack', 'README.txt'), 'utf8'), 'utf8');
 const notices = join(repo, 'THIRD-PARTY-NOTICES.md');
 if (existsSync(notices)) copyTree(notices, join(root, 'THIRD-PARTY-NOTICES.md'));
@@ -331,6 +334,40 @@ copyTree(join(repo, 'scripts', 'pack', 'source-README.txt'), join(srcRoot, 'READ
 log(`已随包附上源代码:${srcRoot}`);
 
 // ---------- 4. 压缩 ----------
+/**
+ * 只改 zip 中央目录里某条记录的 Unix 权限位，不动压缩数据、不动 CRC，
+ * 所以不需要把 65 MB 重新压一遍。
+ * 为什么需要：macOS 的访达双击 .command 靠这个位决定能不能运行，
+ * 而 Windows 文件系统没有可执行位，bsdtar 写出来一律 0644。
+ */
+function setZipUnixMode(zipFile, entrySuffix, mode) {
+  const buf = readFileSync(zipFile);
+  // 从尾部往前找 EOCD（0x06054b50）：中央目录的偏移与条数在里面
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 22 - 65535; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return 0;
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  let patched = 0;
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) break;
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
+    if (name.endsWith(entrySuffix)) {
+      buf.writeUInt16LE(0x031e, p + 4); // version made by：高字节 3 = Unix
+      buf.writeUInt32LE(((0o100000 | mode) << 16) >>> 0, p + 38); // external attributes 高 16 位
+      patched++;
+    }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  if (patched) writeFileSync(zipFile, buf);
+  return patched;
+}
+
 const now = new Date();
 const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 const zipPath = join(repo, `KnowLattice-离线版-${stamp}.zip`);
@@ -370,6 +407,22 @@ if (!ok) {
 if (!ok) {
   console.error('[pack] 压缩失败，未生成 zip（staging 保留在 .yanagent/pack-staging 以便排查）');
   process.exit(1);
+}
+
+// ---------- 4a. macOS 的可执行位 ----------
+// 「访达」双击 .command 能不能跑，取决于 zip 里那条记录的 Unix 权限位。Windows 上没有
+// 可执行位，bsdtar 写出来的是 0644——包发出去，同学双击只会看到「没有权限」。
+// 这里只改中央目录那一条记录（external attributes 的高 16 位就是 Unix 模式），
+// 不动压缩数据、不动 CRC，所以不需要重新压缩 65 MB。
+{
+  // 会命中两条：包根一份，source/scripts/pack/ 下的源码副本一份——两份都该是可执行的。
+  const n = setZipUnixMode(zipPath, 'start-knowlattice.command', 0o755);
+  if (n >= 1) {
+    log(`已给 ${n} 处 start-knowlattice.command 写入 Unix 可执行位（macOS 双击需要）`);
+  } else {
+    console.error('[pack] 警告：没能给 start-knowlattice.command 写入可执行位（命中 0 条）');
+    console.error('[pack] macOS 上需要手动执行：chmod +x start-knowlattice.command');
+  }
 }
 
 // ---------- 4b. 对账：zip 里的条目必须与暂存树一一对应 ----------
