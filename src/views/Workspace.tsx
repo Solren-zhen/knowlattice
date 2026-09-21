@@ -783,7 +783,14 @@ export default function Workspace() {
           />
         </Suspense>
       )}
-      {todoOpen && <TodoView onClose={() => setTodoOpen(false)} docs={vault.docs} onOpenPath={(p) => { setTodoOpen(false); openNote(p); }} />}
+      {todoOpen && (
+        <TodoView
+          onClose={() => setTodoOpen(false)}
+          docs={vault.docs}
+          onOpenPath={(p) => { setTodoOpen(false); openNote(p); }}
+          onSaveNote={(path, content) => vault.save(path, content)}
+        />
+      )}
       {tagOpen && <TagBrowser docs={vault.docs} onOpenPath={(p) => { setTagOpen(false); openNote(p); }} onClose={() => setTagOpen(false)} />}
       {dashOpen && <Dashboard docs={vault.docs} onClose={() => setDashOpen(false)} />}
       {aiOpen && <AiPanel onClose={() => setAiOpen(false)} />}
