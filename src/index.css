@@ -2422,6 +2422,7 @@ a.wikilink.missing::after {
   font-size: var(--fs-lead); font-weight: 650; line-height: 1.7;
   letter-spacing: -0.01em;
   margin: 0 0 var(--sp-4);
+  white-space: pre-wrap; /* 自判题题干可能带案例/选项多行，不保留换行会挤成一坨 */
 }
 .quiz-opts { display: flex; flex-direction: column; gap: 9px; }
 .opt {
