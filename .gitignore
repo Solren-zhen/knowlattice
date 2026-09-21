@@ -34,6 +34,16 @@ Thumbs.db
 # 代码分析产物
 .ua/
 
+# 临时草稿（asar 解包脚本等；里面有非 UTF-8 的 main.js，会让 npm run lint 直接报错）
+_tmp_yan/
+
+# Yan Agent 自己的备份目录
+_yan-agent-backup-*/
+
+# DSH Desktop 的工作文件（被占用删不掉，也不属于本项目；留着会让 git status 永远脏）
+token-cost-calc.univer
+verify2.univer
+
 # 视觉审计工作区（截图 harness / 基线图 / 演示数据，均本地生成）
 .shots/
 
