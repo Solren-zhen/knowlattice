@@ -28,7 +28,7 @@ function catchMessage(fn: () => unknown): string {
 }
 
 describe('题库导入：失败也要指路', () => {
-  it('笔记备份文件 → 明确告知走「数据管理 → 导入备份」', () => {
+  it('笔记备份文件 → 明确告知走「从备份 .json 恢复」', () => {
     const backup = {
       app: 'knowlattice',
       version: 5,
@@ -37,7 +37,8 @@ describe('题库导入：失败也要指路', () => {
     };
     const msg = catchMessage(() => parseQbankJson(JSON.stringify(backup), '绿皮书'));
     expect(msg).toMatch(/笔记备份/);
-    expect(msg).toMatch(/数据管理 → 导入备份/);
+    expect(msg).toMatch(/笔记树右上角/);
+    expect(msg).toMatch(/从备份 \.json 恢复/);
     expect(msg).toMatch(/questions/);
   });
 
@@ -89,7 +90,7 @@ describe('题库存不下时：不能把浏览器英文原文甩给用户', () =
     expect(msg).toMatch(/题库存不下/);
     expect(msg).toMatch(/约 5 MB/);
     expect(msg).toMatch(/删掉几个/);
-    expect(msg).toMatch(/数据管理 → 导入备份/);
+    expect(msg).toMatch(/从备份 \.json 恢复/);
     expect(msg).not.toMatch(/quota|Storage/); // 英文原文不该漏出去
   });
 });
