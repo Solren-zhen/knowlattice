@@ -1,0 +1,14 @@
+# 换行符钉死（只钉真正需要的，其余交给 core.autocrlf）
+#
+# 起因：这台机器上 core.autocrlf=true，重新 checkout 会把 shell 脚本写成 CRLF。
+# 而 macOS / Linux 的 bash 遇到 \r 会把它当成命令的一部分——最典型的是
+#   python3 -c 'import sys; …'
+# 变成
+#   python3 -c 'import sys; …\r'
+# 直接语法错误，于是「明明装了 Python 却提示没装」。离线包里的
+# start-knowlattice.command 是要给 Mac 双击的，所以必须钉死 LF。
+#
+# .ps1 / .bat 故意不钉：Windows 脚本用 CRLF 是正确且更稳的，交给 autocrlf 就好。
+*.command text eol=lf
+*.sh      text eol=lf
+*.py      text eol=lf
