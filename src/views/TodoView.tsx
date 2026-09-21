@@ -72,6 +72,14 @@ const SORTS: Array<{ key: SortMode; label: string }> = [
 const PRIORITY_LABEL: Record<TodoPriority, string> = { 1: '高', 2: '中', 3: '低' };
 const PRIORITY_ORDER: TodoPriority[] = [1, 2, 3];
 
+/** 面板底部的短语法说明：符号 → 含义 → 能点的示例（点了直接插进输入框） */
+const SYNTAX: Array<{ sign: string; desc: string; examples: string[] }> = [
+  { sign: '@', desc: '日期', examples: ['@今天', '@明天', '@周一', '@9-25', '@2026-09-25', '@+3'] },
+  { sign: '!', desc: '优先级', examples: ['!高', '!中', '!低'] },
+  { sign: '#', desc: '关联笔记', examples: ['#呼吸系统'] },
+  { sign: '*', desc: '重复', examples: ['*每天', '*工作日', '*每周', '*每两周', '*每月'] },
+];
+
 function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
     const v = localStorage.getItem(key) as T | null;
@@ -198,6 +206,12 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
     if (!parsed.text) return;
     commit([makeTodo(parsed), ...list]);
     setText('');
+    composerRef.current?.focus();
+  };
+
+  /** 点一下底部的短语法示例就插进输入框（末尾补空格），省得手打 */
+  const insertToken = (tok: string) => {
+    setText((t) => (t.trim() === '' ? `${tok} ` : `${t.trimEnd()} ${tok} `));
     composerRef.current?.focus();
   };
 
@@ -620,15 +634,6 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
               </div>
             )}
 
-            {view !== 'notes' && (
-              <div className="todo-hint muted">
-                短语法：<kbd>@今天</kbd><kbd>@明天</kbd><kbd>@周一</kbd><kbd>@9-25</kbd> ·
-                <kbd>!高</kbd><kbd>!中</kbd><kbd>!低</kbd> ·
-                <kbd>#笔记名</kbd> ·
-                <kbd>*每天</kbd><kbd>*工作日</kbd><kbd>*每周</kbd><kbd>*每两周</kbd><kbd>*每月</kbd>
-              </div>
-            )}
-
             <div className="todo-toolbar">
               <input
                 className="todo-search"
@@ -949,11 +954,30 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
           ))}
         </datalist>
 
-        <footer className="todo-foot muted">
-          快捷键：<kbd>n</kbd> 新建 · <kbd>↑</kbd><kbd>↓</kbd>/<kbd>j</kbd><kbd>k</kbd> 选择 ·
-          <kbd>x</kbd> 勾选 · <kbd>Enter</kbd> 编辑 · <kbd>Delete</kbd> 删除 · <kbd>e</kbd> 详情 ·
-          <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 优先级 · <kbd>0</kbd> 清除 · <kbd>m</kbd> 多选 ·
-          <kbd>Ctrl</kbd>+点击 多选 · <kbd>Shift</kbd>+点击 范围选 · 双击文字也能编辑
+        <footer className="todo-foot">
+          <div className="todo-foot__lead muted">
+            短语法：一句话记一条，边打边认。没认出来的词原样留在正文里，不会被吃掉。
+          </div>
+          <div className="todo-foot__grid">
+            {SYNTAX.map((g) => (
+              <div className="todo-foot__item" key={g.sign}>
+                <span className="todo-foot__sign">{g.sign}</span>
+                <span className="todo-foot__desc">{g.desc}</span>
+                <span className="todo-foot__examples">
+                  {g.examples.map((ex) => (
+                    <button
+                      key={ex}
+                      className="todo-foot__ex"
+                      title={`插到输入框：${ex}`}
+                      onClick={() => insertToken(ex)}
+                    >
+                      {ex}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </div>
         </footer>
         </>)}
 

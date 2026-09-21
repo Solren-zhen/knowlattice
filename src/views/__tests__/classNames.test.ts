@@ -24,7 +24,7 @@ function classesOf(src: string): Set<string> {
   for (const m of src.matchAll(/className=(?:"([^"]*)"|\{`([^`]*)`\})/g)) {
     const raw = (m[1] ?? m[2] ?? '').replace(/\$\{[^}]*\}/g, ' ');
     for (const tok of raw.split(/[\s'"]+/)) {
-      if (/^(todo|wb)-[a-z0-9-]+$/.test(tok)) out.add(tok);
+      if (/^(todo|wb)-[a-z0-9_-]+$/.test(tok)) out.add(tok);
     }
   }
   return out;
