@@ -4,7 +4,7 @@
  * 数据写入 IndexedDB(knowlattice.files) + localStorage；写入后调用方 reload 重新加载 vault。
  */
 import { openDB } from 'idb';
-import { saveTodos } from './todos';
+import { saveTodos, dayKey, addDays, type Todo } from './todos';
 import { importDays } from './stats';
 
 const DB_NAME = 'knowlattice';
@@ -124,11 +124,19 @@ const DEMO_BANK = {
   ],
 };
 
-const DEMO_TODOS = [
-  { id: 'd1', text: '复习·呼吸章节（氧解离曲线/波尔效应）', done: false, createdAt: Date.now() },
-  { id: 'd2', text: '整理生化·糖代谢思维导图', done: false, createdAt: Date.now() },
-  { id: 'd3', text: '刷一遍「演示题库·生理/生化」', done: false, createdAt: Date.now() },
-  { id: 'd4', text: '背诵三尖瓣位置口诀', done: true, createdAt: Date.now() },
+const DEMO_TODOS: Todo[] = [
+  {
+    id: 'd1', text: '复习·呼吸章节（氧解离曲线/波尔效应）', done: false, createdAt: Date.now(),
+    due: dayKey(), priority: 1,
+    subtasks: [
+      { id: 'd1s1', text: '画一遍氧解离曲线', done: true },
+      { id: 'd1s2', text: '背波尔效应三个影响因素', done: false },
+    ],
+  },
+  { id: 'd2', text: '整理生化·糖代谢思维导图', done: false, createdAt: Date.now(), due: addDays(dayKey(), 1), priority: 2 },
+  { id: 'd3', text: '刷一遍「演示题库·生理/生化」', done: false, createdAt: Date.now(), due: dayKey(), priority: 3 },
+  { id: 'd4', text: '背诵三尖瓣位置口诀', done: true, createdAt: Date.now(), completedAt: Date.now() },
+  { id: 'd5', text: '每天背 30 个解剖名词', done: false, createdAt: Date.now(), repeat: 'daily' },
 ];
 
 /** 近 7 天学习记录（含今天，便于展示打卡与柱状图） */
