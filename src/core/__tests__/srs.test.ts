@@ -153,8 +153,12 @@ describe('导入导出（回归：due 序列化为 ISO 字符串）', () => {
     localStorage.clear();
     expect(srs.importSrsFromJson(backup)).toBe(1);
     expect(Object.keys(srs.exportSrsState())).toEqual(['a.md']);
-    // 裸状态对象直接导入
+    // 裸状态对象直接导入：先把导出串取出来再清空存储。
+    // 注意顺序——loadCards 现在以 localStorage 为准（缓存按原始字符串失效，
+    // 这样另一个标签页/外部清空后不会拿着旧调度算队列），所以「清空之后再导出」只能得到空。
+    const bare = srs.exportSrsJson();
     localStorage.clear();
-    expect(srs.importSrsFromJson(srs.exportSrsJson())).toBe(1);
+    expect(srs.importSrsFromJson(bare)).toBe(1);
+    expect(Object.keys(srs.exportSrsState())).toEqual(['a.md']);
   });
 });

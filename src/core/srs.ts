@@ -18,13 +18,24 @@ const f = fsrs(generatorParameters());
 
 const KEY = 'knowlattice-srs';
 
-/** 模块级缓存：复习界面每次渲染都会读卡（stats/当前卡），避免反复 JSON.parse 整个库 */
-let cache: Record<string, Card> | null = null;
+/**
+ * 模块级缓存：复习界面每次渲染都会读卡（stats/当前卡），避免反复 JSON.parse 整个库。
+ * 缓存**按 localStorage 原始字符串**比对：外部直接写存储（另一个标签页、备份导入、
+ * 测试里 clear）时下一次读会自己失效重解析，不会拿着旧调度算出错的复习队列。
+ */
+let cacheRaw: string | null = null;
+let cache: Record<string, Card> = {};
 
 export function loadCards(): Record<string, Card> {
-  if (cache) return cache;
+  let rawStr: string;
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Record<string, unknown>;
+    rawStr = localStorage.getItem(KEY) ?? '{}';
+  } catch {
+    return cache;
+  }
+  if (rawStr === cacheRaw) return cache;
+  try {
+    const raw = JSON.parse(rawStr) as Record<string, unknown>;
     const out: Record<string, Card> = {};
     for (const [k, v] of Object.entries(raw)) {
       const c = v as Partial<Card> | null;
@@ -41,16 +52,17 @@ export function loadCards(): Record<string, Card> {
       }
     }
     cache = out;
-    return out;
   } catch {
     cache = {};
-    return cache;
   }
+  cacheRaw = rawStr;
+  return cache;
 }
 
 function save(cards: Record<string, Card>) {
   cache = cards;
-  localStorage.setItem(KEY, JSON.stringify(cards));
+  cacheRaw = JSON.stringify(cards);
+  localStorage.setItem(KEY, cacheRaw);
 }
 
 const RATE_MAP: Record<Rating, FSRSRating> = {
