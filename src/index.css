@@ -1807,8 +1807,6 @@ a.wikilink.missing::after {
 .todo-chip.due { color: var(--accent); border-color: var(--accent); }
 .todo-chip.pri { color: var(--danger); border-color: var(--danger); }
 .todo-chip.rep { color: var(--success); border-color: var(--success); }
-.todo-hint { padding: 0 var(--sp-4) 8px; font-size: var(--fs-micro); color: var(--muted); line-height: 1.9; }
-.todo-hint kbd { margin: 0 2px; }
 .todo-search { flex: 1 1 150px; min-width: 120px; padding: 4px 10px; font-size: var(--fs-caption); border: 1px solid var(--border); border-radius: 999px; background: var(--bg-raised); color: var(--text); }
 .todo-search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .todo-sort { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-caption); color: var(--muted); }
@@ -1843,7 +1841,23 @@ a.wikilink.missing::after {
 .todo-sub span { flex: 1; min-width: 0; }
 .todo-sub.done span { color: var(--muted); text-decoration: line-through; }
 .todo-sub .todo-check { width: 16px; height: 16px; font-size: 10px; }
-.todo-foot { padding: 8px var(--sp-4); border-top: 1px solid var(--border); line-height: 1.9; font-size: var(--fs-micro); }
+.todo-foot { padding: 10px var(--sp-4) 12px; border-top: 1px solid var(--border); font-size: var(--fs-micro); }
+.todo-foot__lead { line-height: 1.7; }
+.todo-foot__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px var(--sp-4); margin-top: 6px; }
+.todo-foot__item { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.todo-foot__sign {
+  flex: none; width: 16px; height: 16px; line-height: 16px; text-align: center;
+  border-radius: var(--r-xs); background: var(--accent-soft); color: var(--accent);
+  font-family: var(--font-mono); font-size: var(--fs-micro); align-self: center;
+}
+.todo-foot__desc { flex: none; color: var(--muted); }
+.todo-foot__examples { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.todo-foot__ex {
+  padding: 1px 6px; font-family: inherit; font-size: var(--fs-micro);
+  color: var(--muted); background: none; border: 1px dashed var(--border); border-radius: 6px;
+  cursor: pointer; transition: all var(--t-fast) var(--ease);
+}
+.todo-foot__ex:hover { color: var(--accent); border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
 
 /* ---- M9：三栏布局本体 ---- */
 .todo-body {
@@ -1967,6 +1981,7 @@ a.wikilink.missing::after {
 }
 .wb-chip:hover { color: var(--text); border-color: var(--border-strong); }
 .wb-chip.running { color: var(--accent); border-color: var(--border-accent); background: var(--accent-soft); }
+.wb-chip__phase { font-size: var(--fs-micro); letter-spacing: 0.04em; }
 .wb-chip__time { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
 .wb-chip.running .wb-chip__time { color: var(--accent); }
 
