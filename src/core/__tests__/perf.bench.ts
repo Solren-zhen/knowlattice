@@ -13,6 +13,7 @@ import { rebuildLinkIndex } from '../linkIndex';
 import { VaultSearch } from '../searchIndex';
 import { parseFrontmatter } from '../parser';
 import { dueQueue, loadCards } from '../srs';
+import { buildCards } from '../srsCards';
 import { chapterHeat, loadMistakes, type MistakeMap } from '../mistakes';
 
 const N = 5000;
@@ -77,6 +78,12 @@ localStorage.setItem('knowlattice-mistakes', JSON.stringify(mistakes));
 // 预热模块级缓存，避免把「首次 JSON.parse 全库」算进每次迭代
 loadCards();
 const mistakesLoaded = loadMistakes();
+// 建卡（一篇一卡 → 按小节切）本身也要测：全库建卡是复习面板打开时的一次性开销
+const benchCards = buildCards(paths, docs);
+
+test('全库建卡 buildCards', async ({ bench }) => {
+  await bench(`buildCards @${N}`, () => buildCards(paths, docs)).run();
+});
 
 test('目录树 buildTree', async ({ bench }) => {
   await bench(`buildTree @${N}`, () => buildTree(paths)).run();
@@ -93,7 +100,7 @@ test('frontmatter 解析（未走缓存）', async ({ bench }) => {
 });
 
 test('复习到期队列 dueQueue', async ({ bench }) => {
-  await bench(`dueQueue @${N}`, () => dueQueue(paths, now)).run();
+  await bench(`dueQueue @${benchCards.length}`, () => dueQueue(benchCards, now)).run();
 });
 
 test('错题章节热力 chapterHeat', async ({ bench }) => {

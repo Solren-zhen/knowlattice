@@ -9,6 +9,8 @@ node_modules/
 
 # 离线便携包解压出来的目录（62MB 构建产物，靠 npm run pack 随时重出）
 KnowLattice-离线版-*/
+# zip 内层的顶层目录名：在仓库根目录「解压到当前文件夹」时会解出这个（同一份构建产物）
+KnowLattice-Portable/
 
 # 下载残留
 *.qkdownloading

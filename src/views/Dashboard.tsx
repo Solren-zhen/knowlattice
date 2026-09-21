@@ -5,6 +5,7 @@
 import { useMemo } from 'react';
 import { useEsc } from './useEsc';
 import { srsStats } from '../core/srs';
+import { buildCards } from '../core/srsCards';
 import { toast } from '../core/feedback';
 import { loadMistakes } from '../core/mistakes';
 import { loadBanks } from '../core/qbank';
@@ -23,7 +24,8 @@ export default function Dashboard({ docs, onClose }: Props) {
   useEsc(onClose);
   const mdPaths = useMemo(() => [...docs.keys()].filter((p) => p.endsWith('.md')), [docs]);
   const rep = useMemo(() => {
-    const r = srsStats(mdPaths);
+    // 统计单位是「卡」（一篇笔记按小节切出多张），见 core/srsCards.ts
+    const r = srsStats(buildCards(mdPaths, docs));
     const mistakes = Object.keys(loadMistakes()).length;
     const banks = loadBanks();
     const totalQ = banks.reduce((n, b) => n + b.questions.length, 0);
@@ -33,7 +35,7 @@ export default function Dashboard({ docs, onClose }: Props) {
     const days = last7();
     const maxDay = Math.max(1, ...days.map((d) => d.count));
     return { r, mistakes, bankCount: banks.length, totalQ, todoDone, todos: todos.length, s, days, maxDay };
-  }, [mdPaths]);
+  }, [mdPaths, docs]);
 
   const weekLabels = ['一', '二', '三', '四', '五', '六', '日'];
 
