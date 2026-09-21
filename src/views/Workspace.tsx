@@ -16,6 +16,7 @@ import {
 } from '../core/anatomy';
 import ChapterTree from './ChapterTree';
 import Preview from './Preview';
+import { useEsc } from './useEsc';
 // 编辑器（CodeMirror ~400KB）与其余弹层视图全部懒加载：首屏只加载目录 + 预览，
 // 打开笔记/对应功能时才下载各自 chunk
 const Editor = lazy(() => import('./Editor'));
@@ -23,6 +24,8 @@ const QuickSearch = lazy(() => import('./QuickSearch'));
 const ReviewView = lazy(() => import('./ReviewView'));
 const MistakeBook = lazy(() => import('./MistakeBook'));
 const AnatomyBrowser = lazy(() => import('./AnatomyBrowser'));
+// 结构笔记卡片：点结构后在光标旁浮现笔记正文（与 3D 舞台同层，不额外开面板）
+import AnatomyNoteCard from './AnatomyNoteCard';
 // 3D 视图懒加载：three.js（~1MB）拆成独立 chunk，打开解剖图谱时才加载
 const AnatomyViewer3D = lazy(() => import('./AnatomyViewer3D'));
 const BrainAtlasView = lazy(() => import('./BrainAtlasView'));
@@ -50,6 +53,9 @@ import { clickable } from './a11y';
 import { toast, confirmBox } from '../core/feedback';
 
 const RECENTS_KEY = 'knowlattice-recents';
+
+/** 已废弃的旧行内格式键位（Ctrl/⌘+B/I/H）。只消费、不动作，见 Workspace 内的守卫 effect。 */
+const RETIRED_FORMAT_KEYS = ['b', 'i', 'h'];
 
 function loadRecents(): string[] {
   try {
@@ -85,9 +91,18 @@ export default function Workspace() {
   const [treeOpen, setTreeOpen] = useState(true);
   const [anatomyManifest, setAnatomyManifest] = useState<AnatomyManifest | null>(null);
   const [anatomySelected, setAnatomySelected] = useState<ManifestOrgan | null>(null);
+  /** 结构笔记卡片：点击点（视口坐标；null = 从列表选中 → 停靠）+ 本次选择是否已被手动关掉 */
+  const [anatomyCardAt, setAnatomyCardAt] = useState<{ x: number; y: number } | null>(null);
+  const [anatomyCardClosed, setAnatomyCardClosed] = useState(false);
+  /** 3D 舞台元素（回调 ref 存 state：卡片定位要用它，挂载完成的时机得能触发一次渲染） */
+  const [anatomyStageEl, setAnatomyStageEl] = useState<HTMLDivElement | null>(null);
   const [recents, setRecents] = useState<string[]>(loadRecents);
   /** 保存成功闪现反馈 */
   const [savedFlash, setSavedFlash] = useState(false);
+  /** 上一次保存失败（用于节流提示）与失败后的自动重试次数 */
+  const saveErrRef = useRef<{ msg: string; at: number } | null>(null);
+  const saveRetryRef = useRef(0);
+  const [saveRetryTick, setSaveRetryTick] = useState(0);
   /** 笔记导航历史（后退/前进） */
   const [nav, setNav] = useState<{ stack: string[]; idx: number }>({ stack: [], idx: -1 });
 
@@ -111,16 +126,59 @@ export default function Workspace() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  /** 立即保存当前笔记；manual=false 时不弹「已保存」反馈（自动保存用） */
+  // 废弃的旧行内格式键位（Ctrl/⌘+B 加粗、+I 斜体、+H 高亮）在应用层统一消费，不产生任何副作用。
+  // 键位本身已搬到 Alt 系（见 core/mdFormat.ts）；这里兜的是「没人管」的后果：Chrome 会拿
+  // Ctrl+H 打开历史记录页，正在写笔记的用户会被直接带走；Ctrl+B/I 在 contenteditable 里还有
+  // 触发浏览器原生格式的风险。焦点落在编辑器、预览、目录树还是题库都一样被拦。
+  // 注：macOS 的 ⌘+H 是系统级「隐藏应用」，网页拦不住，这一条实际只在 Windows / Linux 生效。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && RETIRED_FORMAT_KEYS.includes(e.key.toLowerCase())) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  /** 立即保存当前笔记；manual=false 时不弹「已保存」反馈（自动保存用）。两条纪律：
+   *  ①写失败就不清脏点、不显示「已保存」——旧写法在写失败时照样清脏点、显示已保存，
+   *    用户是在「应用说存住了」的前提下丢稿的；②只清「这次真正写下去的那一份」的脏标记：
+   *    await 期间用户切了笔记或又输入了新内容，就不能替它们清脏。 */
   const saveCurrent = useCallback(async (manual = true) => {
     const { vault: v, draft: d } = editRef.current;
-    if (v.currentPath && d !== null) {
-      await v.save(v.currentPath, d);
-      setDirty(false);
-      if (manual) {
-        setSavedFlash(true);
-        setTimeout(() => setSavedFlash(false), 1400);
+    if (!v.currentPath || d === null) return;
+    const path = v.currentPath;
+    const content = d;
+    try {
+      await v.save(path, content);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('保存失败：', path, e);
+      // 自动保存每 800ms 就会重试一次，同一条错误 5 秒内只提示一次，避免刷屏
+      const last = saveErrRef.current;
+      const now = Date.now();
+      if (manual || !last || last.msg !== msg || now - last.at > 5000) {
+        saveErrRef.current = { msg, at: now };
+        toast(`保存失败：${msg}。内容还在编辑器里，可重试或先「备份到 .json」`, 'err');
       }
+      // 脏点保留；再自动重试有限次（写失败往往是一过性的，例如另一个标签页正占着库）
+      if (saveRetryRef.current < 5) {
+        saveRetryRef.current += 1;
+        setSaveRetryTick((t) => t + 1);
+      }
+      return;
+    }
+    saveErrRef.current = null;
+    saveRetryRef.current = 0;
+    // 落盘的是这一份（path + content）才算数：期间切走笔记或又改了内容，交给下一轮
+    const cur = editRef.current;
+    if (cur.vault.currentPath !== path || cur.draft !== content) return;
+    setDirty(false);
+    if (manual) {
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1400);
     }
   }, []);
 
@@ -154,6 +212,13 @@ export default function Workspace() {
     const t = setTimeout(() => void saveCurrent(false), 800);
     return () => clearTimeout(t);
   }, [draft, dirty, vault.currentPath, saveCurrent]);
+
+  // 保存失败后的自动重试：最多 5 次、每次间隔 3 秒（成功即清零，见 saveCurrent）
+  useEffect(() => {
+    if (!saveRetryTick) return;
+    const t = setTimeout(() => void saveCurrent(false), 3000);
+    return () => clearTimeout(t);
+  }, [saveRetryTick, saveCurrent]);
 
   // 关闭/刷新页面前尽力落盘未保存修改（自动保存的正常窗口只有 0.8s，此处兜底）
   useEffect(() => {
@@ -198,17 +263,26 @@ export default function Workspace() {
     setNav((n) => ({ ...n, idx: n.idx + 1 }));
   }, [canFwd, nav, openNoteCore]);
 
-  // Alt+← / Alt+→ 后退前进；解剖图谱打开时 Esc 退出
+  // Alt+← / Alt+→ 后退前进（与 Esc 无关，留在 window 上）
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (brainOpen && e.key === 'Escape') { setBrainOpen(false); return; }
-      if (anatomyOpen && e.key === 'Escape') { setAnatomyOpen(false); return; }
       if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); goBack(); }
       if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); goForward(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [anatomyOpen, brainOpen, goBack, goForward]);
+  }, [goBack, goForward]);
+
+  // 解剖图谱 / 脑图谱的 Esc 分层退出。走全局 Esc 栈：本层在应用启动时就入栈（栈底），
+  // 所以任何面板打开时 Esc 先归那个面板——不会再出现「一次 Esc 同时关掉搜索框和整个图谱」。
+  useEsc(() => {
+    if (brainOpen) { setBrainOpen(false); return; }
+    if (anatomyOpen) {
+      // 先关笔记卡片，再关整个图谱面板：一次 Esc 只退一层，不会把 3D 一起带走
+      if (anatomySelected && !anatomyCardClosed) { setAnatomyCardClosed(true); return; }
+      setAnatomyOpen(false);
+    }
+  });
 
   /** 点击双链：存在则跳转；不存在则提示创建占位笔记（M3 灰色占位逻辑） */
   const handleOpenLink = useCallback(
@@ -233,6 +307,8 @@ export default function Workspace() {
   /** 打开 3D 解剖图谱（首次打开时才加载 manifest，避免启动就拉大文件） */
   const openAnatomy = useCallback(async () => {
     setAnatomyOpen(true);
+    // 重开时卡片先收起：上次的选中结构仍在（3D 高亮保留），但不该一进来就弹卡片
+    setAnatomyCardClosed(true);
     if (!anatomyManifest) {
       try {
         setAnatomyManifest(await loadAnatomyManifest());
@@ -288,6 +364,10 @@ export default function Workspace() {
       };
       const zh = systemZh[organ.system] ?? organ.system;
       const dir = `08-解剖学/${zh}`;
+      // 先落盘当前笔记：下面 createNote 会把 currentPath 切到新笔记（内部 setCurrentPath），
+      // 而自动保存窗口有 800ms——不先 flush，用户在这段时间里的改动会既不落盘、又可能被
+      // 当成新笔记的草稿写进去。openNoteCore 走的是 flushDraft，这条创建分支此前漏了。
+      flushDraft();
       // 汉化：笔记标题/文件名优先用中文结构名（词典缺失或与已有笔记重名时回退英文）
       const zhDict = await loadZhDict();
       const zhName = zhOrganName(organ.name_en, zhDict.organs);
@@ -328,13 +408,21 @@ export default function Workspace() {
       setAnatomyOpen(false);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [vault, openNote]
+    [vault, openNote, flushDraft]
   );
 
-  /** 3D/列表单击 → 选中高亮（不打开笔记；null = 取消选中） */
-  const handleAnatomySelect = useCallback((organ: ManifestOrgan | null) => {
-    setAnatomySelected(organ);
-  }, []);
+  /**
+   * 3D/列表单击 → 选中高亮 + 浮现该结构的笔记卡片（不打开笔记；null = 取消选中）。
+   * at 是 3D 点击点在视口中的坐标，卡片贴着光标浮现；从右侧列表选中时没有点击点，卡片停靠左上角。
+   */
+  const handleAnatomySelect = useCallback(
+    (organ: ManifestOrgan | null, at?: { x: number; y: number }) => {
+      setAnatomySelected(organ);
+      setAnatomyCardAt(at ?? null);
+      setAnatomyCardClosed(false); // 每次选择都重新弹卡片（手动关过也一样）
+    },
+    []
+  );
 
   /** vault 路径 → 可渲染内容：.md 返回文本，附件返回 Blob 对象 URL（由 vault 统一解析） */
   const readFile = vault.readFile;
@@ -342,6 +430,9 @@ export default function Workspace() {
   const handleCreate = useCallback(
     async (dir: string, title: string, type: NoteType = 'concept') => {
       try {
+        // 与解剖图谱的创建分支同理：createNote 内部会 setCurrentPath 切走当前笔记，
+        // 不先落盘的话，自动保存窗口（800ms）内的输入会被下面 setDraft(template) 直接覆盖。
+        flushDraft();
         const template = noteTemplate(title, dir || '未分类', type);
         const path = await vault.createNote(dir, title, template);
         // 直接用模板内容填充草稿，避免读到更新前的旧 docs 缓存
@@ -354,7 +445,7 @@ export default function Workspace() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [vault, pushRecent]
+    [vault, pushRecent, flushDraft]
   );
 
   const notePaths = useMemo(
@@ -382,6 +473,23 @@ export default function Workspace() {
 
   if (!vault.loaded) {
     return <div className="loading">加载知识库…</div>;
+  }
+
+  // 库没读出来时停在错误页，**不进入可写状态**：此时内存里一篇笔记都没有，
+  // 放行进去会让「新建/查重」以「磁盘上没有这篇」为前提行事，把真实笔记覆盖掉。
+  if (vault.loadError) {
+    return (
+      <div className="app">
+        <div className="load-error" role="alert">
+          <h2>知识库加载失败</h2>
+          <p className="load-error-msg">{vault.loadError}</p>
+          <p className="muted">
+            为避免把已有笔记当成新笔记覆盖，已停用编辑。数据仍在浏览器本地存储里，重试即可。
+          </p>
+          <button className="btn-primary" onClick={vault.retryLoad}>重试</button>
+        </div>
+      </div>
+    );
   }
 
   const activePath = vault.currentPath;
@@ -445,7 +553,10 @@ export default function Workspace() {
                   setDraft(null);
                   setDirty(false);
                 }
-                void vault.removeMany(paths);
+                void vault.removeMany(paths).then((failed) => {
+                  // 删失败的会留在目录里（内存只删真正删成功的），必须说清，否则用户以为删掉了
+                  if (failed.length) toast(`${failed.length} 篇删除失败，已留在目录里`, 'err');
+                });
               }}
             />
           </div>
@@ -506,13 +617,21 @@ export default function Workspace() {
                       okText: '删除',
                     }).then(async (ok) => {
                       if (!ok) return;
-                      await vault.remove(vault.currentPath!);
+                      const path = vault.currentPath;
+                      if (!path) return;
+                      try {
+                        await vault.remove(path);
+                      } catch (e) {
+                        toast(`删除失败：${(e as Error).message}`, 'err');
+                        return; // 没删掉就不清草稿：笔记还在，界面保持原样
+                      }
                       setDraft(null); // 清空草稿，避免删除后残留旧内容
                       setDirty(false);
                       toast('已删除（可在「历史版本」中恢复）', 'ok');
                     });
                   }}
                   aria-label="删除笔记"
+                  title="删除当前笔记（可在「历史版本」中找回）"
                 >
                   <IconTrash />
                 </button>
@@ -640,9 +759,13 @@ export default function Workspace() {
             onClose={() => setMindOpen(false)}
             onOpenWiki={handleOpenLink}
             onSaveNote={(md) => {
-              void vault.save(vault.currentPath!, md);
+              const path = vault.currentPath;
+              if (!path) return;
               setDraft(md);
-              setDirty(false);
+              // 写成功才清脏点：写失败时脏点留着，自动保存会继续重试
+              void vault.save(path, md)
+                .then(() => setDirty(false))
+                .catch((e) => toast(`思维导图保存失败：${(e as Error).message}`, 'err'));
             }}
           />
         </Suspense>
@@ -731,7 +854,7 @@ export default function Workspace() {
             <span className="panel__title">3D 解剖图谱</span>
             <span className="panel__actions muted">{anatomyManifest ? anatomyManifest.organs.length : 0} 结构</span>
           </div>
-          <div className="anatomy-stage">
+          <div className="anatomy-stage" ref={setAnatomyStageEl}>
             {anatomyManifest ? (
               <Suspense fallback={<div className="anatomy-empty">3D 视口加载中…</div>}>
                 <AnatomyViewer3D
@@ -742,6 +865,18 @@ export default function Workspace() {
               </Suspense>
             ) : (
               <div className="anatomy-empty">3D 视口 · 数据加载中…</div>
+            )}
+            {anatomySelected && !anatomyCardClosed && (
+              <AnatomyNoteCard
+                organ={anatomySelected}
+                anchor={anatomyCardAt}
+                stage={anatomyStageEl}
+                resolve={vault.resolveLink}
+                readFile={readFile}
+                onOpenNote={handleAnatomyOpenNote}
+                onOpenLink={handleOpenLink}
+                onClose={() => setAnatomyCardClosed(true)}
+              />
             )}
           </div>
           <Suspense fallback={<div className="anatomy-empty">结构列表加载中…</div>}>

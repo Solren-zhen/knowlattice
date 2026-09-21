@@ -92,3 +92,43 @@ chapter: 生理学
     expect(m['p.md'].chapter).toBe(meta.chapter);
   });
 });
+
+/**
+ * 引用语义回归测试（2026-09-20 修复）。
+ * 旧实现里 loadMistakes() 返回模块级 cache 本身、clearMistake 就地删除后返回同一个引用，
+ * 于是 MistakeBook 的 `setMistakes(clearMistake(path))` 拿到同一对象，React 直接 bail out：
+ * 记录从 localStorage 删了，但行还在、计数不变、热力条不变，用户以为按钮坏了。
+ */
+describe('返回新对象（保证 setState 能触发重渲染）', () => {
+  it('loadMistakes 每次返回不同的对象', async () => {
+    const mod = await load();
+    mod.recordMistake('p.md', '# T');
+    expect(mod.loadMistakes()).not.toBe(mod.loadMistakes());
+  });
+
+  it('loadMistakes 返回的是浅拷贝：改返回值不会污染缓存', async () => {
+    const mod = await load();
+    mod.recordMistake('p.md', '# T');
+    const snapshot = mod.loadMistakes();
+    delete snapshot['p.md'];
+    expect(mod.loadMistakes()['p.md']).toBeDefined();
+  });
+
+  it('clearMistake 返回新对象，且旧快照仍保留被删记录（React 才比较得出差异）', async () => {
+    const mod = await load();
+    const before = mod.recordMistake('p.md', '# T');
+    const after = mod.clearMistake('p.md');
+
+    expect(after).not.toBe(before);
+    expect(after['p.md']).toBeUndefined();
+    expect(before['p.md']).toBeDefined();
+  });
+
+  it('recordMistake 返回新对象', async () => {
+    const mod = await load();
+    const a = mod.recordMistake('p.md', '# T');
+    const b = mod.recordMistake('p.md', '# T');
+    expect(b).not.toBe(a);
+    expect(b['p.md'].count).toBe(2);
+  });
+});

@@ -4,6 +4,7 @@
  * 打开弹窗或输入查询时索引已就绪/增量更新，绝不全库重建。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEsc } from './useEsc';
 import { vaultSearch, type SearchDoc } from '../core/searchIndex';
 
 interface Props {
@@ -31,6 +32,7 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
   const [sel, setSel] = useState(0);
   const [searchReady, setSearchReady] = useState(vaultSearch.isReady());
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   // docs 变化 → 增量同步到共享搜索引擎（未构建时只登记，成本近零）
   useEffect(() => {
@@ -83,6 +85,18 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
     return () => clearTimeout(t);
   }, [open]);
 
+  // Esc 关闭走全局 Esc 栈。传 open 而不是只靠挂载：本组件目前是条件挂载的，
+  // 但万一将来改成常挂（open 当 prop），没有这个开关就会一直占着栈顶把 Esc 吞掉。
+  useEsc(onClose, open);
+
+  // 键盘 ↓ 越出可视区后把高亮项滚进视口：否则高亮条看不见，
+  // 此时按回车会打开一篇用户根本没看到的笔记。
+  useEffect(() => {
+    if (!open) return;
+    const el = resultsRef.current?.querySelectorAll('.qs-item')[sel] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [open, sel, results.length]);
+
   if (!open) return null;
 
   const pick = (i: number) => {
@@ -114,12 +128,10 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
               setSel((s) => Math.max(s - 1, 0));
             } else if (e.key === 'Enter') {
               pick(sel);
-            } else if (e.key === 'Escape') {
-              onClose();
             }
           }}
         />
-        <div className="qs-results">
+        <div className="qs-results" ref={resultsRef}>
           {!searchReady && query.trim() && <div className="qs-empty">正在构建全文索引…（仅首次需要几秒）</div>}
             {searchReady && results.length === 0 && <div className="qs-empty">没有匹配「{query}」的笔记</div>}
           {results.slice(0, 20).map((r, i) => (

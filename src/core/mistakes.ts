@@ -23,14 +23,20 @@ const KEY = 'knowlattice-mistakes';
 /** 模块级缓存：避免渲染期反复 JSON.parse 整个错题表 */
 let cache: MistakeMap | null = null;
 
+/**
+ * 读取错题表。**每次返回浅拷贝**：返回 cache 本身会让 `setState(clearMistake(...))` 拿到
+ * 同一个引用，React 的 Object.is 比较直接 bail out —— 记录确实删了，但行还在、计数不变，
+ * 用户以为按钮坏了。浅拷贝不重新 JSON.parse，成本可忽略。
+ */
 export function loadMistakes(): MistakeMap {
-  if (cache) return cache;
-  try {
-    cache = JSON.parse(localStorage.getItem(KEY) ?? '{}') as MistakeMap;
-  } catch {
-    cache = {};
+  if (!cache) {
+    try {
+      cache = JSON.parse(localStorage.getItem(KEY) ?? '{}') as MistakeMap;
+    } catch {
+      cache = {};
+    }
   }
-  return cache;
+  return { ...cache };
 }
 
 function save(mistakes: MistakeMap) {

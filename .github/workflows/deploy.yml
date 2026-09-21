@@ -26,6 +26,10 @@ jobs:
           cache: npm
       - name: 安装依赖
         run: npm ci
+      - name: 静态检查
+        run: npm run lint
+      - name: 单元测试
+        run: npm test
       - name: 构建
         run: npm run build
       - uses: actions/upload-pages-artifact@v3
