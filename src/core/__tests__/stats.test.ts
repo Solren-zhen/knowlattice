@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { last7, markStudy, streak, studyDays, exportDays, importDays } from '../stats';
+import { last7, markStudy, streak, studyDays, exportDays, importDays, heatmap } from '../stats';
 
 beforeEach(() => localStorage.clear());
 
@@ -67,5 +67,27 @@ describe('stats', () => {
     expect(importDays({ '2024-01-01': 'x', '2024-01-02': -1, '2024-01-03': 0 })).toBe(0);
     expect(importDays({ '2024-01-03': 2 })).toBe(1);
     expect(exportDays()).toEqual({ '2024-01-03': 2 });
+  });
+});
+
+describe('打卡热力图', () => {
+  // 2026-09-21 是周一，所以每列行首都是周一，断言不用猜星期几
+  it('铺成 weeks 列 × 7 行，末尾一列以今天为周一开头，未来几天标 future', () => {
+    const grid = heatmap('2026-09-21', 3);
+    expect(grid).toHaveLength(3);
+    expect(grid.every((col) => col.length === 7)).toBe(true);
+    expect(grid[0][0].day).toBe('2026-09-07');
+    expect(grid[2][0].day).toBe('2026-09-21');
+    expect(grid[2][0].future).toBe(false);
+    expect(grid[2][1].future).toBe(true); // 周二还没到
+    expect(grid[2][6].future).toBe(true);
+  });
+
+  it('计数来自存储（今天在最后一列，前一天的周日在上一列末行）', () => {
+    localStorage.setItem('knowlattice-days', JSON.stringify({ '2026-09-21': 4, '2026-09-20': 1 }));
+    const grid = heatmap('2026-09-21', 2);
+    expect(grid[1][0]).toMatchObject({ day: '2026-09-21', count: 4, future: false });
+    expect(grid[0][6]).toMatchObject({ day: '2026-09-20', count: 1, future: false });
+    expect(grid[1][6]).toMatchObject({ day: '2026-09-27', count: 0, future: true });
   });
 });

@@ -151,6 +151,29 @@ export const IconChart = ({ size = 15 }: P) => (
   </svg>
 );
 
+/** 番茄钟：表盘 + 指针 + 顶部小柄（剪影先认得出是计时器） */
+export const IconTimer = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <circle cx="12" cy="13.6" r="7.6" {...wash} />
+    <path d="M9.4 2.8h5.2M12 2.8v3.4" strokeWidth={2} />
+    <path d="M12 13.6V9.4M12 13.6l3.1 1.9" />
+  </svg>
+);
+
+/** 开始 */
+export const IconPlay = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <path d="M8.4 5.4 18.6 12 8.4 18.6z" {...solid} />
+  </svg>
+);
+
+/** 暂停 */
+export const IconPause = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <path d="M9 5.6v12.8M15 5.6v12.8" strokeWidth={2.4} />
+  </svg>
+);
+
 /** AI 助手：四角星光 + 伴星 */
 export const IconAi = ({ size = 15 }: P) => (
   <svg {...base(size)}>

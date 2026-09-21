@@ -1,28 +1,41 @@
 /**
- * 任务面板（整页三栏）：本地优先，持久化到 localStorage。
+ * 番茄工作台（整页）：把「专注 / 待办 / 统计」装进一个工作面，三者共用一份数据。
  *
- * 布局：
- *   左栏  智能列表（今天/明天之前/本周内/已逾期/全部未完成/已完成/全部，带计数）
- *         + 「笔记里的任务」入口 + 按关联笔记分组
- *   中栏  短语法输入框 + 搜索/排序/分组 + 批量操作条 + 分组列表（可折叠）
- *   右栏  选中项详情（到期/优先级/重复/关联笔记/备注/子任务）；没选中时是统计卡
+ * 布局：顶部标签切模块 + 常驻计时条（切到哪一页都在走，一眼看得到还剩多久）
+ *   专注  计时环 + 开始/暂停/重置/跳过 + 关联待办 + 今日累计 + 时长设置
+ *   待办  左栏智能列表 / 中栏列表+批量 / 右栏详情+统计（详见下面）
+ *   统计  番茄总览 + 近 7 天趋势 + 待办完成率 + 学习打卡热力图
  *
- * 参照三个成熟方案（不是拍脑袋想的）：
+ * 工作台形态参照 github.com/GarryLiang/pomodoro-workbench：番茄钟与待办联动——
+ * 专注前选一条待办，每完成一个番茄它 +1。落地时按本仓库的数据模型做了两处取舍：
+ *   - 不另做一套手动「习惯打卡」：复习评卡 / 题库作答已经在记打卡（core/stats），
+ *     热力图直接画那份真实学习记录，避免两套「连续天数」互相打架；
+ *   - 计时按真实时间戳算（core/pomodoro）：关掉面板也在走，重开按时间接上，不漂移。
+ *
+ * 待办模块的参照方案（不是拍脑袋想的）：
  *   - TodoMVC app-spec：行内编辑三出口（blur/Enter 保存、Esc 丢弃、清空即删）、全选完成、清空已完成、过滤持久化；
  *   - Super Productivity：一句话短语法（`复习呼吸 @明天 !高 #呼吸系统 *每天`）；
- *   - Obsidian Tasks（github.com/obsidian-tasks-group/obsidian-tasks）：笔记里的 `- [ ]` 任务也能看见、
- *     勾选直接写回源文件（`[ ]` ⇄ `[x]`，完成补 `✅ 日期`）。
+ *   - Obsidian Tasks：笔记里的 `- [ ]` 任务也能看见、勾选直接写回源文件（`[ ]` ⇄ `[x]`，完成补 `✅ 日期`）。
  *
- * 纯逻辑在 core/todos.ts 与 core/noteTasks.ts（可单测），这里只管画和事件。
+ * 纯逻辑在 core/todos.ts / core/noteTasks.ts / core/pomodoro.ts（都可单测），这里只管画和事件。
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useEsc, isEditable } from './useEsc';
-import { IconTrash, IconTodo, IconClose } from './icons';
+import { IconTrash, IconTodo, IconClose, IconTimer, IconPlay, IconPause, IconChart } from './icons';
 import { toast, confirmBox } from '../core/feedback';
 import { parseFrontmatterCached } from '../core/parser';
 import { collectNoteTasks, setNoteTaskDone, type NoteTask } from '../core/noteTasks';
 import {
-  addDays, addSubtask, BUCKET_LABELS, bulkComplete, bulkRemove, bulkUpdate, clearCompleted, completeTodo,
+  addRecord, formatClock, loadConfig, loadRecords, loadState as loadPomoState, pause as pausePomo, PHASE_LABELS,
+  pomoStats, pomoTrend, progressOf, remainingMs, reset as resetPomo, sanitizeConfig, saveConfig,
+  saveState as savePomoState, skip as skipPomo, start as startPomo, tick,
+  type PomodoroConfig, type PomodoroRecord, type PomodoroState,
+} from '../core/pomodoro';
+import { heatmap, streak as studyStreak, studyDays } from '../core/stats';
+import TodoFocus from './TodoFocus';
+import TodoStats from './TodoStats';
+import {
+  addDays, addSubtask, BUCKET_LABELS, bulkComplete, bulkRemove, bulkUpdate, bumpPomo, clearCompleted, completeTodo,
   dayKey, editTodo, groupByNote, groupTodos, inSmartList, loadTodos, makeTodo, matchesQuery, moveTodo,
   parseQuickAdd, removeSubtask, removeTodo, REPEAT_LABELS, rollover, saveTodos, SMART_EMPTY, SMART_LABELS,
   SMART_ORDER, smartCounts, sortTodos, subtaskProgress, todoStats, todoStreak, todoTrend, toggleAll,
@@ -31,6 +44,16 @@ import {
 } from '../core/todos';
 
 type View = SmartList | 'notes';
+
+/** 工作台模块：专注（番茄钟）/ 待办（本来的面板）/ 统计 */
+type Module = 'focus' | 'board' | 'stats';
+
+const MODULE_KEY = 'knowlattice-todo-module';
+const MODULES: Array<{ key: Module; label: string; Icon: ComponentType<{ size?: number }> }> = [
+  { key: 'focus', label: '专注', Icon: IconTimer },
+  { key: 'board', label: '待办', Icon: IconTodo },
+  { key: 'stats', label: '统计', Icon: IconChart },
+];
 
 const VIEW_KEY = 'knowlattice-todo-filter';
 const SORT_KEY = 'knowlattice-todo-sort';
@@ -177,6 +200,91 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
     setText('');
     composerRef.current?.focus();
   };
+
+  // ---------- 番茄钟（工作台常驻：切模块不停，关掉面板也在走）----------
+  const [module, setModule] = useState<Module>(() => readPref(MODULE_KEY, MODULES.map((m) => m.key), 'board'));
+  const [cfg, setCfg] = useState<PomodoroConfig>(loadConfig);
+  const [timer, setTimer] = useState<PomodoroState>(loadPomoState);
+  const [records, setRecords] = useState<PomodoroRecord[]>(loadRecords);
+  const [now, setNow] = useState(() => Date.now());
+
+  // 定时器回调要读最新值：用 ref 同步，避免闭包读到旧的 list/timer/cfg。
+  // 同步放在 effect 里（每次渲染后跑一次），不在渲染期间写 ref——渲染期间写 ref 在并发渲染下不安全。
+  const timerRef = useRef(timer);
+  const cfgRef = useRef(cfg);
+  const recordsRef = useRef(records);
+  const listRef = useRef(list);
+  const commitRef = useRef(commit);
+  useEffect(() => {
+    timerRef.current = timer;
+    cfgRef.current = cfg;
+    recordsRef.current = records;
+    listRef.current = list;
+    commitRef.current = commit;
+  });
+
+  const applyTimer = (next: PomodoroState) => {
+    timerRef.current = next;
+    setTimer(next);
+    savePomoState(next);
+  };
+
+  const toggleTimer = () => {
+    const t = Date.now();
+    applyTimer(timerRef.current.running ? pausePomo(timerRef.current, t) : startPomo(timerRef.current, t));
+    setNow(t);
+  };
+  const resetTimer = () => applyTimer(resetPomo(timerRef.current));
+  const skipTimer = () => {
+    applyTimer(skipPomo(timerRef.current, cfgRef.current, Date.now()));
+    setNow(Date.now());
+  };
+  const pickTask = (id: string | null) => applyTimer({ ...timerRef.current, taskId: id });
+  const changeConfig = (patch: Partial<PomodoroConfig>) => {
+    const next = sanitizeConfig({ ...cfgRef.current, ...patch });
+    cfgRef.current = next;
+    setCfg(next);
+    saveConfig(next);
+  };
+
+  useEffect(() => {
+    if (!timer.running) return;
+    const step = () => {
+      const t = Date.now();
+      setNow(t);
+      const r = tick(timerRef.current, cfgRef.current, t);
+      if (!r.finished) return;
+      applyTimer(r.state);
+      if (r.record) {
+        const next = addRecord(recordsRef.current, r.record);
+        recordsRef.current = next;
+        setRecords(next);
+        if (r.record.taskId) {
+          const bumped = bumpPomo(listRef.current, r.record.taskId);
+          if (bumped !== listRef.current) commitRef.current(bumped);
+        }
+        toast(`完成 1 个番茄（${r.record.minutes} 分钟）· ${PHASE_LABELS[r.state.phase]}开始`, 'ok', 3200);
+      } else {
+        toast(`${PHASE_LABELS[r.state.phase]}开始`, 'info', 2200);
+      }
+    };
+    const id = window.setInterval(step, 500);
+    // 立刻对一次表：面板关着的时候到点了，重开就补上。
+    // 用 0ms 定时器而不是直接调用 step()——effect 里同步 setState 会触发级联渲染（lint 规则也是这么判的）。
+    const kick = window.setTimeout(step, 0);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(kick);
+    };
+  }, [timer.running]);
+
+  const pomo = useMemo(() => pomoStats(records, today), [records, today]);
+  const pomoTrendData = useMemo(() => pomoTrend(records, today, 7), [records, today]);
+  const heat = useMemo(() => heatmap(today, 12), [today]);
+  // 打卡在别的页面写入（复习评卡 / 题库作答），所以切到统计页时重新读一次
+  const [study, setStudy] = useState(() => ({ streak: studyStreak(), days: studyDays().length }));
+  const remaining = remainingMs(timer, cfg, now);
+  const progress = progressOf(timer, cfg, now);
 
   const shown = useMemo(() => {
     if (view === 'notes') return [];
@@ -333,6 +441,14 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
       if (isEditable(e.target) || editingId) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key;
+      // 专注页只吃自己的键：空格 开始/暂停、S 跳过。待办那套 x/Enter/Delete 在这一页没有意义，
+      // 更不能让「空格」同时触发两件事。
+      if (module === 'focus') {
+        if (k === ' ') { e.preventDefault(); toggleTimer(); return; }
+        if (k === 's' || k === 'S') { e.preventDefault(); skipTimer(); return; }
+        return;
+      }
+      if (module !== 'board') return;
       const idx = selId ? flatIds.indexOf(selId) : -1;
       const move = (d: number) => {
         if (!flatIds.length) return;
@@ -371,24 +487,55 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
 
   return (
     <div className="panel-backdrop mistake-overlay" onClick={onClose}>
-      <div className="panel mistake-panel todo-page" onClick={(e) => e.stopPropagation()}>
+      <div className="panel mistake-panel todo-panel" onClick={(e) => e.stopPropagation()}>
         <header className="panel__head">
           <span className="panel__title">
-            <IconTodo /> 任务面板
+            <IconTimer /> 番茄工作台
             <span className="muted">
               {' '}· {stats.active} 项未完成
               {stats.overdue ? ` · ${stats.overdue} 项逾期` : ''}
               {openNoteTasks.length ? ` · 笔记里 ${openNoteTasks.length} 项` : ''}
             </span>
           </span>
+          <nav className="wb-tabs">
+            {MODULES.map((m) => (
+              <button
+                key={m.key}
+                className={`wb-tab${module === m.key ? ' active' : ''}`}
+                aria-current={module === m.key ? 'page' : undefined}
+                onClick={() => {
+                  setModule(m.key);
+                  writePref(MODULE_KEY, m.key);
+                  if (m.key === 'stats') setStudy({ streak: studyStreak(), days: studyDays().length });
+                }}
+              >
+                <m.Icon size={14} /> {m.label}
+              </button>
+            ))}
+          </nav>
           <div className="panel__actions">
-            <button className="btn-small" onClick={() => commit(toggleAll(list, true))}>全部完成</button>
-            <button className="btn-small" onClick={() => commit(toggleAll(list, false))}>全部取消完成</button>
-            <button className="btn-small" onClick={clearDone} disabled={!stats.done}>清空已完成</button>
+            <button
+              className={`wb-chip${timer.running ? ' running' : ''}`}
+              onClick={toggleTimer}
+              aria-label={`${PHASE_LABELS[timer.phase]} ${formatClock(remaining)}，点击${timer.running ? '暂停' : '开始'}`}
+              title="开始 / 暂停"
+            >
+              <span className="wb-chip__phase">{PHASE_LABELS[timer.phase]}</span>
+              <span className="wb-chip__time">{formatClock(remaining)}</span>
+              {timer.running ? <IconPause size={13} /> : <IconPlay size={13} />}
+            </button>
+            {module === 'board' && (
+              <>
+                <button className="btn-small" onClick={() => commit(toggleAll(list, true))}>全部完成</button>
+                <button className="btn-small" onClick={() => commit(toggleAll(list, false))}>全部取消完成</button>
+                <button className="btn-small" onClick={clearDone} disabled={!stats.done}>清空已完成</button>
+              </>
+            )}
             <button className="btn-icon" aria-label="关闭任务面板" onClick={onClose}><IconClose /></button>
           </div>
         </header>
 
+        {module === 'board' && (<>
         <div className="todo-progress" title={`完成 ${stats.done} / ${stats.total}`}>
           <span className="todo-progress-bar" style={{ width: `${Math.round(stats.progress * 100)}%` }} />
         </div>
@@ -622,6 +769,25 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
                                 {subtaskProgress(t).done}/{subtaskProgress(t).total} 子任务
                               </span>
                             )}
+                            {t.pomos ? (
+                              <span className="todo-badge todo-badge--pomo" aria-label={`已投入 ${t.pomos} 个番茄`}>
+                                <IconTimer size={11} /> {t.pomos}
+                              </span>
+                            ) : null}
+                            {!t.done && (
+                              <button
+                                className="todo-badge todo-badge--btn todo-focus-btn"
+                                title="把这条设为本次专注的待办，并切到专注页"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  pickTask(t.id);
+                                  setModule('focus');
+                                  writePref(MODULE_KEY, 'focus');
+                                }}
+                              >
+                                专注
+                              </button>
+                            )}
                             <button className="btn-small" onClick={(e) => { e.stopPropagation(); setSelId(t.id); detailRef.current?.focus(); }}>详情</button>
                             <button className="btn-icon" aria-label="删除这条待办" onClick={(e) => { e.stopPropagation(); removeOne(t.id); }}><IconTrash /></button>
                           </span>
@@ -789,6 +955,34 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
           <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 优先级 · <kbd>0</kbd> 清除 · <kbd>m</kbd> 多选 ·
           <kbd>Ctrl</kbd>+点击 多选 · <kbd>Shift</kbd>+点击 范围选 · 双击文字也能编辑
         </footer>
+        </>)}
+
+        {module === 'focus' && (
+          <TodoFocus
+            state={timer}
+            cfg={cfg}
+            remaining={remaining}
+            progress={progress}
+            stats={pomo}
+            todos={list}
+            onStart={() => { applyTimer(startPomo(timerRef.current, Date.now())); setNow(Date.now()); }}
+            onPause={() => { applyTimer(pausePomo(timerRef.current, Date.now())); setNow(Date.now()); }}
+            onReset={resetTimer}
+            onSkip={skipTimer}
+            onPickTask={pickTask}
+            onChangeConfig={changeConfig}
+          />
+        )}
+
+        {module === 'stats' && (
+          <TodoStats
+            stats={pomo}
+            trend={pomoTrendData}
+            heat={heat}
+            todos={{ done: stats.done, total: stats.total, overdue: stats.overdue }}
+            study={study}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  addDays, addSubtask, BUCKET_LABELS, bulkComplete, bulkRemove, bulkUpdate, clearCompleted, completeTodo,
+  addDays, addSubtask, BUCKET_LABELS, bulkComplete, bulkRemove, bulkUpdate, bumpPomo, clearCompleted, completeTodo,
   dayKey, daysBetween, dueBucket, dueLabel, editTodo, exportTodos, groupByNote, groupTodos, importTodos,
   inSmartList, loadTodos, makeTodo, matchesQuery, moveTodo, newTodoId, nextDue, parseQuickAdd, removeSubtask,
   removeTodo, rollover, saveTodos, smartCounts, sortTodos, subtaskProgress, todoStats, todoStreak, todoTrend,
@@ -498,5 +498,27 @@ describe('M9 批量操作 / 顺延', () => {
   it('搜索也认备注', () => {
     expect(matchesQuery(todo({ id: 'a', memo: '重点看氧解离曲线' }), '氧解离')).toBe(true);
     expect(matchesQuery(todo({ id: 'a', memo: '重点看氧解离曲线' }), '心电图')).toBe(false);
+  });
+});
+
+describe('M10 番茄数（pomos）', () => {
+  it('bumpPomo 给指定待办 +1；没命中或 n<=0 时不产生新对象', () => {
+    const base = [todo({ id: 'a' }), todo({ id: 'b' })];
+    const next = bumpPomo(base, 'a');
+    expect(next[0].pomos).toBe(1);
+    expect(next[1].pomos).toBeUndefined();
+    expect(bumpPomo(next, 'a', 2)[0].pomos).toBe(3);
+    expect(bumpPomo(base, 'nope')).toBe(base);
+    expect(bumpPomo(base, 'a', 0)).toBe(base);
+    expect(bumpPomo(base, '')).toBe(base);
+  });
+
+  it('loadTodos 保留 pomos，坏值丢掉', () => {
+    localStorage.setItem('knowlattice-todos', JSON.stringify([
+      { id: 'a', text: 'ok', done: false, createdAt: 1, pomos: 3 },
+      { id: 'b', text: 'ok2', done: false, createdAt: 2, pomos: -1 },
+      { id: 'c', text: 'ok3', done: false, createdAt: 3, pomos: 'x' },
+    ]));
+    expect(loadTodos().map((t) => t.pomos)).toEqual([3, undefined, undefined]);
   });
 });

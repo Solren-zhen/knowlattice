@@ -67,6 +67,36 @@ export function studyDays(): string[] {
   return [...load().keys()].sort();
 }
 
+/**
+ * GitHub 风格的打卡热力图：按周铺开（列 = 一周，行 = 周一到周日），
+ * 末尾一定是今天所在的那一周，未来几天标 future（界面上不画颜色）。
+ */
+export interface HeatCell {
+  day: string;
+  count: number;
+  /** 还没到的日子：不参与颜色，也不参与「连续」判断 */
+  future: boolean;
+}
+
+export function heatmap(today: string, weeks = 12): HeatCell[][] {
+  // 把 today 挪到所在周的周日，再回退 weeks-1 周，作为第一列
+  const [y, m, d] = today.split('-').map(Number);
+  const base = new Date(y, m - 1, d);
+  const dow = (base.getDay() + 6) % 7; // 周一 = 0
+  const first = addDays(today, -(dow + (weeks - 1) * 7));
+  const counts = load();
+  const out: HeatCell[][] = [];
+  for (let w = 0; w < weeks; w++) {
+    const col: HeatCell[] = [];
+    for (let i = 0; i < 7; i++) {
+      const day = addDays(first, w * 7 + i);
+      col.push({ day, count: counts.get(day) ?? 0, future: day > today });
+    }
+    out.push(col);
+  }
+  return out;
+}
+
 /** 导出打卡记录（日期 → 当日学习次数）供整包备份 */
 export function exportDays(): Record<string, number> {
   return Object.fromEntries(load());
