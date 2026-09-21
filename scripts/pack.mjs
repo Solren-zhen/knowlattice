@@ -17,10 +17,11 @@
  * 产物：仓库根目录 KnowLattice-离线版-YYYY-MM-DD.zip（已在 .gitignore 中忽略）
  * 包内全部用 ASCII 名称，避免不同解压工具把中文条目解成乱码；说明文本用 UTF-8 BOM，记事本可直接读。
  */
-import { existsSync, mkdirSync, rmSync, copyFileSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join, resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { removeTree } from './removeTree.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..');
@@ -65,34 +66,20 @@ const walkFiles = (dir, out = []) => {
 };
 
 /**
- * 删目录，并且**确认真的删掉了**。
+ * 删目录、确认真的删掉了，并把这件事交给调用方决定成败。
  *
- * 2026-09-21 实测：这台机器上 `rmSync(p, { recursive: true, force: true })` 会
- * **不抛错、也不删**（force / maxRetries / retryDelay 都一样）。后果很隐蔽：打包开头清暂存
- * 没生效 → copyTree 把新构建**合并**进旧暂存 → tar 把整棵合并树压进包 → 包里同时有两套
- * 构建产物（旧入口 bundle + 15 个旧分块），包体还多 0.9 MB，而所有日志看起来都是正常的。
- * 所以删除一律走这里：删完必查，查不过就换 cmd rmdir 再来一次，仍不行就交给调用方中止。
+ * 实现已抽到 `scripts/removeTree.mjs`（构建前的 clean-dist 也要用同一套，
+ * 免得两处各写一份、其中一处忘了「删完必查」）。本机 `fs.rmSync` 会不抛错也不删，
+ * 所以删除一律走它：删完必查 → `cmd rmdir` 兜底 → 仍不行返回 false。
  */
-const removeTree = (p) => {
-  if (!existsSync(p)) return true;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      rmSync(p, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-    } catch { /* 换下一招 */ }
-    if (!existsSync(p)) return true;
-    try {
-      execFileSync('cmd.exe', ['/c', 'rmdir', '/s', '/q', resolve(p)], { stdio: 'ignore' });
-    } catch { /* 交给返回值判定 */ }
-    if (!existsSync(p)) return true;
-  }
-  return false;
-};
 
 // ---------- 1. 构建 ----------
 if (!noBuild) {
   log('构建前端：npm run build …');
   const npm = process.platform === 'win32' ? 'cmd.exe' : 'npm';
   const npmArgs = process.platform === 'win32' ? ['/c', 'npm', 'run', 'build'] : ['run', 'build'];
+  // 构建脚本自带 prebuild（scripts/clean-dist.mjs）：本机 vite 的 emptyOutDir 静默失效，
+  // 不清 dist 就会把上一代分块一起打进包（见 removeTree.mjs 的说明）。
   execFileSync(npm, npmArgs, { cwd: repo, stdio: 'inherit' });
 }
 const dist = join(repo, 'dist');
@@ -141,6 +128,7 @@ let srs = null;
 let mistakes = null;
 let todos = null;
 let days = null;
+let cardEdits = null;
 for (const { b } of sources) {
   for (const f of b.files) {
     if (f && typeof f.path === 'string' && typeof f.content === 'string') fileMap.set(f.path, f.content);
@@ -157,11 +145,13 @@ for (const { b } of sources) {
   if (!mistakes && Array.isArray(b.mistakes) && b.mistakes.length) mistakes = b.mistakes;
   if (!todos && Array.isArray(b.todos) && b.todos.length) todos = b.todos;
   if (!days && b.days && Object.keys(b.days).length) days = b.days;
+  // v4：卡片自定义（改写正/背面、删卡）也要随包走，否则离线包里看不到用户的自定义卡片
+  if (!cardEdits && b.cardEdits && Object.keys(b.cardEdits).length) cardEdits = b.cardEdits;
 }
 
 const merged = {
   app: 'knowlattice',
-  version: 3,
+  version: 4,
   exportedAt: new Date().toISOString(),
   files: [...fileMap].map(([path, content]) => ({ path, content })),
   srs: srs ?? {},
@@ -169,6 +159,7 @@ const merged = {
   mistakes: mistakes ?? [],
   todos: todos ?? [],
   days: days ?? {},
+  cardEdits: cardEdits ?? {},
 };
 const noteCount = merged.files.filter((f) => !f.path.startsWith('_attachments/')).length;
 const qCount = qbanks.reduce((n, q) => n + ((q && q.questions && q.questions.length) || 0), 0);

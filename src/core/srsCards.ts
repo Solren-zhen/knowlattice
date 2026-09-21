@@ -36,6 +36,10 @@ export interface ReviewCard {
    * 首次评分时把旧调度写到自己键下并删掉旧键，进度不丢、也不会被算两次。
    */
   legacyKey?: string;
+  /** 自定义正面（覆盖 heading/noteTitle）；来自 core/cardEdits.ts，独立于笔记内容 */
+  front?: string;
+  /** 自定义背面（覆盖 body）；来自 core/cardEdits.ts */
+  back?: string;
 }
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;

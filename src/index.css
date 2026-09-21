@@ -1801,6 +1801,64 @@ a.wikilink.missing::after {
 .todo-check.on { background: var(--accent); border-color: var(--accent); }
 .todo-item.done .todo-text { color: var(--muted); text-decoration: line-through; }
 
+/* ---- M8：进度条 / 短语法 / 分组 / 详情 / 子任务 ---- */
+.todo-panel { width: min(780px, 94vw); }
+.todo-progress { height: 3px; background: var(--border); }
+.todo-progress-bar { height: 100%; background: var(--grad-primary); transition: width var(--t-med) var(--ease); }
+.todo-composer { display: flex; gap: 8px; padding: var(--sp-2) var(--sp-4) 6px; }
+.todo-composer .todo-input { flex: 1; }
+.todo-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 var(--sp-4) 4px; }
+.todo-chip { font-size: var(--fs-micro); padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.todo-chip.due { color: var(--accent); border-color: var(--accent); }
+.todo-chip.pri { color: var(--danger); border-color: var(--danger); }
+.todo-chip.rep { color: var(--success); border-color: var(--success); }
+.todo-hint { padding: 0 var(--sp-4) 8px; font-size: var(--fs-micro); color: var(--muted); line-height: 1.9; }
+.todo-hint kbd { margin: 0 2px; }
+.todo-search { flex: 1 1 150px; min-width: 120px; padding: 4px 10px; font-size: var(--fs-caption); border: 1px solid var(--border); border-radius: 999px; background: var(--bg-raised); color: var(--text); }
+.todo-search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.todo-sort { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-caption); color: var(--muted); }
+.todo-list { padding: 0 var(--sp-2) var(--sp-2); }
+.todo-group-head { font-size: var(--fs-caption); color: var(--muted); padding: 10px 4px 4px; }
+.todo-item { flex-wrap: wrap; align-items: flex-start; }
+.todo-item.sel { background: var(--accent-soft); border-color: var(--border-accent); }
+.todo-main { flex: 1; min-width: 0; }
+.todo-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.todo-badge { font-size: var(--fs-micro); padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border); background: none; color: var(--muted); cursor: default; font-family: inherit; }
+.todo-badge.due-over { color: var(--danger); border-color: var(--danger); }
+.todo-badge.due-today { color: var(--accent); border-color: var(--accent); }
+.todo-badge.pri-1 { color: var(--danger); border-color: var(--danger); }
+.todo-badge.pri-2 { color: var(--accent); border-color: var(--accent); }
+.todo-badge.note { cursor: pointer; }
+.todo-badge.note:hover { color: var(--accent); border-color: var(--accent); }
+.todo-actions { display: flex; align-items: center; gap: 4px; opacity: 0; transition: opacity var(--t-fast) var(--ease); }
+.todo-item:hover .todo-actions, .todo-item.sel .todo-actions { opacity: 1; }
+.todo-edit { width: 100%; padding: 2px 6px; font-size: var(--fs-body); border: 1px solid var(--accent); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text); }
+.todo-edit:focus { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+.todo-detail { flex-basis: 100%; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--accent-soft); cursor: default; }
+.todo-detail-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.todo-detail-row label { font-size: var(--fs-caption); color: var(--muted); min-width: 56px; }
+.todo-date, .todo-select, .todo-note-input { padding: 3px 8px; font-size: var(--fs-caption); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text); }
+.todo-note-input { flex: 1; min-width: 160px; }
+.todo-sub { display: flex; align-items: center; gap: 8px; padding: 3px 0 3px 6px; font-size: var(--fs-caption); }
+.todo-sub span { flex: 1; min-width: 0; }
+.todo-sub.done span { color: var(--muted); text-decoration: line-through; }
+.todo-sub .todo-check { width: 16px; height: 16px; font-size: 10px; }
+.todo-foot { padding: 8px var(--sp-4); border-top: 1px solid var(--border); line-height: 1.9; font-size: var(--fs-micro); }
+
+/* ============================================================ 复习卡片自定义（M6++）
+   编辑/删除都独立于笔记：这里改的是卡片覆盖值，笔记文件不动。 */
+.card-edit { width: min(760px, 92vw); margin: 4vh auto 24px; padding: var(--sp-5) var(--sp-6); background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 20px; box-shadow: var(--shadow-modal); max-height: 80vh; overflow-y: auto; }
+.card-edit--list { margin: 0 auto; width: min(720px, 92vw); padding: var(--sp-3) var(--sp-4); }
+.card-edit-title { margin: 0 0 4px; font-size: var(--fs-title); }
+.card-edit-head { font-size: var(--fs-caption); color: var(--muted); margin-bottom: 6px; }
+.card-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; border-top: 1px solid var(--border); font-size: var(--fs-caption); }
+.card-edit-label { display: block; margin: 10px 0 4px; font-size: var(--fs-caption); color: var(--muted); }
+.card-edit-input { width: 100%; padding: 8px 10px; font-size: var(--fs-body); line-height: 1.6; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text); resize: vertical; }
+.card-edit-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.card-edit-actions { display: flex; gap: 8px; margin-top: 12px; }
+.card-edit-orig { margin-top: 12px; font-size: var(--fs-caption); color: var(--muted); }
+.card-edit-orig summary { cursor: pointer; }
+
 /* ============================================================ 标签聚合 / 学习统计 */
 .tag-search {
   display: flex; gap: 8px; padding: var(--sp-2) var(--sp-4);

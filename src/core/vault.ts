@@ -19,6 +19,7 @@ import { exportSrsState, importSrsState } from './srs';
 import { exportQbanks, importQbanks } from './qbank';
 import { loadMistakes, importMistakes } from './mistakes';
 import { exportTodos, importTodos } from './todos';
+import { exportCardEdits, importCardEdits } from './cardEdits';
 import { exportDays, importDays } from './stats';
 import { pushSnapshot } from './history';
 
@@ -378,7 +379,7 @@ export function useVault() {
       .map(([path, content]) => ({ path, content }));
     const payload = {
       app: 'knowlattice',
-      version: 3,
+      version: 4,
       exportedAt: new Date().toISOString(),
       files,
       // v2 起随备份保存 SRS 复习调度进度（旧版备份无此字段，导入时自动跳过）
@@ -389,6 +390,8 @@ export function useVault() {
       // v3 起补上待办与打卡：这两样此前只活在 localStorage 里，备份不到、换设备即丢
       todos: exportTodos(),
       days: exportDays(),
+      // v4 起补上卡片自定义（改写正/背面、删卡）：和待办同一类问题，不随备份走就会丢
+      cardEdits: exportCardEdits(),
     };
     const blob = new Blob([JSON.stringify(payload)], {
       type: 'application/json',
@@ -413,6 +416,7 @@ export function useVault() {
       mistakes?: unknown;
       todos?: unknown;
       days?: unknown;
+      cardEdits?: unknown;
     };
     // 兼容旧版以 medvault 命名的备份：两版文件结构一致，只有 app 字段不同
     if ((data.app !== 'knowlattice' && data.app !== 'medvault') || !Array.isArray(data.files)) {
@@ -449,6 +453,7 @@ export function useVault() {
     if (data.mistakes) importMistakes(data.mistakes);
     if (data.todos) importTodos(data.todos);
     if (data.days) importDays(data.days);
+    if (data.cardEdits) importCardEdits(data.cardEdits);
 
     // 并入内存缓存 + 增量更新链接索引
     // 只把真正写成功的并入内存：写失败的如果也进内存，当前会话看着一切正常、还弹
