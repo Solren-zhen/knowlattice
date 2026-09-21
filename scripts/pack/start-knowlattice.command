@@ -36,4 +36,7 @@ if [ -z "$PY" ]; then
   exit 1
 fi
 
-exec "$PY" server.py "$@"
+# -u：关掉 Python 的块缓冲。终端里本来就是行缓冲，但如果输出被重定向（有人从别的
+# 脚本里调用它），不加这个的话「KnowLattice is running at …」会一直卡在缓冲区里，
+# 用户对着一个看起来没反应的窗口干等。
+exec "$PY" -u server.py "$@"
