@@ -12,7 +12,7 @@
  *   【FILL_BLANK】/【SHORT_ANSWER】/【TERM_EXPLANATION】/【论述题】→ 无选项，自判题
  *
  * 产出两种，分别对应晶格的两个入口：
- *   ① 整库备份（笔记）  数据管理 → 导入备份     —— 无损，题目原文一字不改
+ *   ① 整库备份（笔记）  笔记树右上角 ⋯ →「从备份 .json 恢复」  —— 无损，题目原文一字不改
  *   ② 题库 JSON         题库练习 → 导入题库文件 —— 解析成 QuizQuestion
  *
  * 用法：node scripts/qbank-to-vault.mjs [--out <目录>]
@@ -360,7 +360,7 @@ const idx = [];
 idx.push('# 题库导入包索引\n');
 idx.push(`生成时间：${report.generatedAt}\n`);
 idx.push('## 一、笔记形式（推荐，无损）\n');
-idx.push('入口：**数据管理 → 导入备份**。题目原文一字不改，连解析、共用题干、表格都在。\n');
+idx.push('入口：**笔记树右上角 ⋯ →「从备份 .json 恢复」**。题目原文一字不改，连解析、共用题干、表格都在。\n');
 idx.push('| 文件 | 大小 | 内容 |');
 idx.push('| --- | --- | --- |');
 for (const s of report.sources) {
