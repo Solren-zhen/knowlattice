@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  addDays, addSubtask, BUCKET_LABELS, clearCompleted, completeTodo, dayKey, daysBetween, dueBucket, dueLabel,
-  editTodo, exportTodos, groupTodos, importTodos, loadTodos, makeTodo, matchesQuery, moveTodo, newTodoId,
-  parseQuickAdd, removeSubtask, removeTodo, saveTodos, sortTodos, subtaskProgress, todoStats, toggleAll,
-  toggleSubtask, updateTodo, type Todo,
+  addDays, addSubtask, BUCKET_LABELS, bulkComplete, bulkRemove, bulkUpdate, clearCompleted, completeTodo,
+  dayKey, daysBetween, dueBucket, dueLabel, editTodo, exportTodos, groupByNote, groupTodos, importTodos,
+  inSmartList, loadTodos, makeTodo, matchesQuery, moveTodo, newTodoId, nextDue, parseQuickAdd, removeSubtask,
+  removeTodo, rollover, saveTodos, smartCounts, sortTodos, subtaskProgress, todoStats, todoStreak, todoTrend,
+  toggleAll, toggleSubtask, updateTodo, type Todo,
 } from '../todos';
 
 beforeEach(() => localStorage.clear());
@@ -336,9 +337,20 @@ describe('M8 重复任务 completeTodo', () => {
 describe('M8 存储清洗与备份', () => {
   it('loadTodos 丢掉形状不对的字段（坏备份灌不进界面）', () => {
     localStorage.setItem('knowlattice-todos', JSON.stringify([
-      { id: 'a', text: 'ok', done: false, createdAt: 1, due: '9/25', priority: 9, repeat: 'monthly', order: 'x', subtasks: [{ text: '无 id' }] },
+      // 'yearly' 不在合法重复规则里（M9 起合法值是 daily/weekdays/weekly/biweekly/monthly）
+      { id: 'a', text: 'ok', done: false, createdAt: 1, due: '9/25', priority: 9, repeat: 'yearly', order: 'x', subtasks: [{ text: '无 id' }] },
+      // 撞原型链的键也必须丢掉：直接 `REPEAT_LABELS[key]` 取值会拿到函数，灌进界面就是灾难
+      { id: 'b', text: 'ok2', done: false, createdAt: 2, repeat: 'toString' },
     ]));
-    expect(loadTodos()).toEqual([{ id: 'a', text: 'ok', done: false, createdAt: 1 }]);
+    expect(loadTodos()).toEqual([
+      { id: 'a', text: 'ok', done: false, createdAt: 1 },
+      { id: 'b', text: 'ok2', done: false, createdAt: 2 },
+    ]);
+  });
+
+  it('loadTodos 保留 M9 的备注与新重复规则', () => {
+    saveTodos([todo({ id: 'a', memo: '重点看氧解离曲线', repeat: 'monthly' })]);
+    expect(loadTodos()[0]).toMatchObject({ memo: '重点看氧解离曲线', repeat: 'monthly' });
   });
 
   it('loadTodos 保留合法的新字段', () => {
@@ -358,5 +370,133 @@ describe('M8 存储清洗与备份', () => {
     expect(t).toEqual({ id: expect.any(String), text: '看书', done: false, createdAt: 7 });
     const full = makeTodo({ text: '看书', due: '2026-09-25', priority: 1, note: 'n.md', repeat: 'weekly' }, 7);
     expect(full).toMatchObject({ due: '2026-09-25', priority: 1, note: 'n.md', repeat: 'weekly' });
+  });
+});
+
+// ============================================================ M9
+
+const TODAY = '2026-09-21';
+
+describe('M9 重复规则 nextDue', () => {
+  it('每天 / 每周 / 每两周', () => {
+    expect(nextDue(TODAY, 'daily')).toBe('2026-09-22');
+    expect(nextDue(TODAY, 'weekly')).toBe('2026-09-28');
+    expect(nextDue(TODAY, 'biweekly')).toBe('2026-10-05');
+  });
+
+  it('工作日：周五跳到下周一，周六跳到周一，周一到周二', () => {
+    expect(nextDue('2026-09-25', 'weekdays')).toBe('2026-09-28'); // 周五 → 周一
+    expect(nextDue('2026-09-26', 'weekdays')).toBe('2026-09-28'); // 周六 → 周一
+    expect(nextDue('2026-09-21', 'weekdays')).toBe('2026-09-22'); // 周一 → 周二
+  });
+
+  it('每月同一天；短月夹到月末，不会溢出到下下月', () => {
+    expect(nextDue(TODAY, 'monthly')).toBe('2026-10-21');
+    expect(nextDue('2026-01-31', 'monthly')).toBe('2026-02-28');
+    expect(nextDue('2026-08-31', 'monthly')).toBe('2026-09-30');
+  });
+
+  it('短语法认 *工作日 / *每两周 / *每月', () => {
+    expect(parseQuickAdd('背单词 *工作日', TODAY).repeat).toBe('weekdays');
+    expect(parseQuickAdd('背单词 *每两周', TODAY).repeat).toBe('biweekly');
+    expect(parseQuickAdd('背单词 *每月', TODAY).repeat).toBe('monthly');
+  });
+
+  it('completeTodo 走新规则顺延（每月）', () => {
+    const r = completeTodo([todo({ id: 'a', repeat: 'monthly', due: '2026-09-30' })], 'a', TODAY, 1);
+    expect(r.spawned!.due).toBe('2026-10-30');
+  });
+});
+
+describe('M9 智能列表 / 趋势 / 分组', () => {
+  const list: Todo[] = [
+    todo({ id: 'a', due: '2026-09-19' }),                                    // 逾期
+    todo({ id: 'b', due: TODAY }),                                            // 今天
+    todo({ id: 'c', due: '2026-09-22' }),                                     // 明天
+    todo({ id: 'd', due: '2026-09-30' }),                                     // 更远
+    todo({ id: 'e' }),                                                        // 未排期
+    todo({ id: 'f', done: true, due: TODAY, completedAt: Date.parse('2026-09-21T10:00:00') }),
+  ];
+
+  it('inSmartList 口径：今天含逾期，明天之前含今天，本周内不含没排期的', () => {
+    expect(inSmartList(list[0], 'today', TODAY)).toBe(true); // 逾期也算今天该做
+    expect(inSmartList(list[3], 'today', TODAY)).toBe(false);
+    expect(inSmartList(list[2], 'tomorrow', TODAY)).toBe(true);
+    expect(inSmartList(list[3], 'week', TODAY)).toBe(false); // 9-30 超出 7 天
+    expect(inSmartList(list[4], 'week', TODAY)).toBe(false); // 没排期不算「本周内」
+    expect(inSmartList(list[5], 'done', TODAY)).toBe(true);
+    expect(inSmartList(list[5], 'active', TODAY)).toBe(false);
+    expect(inSmartList(list[4], 'all', TODAY)).toBe(true);
+  });
+
+  it('smartCounts 与左栏计数同一口径', () => {
+    const c = smartCounts(list, TODAY);
+    expect(c).toMatchObject({ overdue: 1, today: 2, tomorrow: 3, week: 3, active: 5, done: 1, all: 6 });
+  });
+
+  it('todoTrend 近 7 天按完成日期归档', () => {
+    const t = todoTrend(list, TODAY, 7);
+    expect(t).toHaveLength(7);
+    expect(t[6]).toEqual({ day: '2026-09-21', done: 1 });
+    expect(t[5]).toEqual({ day: '2026-09-20', done: 0 });
+  });
+
+  it('todoStreak：今天还没完成不算断，从昨天往前数', () => {
+    const done = (day: string) => todo({ id: day, done: true, completedAt: Date.parse(`${day}T09:00:00`) });
+    expect(todoStreak([done('2026-09-21'), done('2026-09-20'), done('2026-09-19')], TODAY)).toBe(3);
+    expect(todoStreak([done('2026-09-20'), done('2026-09-19')], TODAY)).toBe(2); // 今天还没做
+    expect(todoStreak([done('2026-09-19')], TODAY)).toBe(0);                     // 断了
+    expect(todoStreak([], TODAY)).toBe(0);
+  });
+
+  it('groupByNote：按关联笔记分组，未关联的单独一组，多的在前', () => {
+    const g = groupByNote(
+      [todo({ id: 'a', note: 'n.md' }), todo({ id: 'b', note: 'n.md' }), todo({ id: 'c' })],
+      [{ name: '内科学', path: 'n.md' }]
+    );
+    expect(g.map((x) => [x.label, x.items.length])).toEqual([['内科学', 2], ['未关联笔记', 1]]);
+  });
+});
+
+describe('M9 批量操作 / 顺延', () => {
+  it('批量完成：重复任务照样顺延出下一条', () => {
+    const base = [todo({ id: 'a' }), todo({ id: 'b', repeat: 'daily', due: TODAY }), todo({ id: 'c' })];
+    const r = bulkComplete(base, ['a', 'b'], true, TODAY, 5);
+    expect(r.list.filter((t) => t.done).map((t) => t.id).sort()).toEqual(['a', 'b']);
+    expect(r.spawned).toHaveLength(1);
+    expect(r.spawned[0].due).toBe('2026-09-22');
+    // 批量取消完成
+    const back = bulkComplete(r.list, ['a', 'b'], false, TODAY, 6);
+    expect(back.list.filter((t) => t.done)).toHaveLength(0);
+  });
+
+  it('批量改字段只动选中项', () => {
+    const base = [todo({ id: 'a' }), todo({ id: 'b' }), todo({ id: 'c' })];
+    expect(bulkUpdate(base, ['a', 'c'], { due: TODAY }).map((t) => t.due)).toEqual([TODAY, undefined, TODAY]);
+    expect(bulkUpdate(base, ['a'], { priority: 1 })[0].priority).toBe(1);
+    expect(bulkRemove(base, ['b']).map((t) => t.id)).toEqual(['a', 'c']);
+  });
+
+  it('rollover 只把逾期的未完成项挪到今天', () => {
+    const base = [
+      todo({ id: 'a', due: '2026-09-19' }),
+      todo({ id: 'b', due: '2026-09-22' }),
+      todo({ id: 'c', due: '2026-09-19', done: true }),
+      todo({ id: 'd' }),
+    ];
+    const r = rollover(base, TODAY);
+    expect(r.moved).toBe(1);
+    expect(r.list.map((t) => t.due)).toEqual([TODAY, '2026-09-22', '2026-09-19', undefined]);
+  });
+
+  it('排序多了创建时间与标题', () => {
+    const base = [todo({ id: 'a', text: '乙', createdAt: 2 }), todo({ id: 'b', text: '甲', createdAt: 1 })];
+    expect(sortTodos(base, 'created').map((t) => t.id)).toEqual(['a', 'b']);
+    expect(sortTodos(base, 'title').map((t) => t.text)).toEqual(['甲', '乙']);
+  });
+
+  it('搜索也认备注', () => {
+    expect(matchesQuery(todo({ id: 'a', memo: '重点看氧解离曲线' }), '氧解离')).toBe(true);
+    expect(matchesQuery(todo({ id: 'a', memo: '重点看氧解离曲线' }), '心电图')).toBe(false);
   });
 });

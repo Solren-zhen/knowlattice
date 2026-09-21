@@ -1,21 +1,30 @@
 // @vitest-environment jsdom
 /**
- * 待办清单 M8 的 DOM 测试：短语法、行内编辑、键盘操作、过滤持久化、重复任务。
- * 纯逻辑（解析/分组/排序/统计）在 core/__tests__/todos.test.ts 已有单测，这里只验接线。
+ * 待办清单的 DOM 测试：短语法、行内编辑、键盘操作、过滤持久化、重复任务，
+ * 以及 M9 的整页三栏（智能列表 / 批量 / 撤销 / 笔记里的任务）。
+ * 纯逻辑（解析/分组/排序/统计）在 core/__tests__/todos.test.ts 与 noteTasks.test.ts 已有单测，这里只验接线。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import TodoView from '../TodoView';
+import { addDays, dayKey } from '../../core/todos';
 
 const DOCS = new Map<string, string>([
   ['内科学/呼吸系统.md', '# 呼吸系统\n\n氧解离曲线。\n'],
   ['内科学/循环系统.md', '# 循环系统\n\n心电传导。\n'],
 ]);
 
-function renderView() {
-  const props = { onClose: vi.fn(), docs: DOCS, onOpenPath: vi.fn() };
+function renderView(docs: Map<string, string> = DOCS) {
+  const props = { onClose: vi.fn(), docs, onOpenPath: vi.fn(), onSaveNote: vi.fn() };
   return { ...render(<TodoView {...props} />), props };
 }
+
+/**
+ * 按行取元素。行内的 aria-label（标记为完成 / 删除这条待办 / 勾选笔记任务…）**每行都有一份**，
+ * 多行时全局取必然撞重复——所以一律先定位行，再在行内查。
+ */
+const rowOf = (text: string) => screen.getByText(text).closest('.todo-item') as HTMLElement;
+const inRow = (text: string, label: string) => within(rowOf(text)).getByLabelText(label);
 
 const todos = (): Array<Record<string, unknown>> => JSON.parse(localStorage.getItem('knowlattice-todos') ?? '[]');
 const composer = () => screen.getByPlaceholderText(/加一条/) as HTMLInputElement;
@@ -197,7 +206,8 @@ describe('详情面板：到期日 / 关联笔记 / 子任务 / 重复', () => {
       { id: 'a', text: '复习', done: false, createdAt: 1, note: '内科学/呼吸系统.md' },
     ]));
     const { props } = renderView();
-    fireEvent.click(screen.getByText('呼吸系统'));
+    // 左栏「按笔记」分组里也会出现同一个笔记名，所以按徽标的类取，不按文字取（否则命中两个元素）
+    fireEvent.click(document.querySelector('.todo-note-badge') as HTMLElement);
     expect(props.onOpenPath).toHaveBeenCalledWith('内科学/呼吸系统.md');
   });
 
@@ -210,5 +220,106 @@ describe('详情面板：到期日 / 关联笔记 / 子任务 / 重复', () => {
     fireEvent.change(screen.getByPlaceholderText(/搜索待办/), { target: { value: '氧解离' } });
     await waitFor(() => expect(screen.getByText('复习')).toBeTruthy());
     expect(screen.queryByText('别的')).toBeNull();
+  });
+});
+
+describe('M9 整页三栏：智能列表 / 批量 / 撤销 / 笔记任务', () => {
+  it('左栏智能列表带计数，点一下切列表', async () => {
+    localStorage.setItem('knowlattice-todos', JSON.stringify([
+      { id: 'a', text: '今天做', done: false, createdAt: 3, due: dayKey() },
+      { id: 'b', text: '以后做', done: false, createdAt: 2, due: addDays(dayKey(), 5) },
+      { id: 'c', text: '已做完', done: true, createdAt: 1, completedAt: Date.now() },
+    ]));
+    renderView();
+    expect(screen.getByText('今天做')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '已完成 1' }));
+    await waitFor(() => expect(screen.getByText('已做完')).toBeTruthy());
+    expect(screen.queryByText('今天做')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '已逾期 0' }));
+    await waitFor(() => expect(screen.getByText('没有逾期的事，很好')).toBeTruthy());
+  });
+
+  it('Ctrl+点击多选，批量条一次勾完', async () => {
+    localStorage.setItem('knowlattice-todos', JSON.stringify([
+      { id: 'a', text: '甲', done: false, createdAt: 2 },
+      { id: 'b', text: '乙', done: false, createdAt: 1 },
+    ]));
+    renderView();
+    fireEvent.click(screen.getByText('甲'), { ctrlKey: true });
+    fireEvent.click(screen.getByText('乙'), { ctrlKey: true });
+    await waitFor(() => expect(screen.getByText('已选 2 项')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: '完成' }));
+    await waitFor(() => expect(todos().every((t) => t.done)).toBe(true));
+  });
+
+  it('删除后可撤销（整份列表原样放回）', async () => {
+    localStorage.setItem('knowlattice-todos', JSON.stringify([{ id: 'a', text: '别删我', done: false, createdAt: 1 }]));
+    renderView();
+    fireEvent.click(inRow('别删我', '删除这条待办'));
+    await waitFor(() => expect(todos()).toEqual([]));
+
+    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    await waitFor(() => expect(todos()).toHaveLength(1));
+    expect(todos()[0].text).toBe('别删我');
+  });
+
+  it('笔记里的 `- [ ]` 任务：勾选写回源文件并补 ✅ 日期', async () => {
+    const docs = new Map<string, string>([
+      ['内科学/呼吸系统.md', '# 呼吸系统\n\n- [ ] 背氧解离曲线 📅 2026-09-25 ⏫\n- [x] 看心电图\n'],
+    ]);
+    const { props } = renderView(docs);
+    fireEvent.click(screen.getByRole('button', { name: '待勾选 1' }));
+    await waitFor(() => expect(screen.getByText('背氧解离曲线')).toBeTruthy());
+    // 勾过的也列在下面（点错了还能取消）
+    expect(screen.getByText('看心电图')).toBeTruthy();
+
+    fireEvent.click(inRow('背氧解离曲线', '勾选笔记任务'));
+    await waitFor(() => expect(props.onSaveNote).toHaveBeenCalledTimes(1));
+    const [path, content] = props.onSaveNote.mock.calls[0] as [string, string];
+    expect(path).toBe('内科学/呼吸系统.md');
+    expect(content).toContain(`- [x] 背氧解离曲线 📅 2026-09-25 ⏫ ✅ ${dayKey()}`);
+    expect(content).toContain('- [x] 看心电图'); // 别的行一个字都不许动
+  });
+
+  it('没选中时右栏是统计：近 7 天 + 连续完成天数', () => {
+    localStorage.setItem('knowlattice-todos', JSON.stringify([
+      { id: 'a', text: '今天做完了', done: true, createdAt: 1, completedAt: Date.now() },
+      { id: 'b', text: '昨天也做了', done: true, createdAt: 2, completedAt: Date.now() - 86400000 },
+    ]));
+    renderView();
+    expect(screen.getByText('近 7 天完成')).toBeTruthy();
+    expect(screen.getByText('连续完成')).toBeTruthy();
+    expect(screen.getByText('2 天')).toBeTruthy();
+  });
+
+  it('优先级快捷键 1/2/3 与 0（清除）', async () => {
+    localStorage.setItem('knowlattice-todos', JSON.stringify([{ id: 'a', text: '定级', done: false, createdAt: 1 }]));
+    renderView();
+    fireEvent.click(screen.getByText('定级'));
+    fireEvent.keyDown(document.body, { key: '1' });
+    await waitFor(() => expect(todos()[0].priority).toBe(1));
+
+    fireEvent.keyDown(document.body, { key: '3' });
+    await waitFor(() => expect(todos()[0].priority).toBe(3));
+
+    fireEvent.keyDown(document.body, { key: '0' });
+    await waitFor(() => expect(todos()[0].priority).toBeUndefined());
+  });
+
+  it('左栏按笔记分组能只看一篇，chip 可清除', async () => {
+    localStorage.setItem('knowlattice-todos', JSON.stringify([
+      { id: 'a', text: '呼吸的活', done: false, createdAt: 2, note: '内科学/呼吸系统.md' },
+      { id: 'b', text: '循环的活', done: false, createdAt: 1, note: '内科学/循环系统.md' },
+    ]));
+    renderView();
+    fireEvent.click(screen.getByRole('button', { name: '呼吸系统 1' }));
+    await waitFor(() => expect(screen.queryByText('循环的活')).toBeNull());
+    expect(screen.getByText('呼吸的活')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('清除笔记筛选'));
+    await waitFor(() => expect(screen.getByText('循环的活')).toBeTruthy());
   });
 });

@@ -1779,18 +1779,6 @@ a.wikilink.missing::after {
   font-size: var(--fs-control); color: var(--text);
 }
 .todo-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); outline: none; }
-.todo-filterbar {
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px var(--sp-4); font-size: var(--fs-caption);
-}
-.todo-filter {
-  padding: 4px 10px; border-radius: 999px; cursor: pointer;
-  color: var(--muted); background: transparent; border: 1px solid transparent;
-}
-.todo-filter.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
-/* 未重置 background/border 时 <button> 会露出浏览器原生底（深色下为 #6b6b6b），此处补上 */
-.todo-clear { margin-left: auto; font-size: var(--fs-caption); color: var(--muted); cursor: pointer; background: none; border: none; padding: 0; }
-.todo-clear:hover { color: var(--danger); }
 .todo-item { cursor: default; }
 .todo-check {
   width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
@@ -1802,7 +1790,14 @@ a.wikilink.missing::after {
 .todo-item.done .todo-text { color: var(--muted); text-decoration: line-through; }
 
 /* ---- M8：进度条 / 短语法 / 分组 / 详情 / 子任务 ---- */
-.todo-panel { width: min(780px, 94vw); }
+/* ---- M9：整页三栏（左智能列表 / 中列表 / 右详情）----
+   待办是一个工作面，不是一个 780px 的浮层：给足宽高，三栏各自滚动。
+   用 .panel.todo-panel 提权——.panel 的 max-height/overflow 写在文件更后面，同权重会被它盖掉。 */
+.panel.todo-panel {
+  width: min(1280px, 96vw);
+  height: min(86vh, 920px);
+  overflow: hidden; /* 滚动交给里面三栏，否则整页跟着滚 */
+}
 .todo-progress { height: 3px; background: var(--border); }
 .todo-progress-bar { height: 100%; background: var(--grad-primary); transition: width var(--t-med) var(--ease); }
 .todo-composer { display: flex; gap: 8px; padding: var(--sp-2) var(--sp-4) 6px; }
@@ -1834,7 +1829,12 @@ a.wikilink.missing::after {
 .todo-item:hover .todo-actions, .todo-item.sel .todo-actions { opacity: 1; }
 .todo-edit { width: 100%; padding: 2px 6px; font-size: var(--fs-body); border: 1px solid var(--accent); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text); }
 .todo-edit:focus { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
-.todo-detail { flex-basis: 100%; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--accent-soft); cursor: default; }
+.todo-detail {
+  border-left: 1px solid var(--border);
+  padding: var(--sp-3);
+  overflow-y: auto;
+  min-width: 0;
+}
 .todo-detail-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .todo-detail-row label { font-size: var(--fs-caption); color: var(--muted); min-width: 56px; }
 .todo-date, .todo-select, .todo-note-input { padding: 3px 8px; font-size: var(--fs-caption); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text); }
@@ -1844,6 +1844,108 @@ a.wikilink.missing::after {
 .todo-sub.done span { color: var(--muted); text-decoration: line-through; }
 .todo-sub .todo-check { width: 16px; height: 16px; font-size: 10px; }
 .todo-foot { padding: 8px var(--sp-4); border-top: 1px solid var(--border); line-height: 1.9; font-size: var(--fs-micro); }
+
+/* ---- M9：三栏布局本体 ---- */
+.todo-body {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr) 300px;
+}
+.todo-side {
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: var(--sp-2) var(--sp-2) var(--sp-3);
+}
+.todo-side__group { margin-bottom: var(--sp-3); }
+.todo-side__title {
+  padding: 6px 8px; font-size: var(--fs-micro); color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.todo-side__item {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  width: 100%; padding: 6px 8px; border: none; border-radius: var(--r-sm);
+  background: none; color: var(--text-2); font-family: inherit;
+  font-size: var(--fs-caption); line-height: 1.5; cursor: pointer; text-align: left;
+}
+.todo-side__item:hover { background: var(--accent-soft); color: var(--accent); }
+.todo-side__item.active { background: var(--accent-soft); color: var(--accent); font-weight: var(--fw-title); }
+.todo-side__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todo-count { flex: none; font-size: var(--fs-micro); color: var(--muted); }
+
+.todo-main-col { display: flex; flex-direction: column; min-width: 0; overflow-y: auto; padding-top: var(--sp-2); }
+.todo-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 var(--sp-4) 8px; }
+.todo-toolbar .btn-small { padding: 3px 10px; font-size: var(--fs-micro); }
+.todo-add-btn { flex: none; }
+.todo-group { padding: 0 var(--sp-2); }
+.todo-group-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 10px 4px 4px; border: none; background: none;
+  font-family: inherit; font-size: var(--fs-caption); color: var(--muted);
+  cursor: pointer; text-align: left;
+}
+.todo-group-head:hover { color: var(--accent); }
+
+.todo-batch, .todo-undo, .todo-filter-chip {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 0 var(--sp-4) 8px; padding: 6px 10px;
+  border: 1px solid var(--border-accent); border-radius: var(--r-md);
+  background: var(--accent-soft); font-size: var(--fs-caption);
+}
+.todo-batch .btn-small { padding: 3px 10px; font-size: var(--fs-micro); }
+.todo-batch__count { font-weight: var(--fw-title); }
+.todo-filter-chip .btn-icon { width: 20px; height: 20px; }
+
+.todo-detail__inner { display: flex; flex-direction: column; gap: 10px; }
+.todo-detail-title {
+  width: 100%; padding: 6px 8px;
+  font-family: inherit; font-size: var(--fs-body); font-weight: var(--fw-title);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--bg-raised); color: var(--text);
+}
+.todo-detail-title:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.todo-field { display: flex; align-items: center; gap: 8px; font-size: var(--fs-caption); color: var(--muted); }
+.todo-field > span:first-child { flex: none; min-width: 56px; }
+.todo-field--col { flex-direction: column; align-items: stretch; }
+.todo-quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.todo-quick .btn-small { padding: 3px 10px; font-size: var(--fs-micro); }
+.todo-quick .btn-small.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.todo-memo {
+  width: 100%; padding: 6px 8px; resize: vertical;
+  font-family: inherit; font-size: var(--fs-caption);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--bg-raised); color: var(--text);
+}
+.todo-memo:focus { outline: none; border-color: var(--accent); }
+.todo-subs { border-top: 1px solid var(--border); padding-top: 6px; }
+.todo-sub-input {
+  width: 100%; margin-top: 6px; padding: 4px 8px;
+  font-family: inherit; font-size: var(--fs-caption);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--bg-raised); color: var(--text);
+}
+
+.todo-stats { display: flex; flex-direction: column; gap: 6px; }
+.todo-stats__row { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-caption); color: var(--muted); }
+.todo-stats__row b { color: var(--text); }
+.todo-trend { display: flex; align-items: flex-end; gap: 4px; height: 56px; padding: 4px 0; }
+.todo-trend__bar { flex: 1; border-radius: 3px 3px 0 0; background: var(--grad-primary); }
+.todo-stats__tip { margin-top: 4px; }
+
+.todo-empty { padding: var(--sp-5) var(--sp-4); text-align: center; }
+.todo-note-task { cursor: default; }
+.todo-badge--btn { cursor: pointer; }
+.todo-badge--btn:hover { color: var(--accent); border-color: var(--accent); }
+.todo-chip--text { color: var(--text-2); }
+
+/* 窄屏：右栏落到列表下方，别把中栏挤没 */
+@media (max-width: 900px) {
+  .todo-body { grid-template-columns: 168px minmax(0, 1fr); }
+  .todo-detail {
+    grid-column: 1 / -1;
+    border-left: none; border-top: 1px solid var(--border);
+    max-height: 42vh;
+  }
+}
 
 /* ============================================================ 复习卡片自定义（M6++）
    编辑/删除都独立于笔记：这里改的是卡片覆盖值，笔记文件不动。 */
