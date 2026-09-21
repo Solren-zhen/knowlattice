@@ -111,9 +111,20 @@ if (explicitData) {
 } else {
   // 自动模式只取仓库根目录的 knowlattice-*.json（这些是应用导出的稳定副本），
   // 避免误收 Downloads 里的旧备份；要带上应用里刚导出的最新版，用 --data 指定。
+  //
+  // 体积闸门：题库类导出动辄几十 MB（111548 道题的备份 54 MB），自动收进来会把分享包
+  // 从 41 MB 撑到 100 MB，而且同学拿到一堆题库备份也不是"起步数据"。超过 8 MB 的一律跳过，
+  // 真要收就 --data 显式指定——显式指定意味着你知道自己在装什么。
+  const AUTO_MAX_BYTES = 8 * 1024 * 1024;
   for (const f of readdirSync(repo).filter((f) => /^(?:knowlattice|medvault)-.*\.json$/.test(f)).sort()) {
-    const b = loadBackup(join(repo, f));
-    if (b) sources.push({ p: join(repo, f), b });
+    const full = join(repo, f);
+    const bytes = statSync(full).size;
+    if (bytes > AUTO_MAX_BYTES) {
+      console.log(`[pack] 跳过 ${f}（${(bytes / 1024 / 1024).toFixed(1)} MB > 自动收录上限 8 MB；要收就 --data 指定）`);
+      continue;
+    }
+    const b = loadBackup(full);
+    if (b) sources.push({ p: full, b });
   }
 }
 if (sources.length === 0) {
@@ -275,6 +286,19 @@ if (!removeTree(staging)) {
 }
 const root = join(staging, 'KnowLattice-Portable');
 mkdirSync(join(root, 'data'), { recursive: true });
+// 装进包里的到底是哪些笔记，打出来——分享前必须一眼看清包里有没有不该带的东西
+{
+  const notes = merged.files.filter((f) => !f.path.startsWith('_attachments/'));
+  const seedBytes = Buffer.byteLength(JSON.stringify(merged));
+  const tops = new Map();
+  for (const f of notes) {
+    const top = f.path.split('/')[0];
+    tops.set(top, (tops.get(top) ?? 0) + 1);
+  }
+  console.log(`[pack] 随包数据：${notes.length} 篇笔记 + ${qbanks.length} 份题库（${(seedBytes / 1024 / 1024).toFixed(2)} MB）`);
+  console.log(`[pack] 笔记顶层目录：${[...tops.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}(${v})`).join('、') || '（无）'}`);
+  for (const { p } of sources) console.log(`[pack] 来源：${relative(repo, p) || p}`);
+}
 // 完整包：OCR 组件（tesseract 三个 core 变体 + 语言包，压缩后 6.73 MB）与 KaTeX 的
 // woff/ttf 冗余字体（0.58 MB）都保留——前者是「扫描版 PDF」功能本体，后者是 woff2
 // 加载失败时的回退，两样加起来 7.3 MB，换掉任何一样都不划算（详见文件头的说明）。
