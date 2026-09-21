@@ -9,6 +9,7 @@ import {
   pickQuestions,
   removeBank,
   rowsToQuestions,
+  setOptionNote,
   type QuizBank,
 } from '../qbank';
 
@@ -161,5 +162,68 @@ describe('pickQuestions', () => {
     expect(picked).toHaveLength(3);
     expect(new Set(picked.map((q) => q.id)).size).toBe(3);
     expect(bank.questions).toEqual(qs);
+  });
+});
+
+describe('选项批注', () => {
+  const choice = {
+    id: 'q-c1', type: 'choice' as const,
+    stem: '氧解离曲线右移？',
+    options: ['容易放氧', '容易结合氧', '亲和力增大'],
+    answer: 0, answerText: '容易放氧',
+  };
+  const seed = () => addBank('生理', [choice]);
+
+  it('写入的是指定选项，且落盘可读回', () => {
+    seed();
+    setOptionNote('生理', 'q-c1', 1, '  右移是亲和力下降  ');
+    const notes = loadBanks()[0].questions[0].optionNotes;
+    expect(notes).toEqual(['', '右移是亲和力下降', '']);
+  });
+
+  it('同一题多次批注互不覆盖', () => {
+    seed();
+    setOptionNote('生理', 'q-c1', 0, '正确项：记住 P50 增大');
+    setOptionNote('生理', 'q-c1', 2, '亲和力增大是左移');
+    expect(loadBanks()[0].questions[0].optionNotes)
+      .toEqual(['正确项：记住 P50 增大', '', '亲和力增大是左移']);
+  });
+
+  it('清空即删除，全部清空后不留空数组', () => {
+    seed();
+    setOptionNote('生理', 'q-c1', 1, '先写一条');
+    setOptionNote('生理', 'q-c1', 1, '   ');
+    expect(loadBanks()[0].questions[0].optionNotes).toBeUndefined();
+  });
+
+  it('题库名/题号/下标不成立时原样返回', () => {
+    seed();
+    setOptionNote('不存在的库', 'q-c1', 0, 'x');
+    setOptionNote('生理', 'q-nope', 0, 'x');
+    setOptionNote('生理', 'q-c1', 9, 'x');
+    expect(loadBanks()[0].questions[0].optionNotes).toBeUndefined();
+  });
+
+  it('导入时读入 optionNotes，并按选项数补齐/裁齐', () => {
+    const qs = normalizeQuestions([{
+      stem: '题干', options: ['a', 'b', 'c'], answer: 'A',
+      optionNotes: ['  第一项  ', '', '第三项', '多出来的'],
+    }]);
+    expect(qs[0].optionNotes).toEqual(['第一项', '', '第三项']);
+    expect(normalizeQuestions([{ stem: '题干2', options: ['a', 'b'], answer: 0, optionNotes: ['', ' '] }])[0].optionNotes)
+      .toBeUndefined();
+  });
+
+  it('重导同名题库时按题干+选项接回旧批注', () => {
+    seed();
+    setOptionNote('生理', 'q-c1', 1, '右移是亲和力下降');
+    // 修订版：同一道题换了 id，另加一道新题
+    addBank('生理', [
+      { ...choice, id: 'q-new-1' },
+      { ...choice, id: 'q-new-2', stem: '另一题', options: ['x', 'y'], answer: 0, answerText: 'x' },
+    ]);
+    const questions = loadBanks()[0].questions;
+    expect(questions[0].optionNotes).toEqual(['', '右移是亲和力下降', '']);
+    expect(questions[1].optionNotes).toBeUndefined();
   });
 });

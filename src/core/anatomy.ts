@@ -5,6 +5,8 @@
  * 数据来源：Anatria-3D（Apache-2.0 代码 + CC BY-SA 4.0 模型）
  */
 
+import { netErrorHint } from './netError';
+
 // ---------- manifest 类型（与 Anatria-3D manifest.json 对齐） ----------
 
 export interface ManifestOrgan {
@@ -98,4 +100,51 @@ export function zhOrganName(nameEn: string, organs: Map<string, string>): string
     return base ? `${base}（${m[2].toLowerCase() === 'left' ? '左' : '右'}）` : null;
   }
   return organs.get(nameEn) ?? null;
+}
+
+// ---------- manifest 派生信息 ----------
+
+/**
+ * 一个系统实际要用到哪几个 GLB。
+ *
+ * 不能假设「一个系统一个文件」。manifest 里有 3 个系统（digestive / endocrine /
+ * respiratory）的 organs 指向**两个** mesh_file：主文件 + `visceral_male.glb`（内脏器官）。
+ * 例如 endocrine 的 10 个结构里只有 4 个在 `endocrine_male.glb`，另外 6 个（垂体、松果体、
+ * 甲状腺、肾上腺…）都在 `visceral_male.glb`。以前只取「该系统第一条 organ 的 mesh_file」，
+ * 于是这 13 个结构在列表里点得到、3D 里永远不显示。
+ *
+ * 顺序保持 manifest 中出现顺序：第一个是该系统的主文件（加载失败才算整个系统失败）。
+ */
+export function systemMeshFiles(manifest: AnatomyManifest, system: string): string[] {
+  const files: string[] = [];
+  for (const o of manifest.organs) {
+    if (o.system !== system) continue;
+    if (o.mesh_file && !files.includes(o.mesh_file)) files.push(o.mesh_file);
+  }
+  return files.length > 0 ? files : [`${system}_male.glb`];
+}
+
+// ---------- 模型加载失败时给用户看什么 ----------
+
+/**
+ * 3D 模型取不到时的文案。
+ *
+ * 404 与传输层失败是两回事，所以分开给话术：
+ * - 404（`FileLoader` 抛的 HttpError 带 `response`）：这个文件没随包提供，用户既不知道
+ *   「是缺文件」也不知道「别的系统没事、结构列表还能用」，所以要说清楚；
+ * - 其它（连不上本地服务等）交给 netErrorHint。
+ *
+ * 触发场景不再是「nervous_male.glb 没提交」（2026-09-20 已从上游补回并加了打包闸门），
+ * 而是任何一次包不完整 / 服务没起来——包括 `visceral_male.glb` 这类**附加**文件缺失。
+ */
+export function modelLoadHint(err: unknown, file: string): string {
+  // three.js 的 HttpError 带 response 字段（class HttpError { this.response = response }），
+  // 优先读它；读不到再退回到消息里的状态码（不依赖具体措辞）。
+  const status = (err as { response?: { status?: number } } | null)?.response?.status;
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  if (status === 404 || (status === undefined && /\b404\b/.test(raw))) {
+    return `${file} 没有随包提供，这个系统的 3D 模型无法显示。其它系统不受影响；`
+      + '该系统的结构名称与笔记仍可在右侧列表里查看。';
+  }
+  return netErrorHint(err);
 }

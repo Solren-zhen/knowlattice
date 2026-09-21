@@ -9,9 +9,17 @@
  */
 import { useEffect, useState } from 'react';
 import { renderMarkdown } from '../core/markdown';
+import { FORMAT_KEYS } from '../core/formatKeys';
 import { IconSearch } from './icons';
 
 /** markdown-it 实例已移至 core/markdown.ts 懒加载（首屏入口包不含它） */
+
+/** 四个行内格式键的展示文案，从 FORMAT_KEYS 推出来——键位只此一处定义，
+ *  改键不会再漏改首页提示（mdFormat 的注释把「内置使用说明」也算在四处同源之内）。
+ *  label 形如 'Alt+A'，取 '+' 后半段拼成 'A S Z X'。 */
+const FORMAT_HINT = `Alt/⌥ + ${(['bold', 'highlight', 'italic', 'wiki'] as const)
+  .map((k) => FORMAT_KEYS[k].label.split('+')[1])
+  .join(' ')}`;
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -110,11 +118,14 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
   };
 
   if (content === null) {
+    // 首页文案纪律：一行只说一件事，每条 ≤ 10 个字（断言在 previewHero.dom.test.tsx，
+    // 长度按词计数、忽略分隔符）。原来最长的两条各 40+ 字，在两列网格里被撑成三行、
+    // 右边缘参差，首屏被拉长。设计理由（为什么这四个键要挤在左手）属于 README，不属于首屏。
     return (
       <div className="preview placeholder">
         <div className="hero-badge">晶格 · KnowLattice</div>
         <h1 className="hero-title">你的知识库，从这里开始</h1>
-        <p className="hero-sub">一文件一知识点 · 缩进即层级 · 「属性: 内容」自动加粗 · [[双链]] 织成知识网</p>
+        <p className="hero-sub">一文件一知识点 · 缩进即层级 · [[双链]] 织成知识网</p>
         <div className="hero-cta">
           <button className="btn-primary hero-primary" onClick={onSearch}>
             <IconSearch /> 快速搜索 <kbd>Ctrl K</kbd>
@@ -122,10 +133,12 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
           <button className="btn" onClick={onGraph}>知识图谱</button>
         </div>
         <div className="teach-steps">
-          <div className="teach-step"><kbd>回车</kbd><span>自动续写下一条，不用输任何符号</span></div>
-          <div className="teach-step"><kbd>Tab</kbd><span>缩进一层，就是子要点</span></div>
-          <div className="teach-step"><kbd>[[</kbd><span>链接到其他笔记，形成知识网</span></div>
-          <div className="teach-step"><kbd>Ctrl+B</kbd><span>加粗关键词；Ctrl+H 高亮重点。选中文字后右键也行，不用手打符号</span></div>
+          <div className="teach-step"><kbd>回车</kbd><span>续写下一条</span></div>
+          <div className="teach-step"><kbd>Tab</kbd><span>缩进成子要点</span></div>
+          <div className="teach-step"><kbd>[[</kbd><span>链接到其他笔记</span></div>
+          <div className="teach-step"><kbd>{FORMAT_HINT}</kbd><span>加粗 / 高亮 / 斜体 / 双链</span></div>
+          {/* 第 5 条跨两列：5 个格子在 2 列网格里必然剩一个孤儿格，索性让它整行 */}
+          <div className="teach-step wide"><kbd>右键</kbd><span>打开 / 删除整篇笔记</span></div>
         </div>
         <p className="muted shortcut-hint">
           <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存 · <kbd>Alt</kbd>+<kbd>←→</kbd> 后退前进

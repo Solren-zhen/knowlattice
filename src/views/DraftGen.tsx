@@ -3,10 +3,12 @@
  * 纯前端规则引擎（core/noteGen），零成本离线可用。
  */
 import { useRef, useState } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import { generateDraft, draftToMarkdown, type Draft } from '../core/noteGen';
 import { loadPdfjs } from '../core/pdfLib';
 import { IconWand, IconClose } from './icons';
 import { toast } from '../core/feedback';
+import { netErrorHint } from '../core/netError';
 
 interface Props {
   /** 预填文本（来自编辑器选中内容） */
@@ -17,6 +19,8 @@ interface Props {
 }
 
 export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
+  // Esc 关闭；焦点在文本框里时先退出输入框，再按一次才关——避免草稿连同面板一起没了
+  useEsc(escThenClose(onClose));
   const [text, setText] = useState(initialText);
   const [chapter, setChapter] = useState('');
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -53,7 +57,7 @@ export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
     try {
       setDraft(generateDraft(text, { chapter, tags }));
     } catch (e) {
-      toast((e as Error).message, 'err');
+      toast(netErrorHint(e), 'err');
     }
   };
 
@@ -70,7 +74,7 @@ export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
       toast(`已入库：${path}`, 'ok');
       onClose();
     } catch (e) {
-      toast((e as Error).message, 'err');
+      toast(netErrorHint(e), 'err');
     } finally {
       setSaving(false);
     }

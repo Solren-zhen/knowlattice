@@ -25,13 +25,28 @@
   --accent-ring: rgba(79, 70, 229, 0.28);
   /* 主色填充之上的文字色：浅色用白，深色反转为深墨，两主题均 ≥4.5:1 */
   --accent-ink: #ffffff;
-  --grad-primary: linear-gradient(180deg, #6366f1 0%, var(--accent) 100%);
+  /* 渐变顶端原来用 #6366f1：白字压在上面只有 4.47:1，差 0.03 不达 AA。
+     整体压暗 2%（肉眼不可辨）→ 4.66:1，底端 #4f46e5 本来就是 6.29:1。 */
+  --grad-primary: linear-gradient(180deg, #5f63ee 0%, var(--accent) 100%);
   --grad-primary-hover: linear-gradient(180deg, #4f46e5 0%, var(--accent-hover) 100%);
 
   /* ---- 状态色 ---- */
   --danger: #dc2626;
   --danger-soft: rgba(220, 38, 38, 0.06);
   --success: #10b981;
+  /* 状态色填充之上的文字色：与 --accent-ink 同一套规则，浅色深色都 ≥4.5:1
+     （白字在 --success 上只有 2.54:1、深色下在 --danger 上 2.77:1） */
+  --success-ink: #052e22;
+  --danger-ink: #ffffff;
+  /* 状态色「文字压自身淡底」的变体：原色直接压在自己的 6~8% 淡底上时，
+     浅色主题只有 2.0~4.4:1（困难 2.02 / 简单 2.26 / 重来 3.39 / 危险 4.40）。
+     描边与填充仍用原色，只有文字改用这里的深色变体。 */
+  --danger-text: #b91c1c;
+  --amber-text: #b45309;
+  --cyan-text: #0e7490;
+  /* 成功色此前没有「文字变体」出口，于是判分对的 ✓ 直接吃 --success：#10b981
+     压在 12% 成功淡底上只有 2.54:1。补上同一套出口（4.97:1）。 */
+  --success-text: #047857;
   --warn-bg: #eff6ff;
   --warn-border: #bfdbfe;
   --warn-text: #1d4ed8;
@@ -190,6 +205,23 @@ button, input, select, textarea { font: inherit; letter-spacing: inherit; }
   height: 100%; color: var(--muted);
 }
 
+/* 知识库加载失败拦截页（见 core/vault.ts + views/Workspace.tsx）：
+   库没读出来时停在这里，不进入可写状态。样式自足——此时应用其余部分都没渲染。 */
+.load-error {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; height: 100%; padding: 24px; text-align: center;
+}
+.load-error h2 { margin: 0; font-size: 17px; font-weight: 600; color: var(--text); }
+.load-error-msg {
+  max-width: 480px; margin: 0; padding: 10px 14px;
+  border: 1px solid var(--danger-soft); border-radius: var(--r-md);
+  background: var(--bg-raised); color: var(--danger-text);
+  font-size: 12px; line-height: 1.6; word-break: break-word;
+}
+.load-error .muted { max-width: 480px; margin: 0; line-height: 1.6; }
+/* .btn-primary 默认整行宽（表单主按钮），这里收窄到内容宽度 */
+.load-error .btn-primary { width: auto; padding: 8px 22px; font-size: var(--fs-control); }
+
 /* ============================================================ 按钮 */
 .btn-small,
 .btn-icon {
@@ -221,15 +253,9 @@ button, input, select, textarea { font: inherit; letter-spacing: inherit; }
   opacity: 0.45; cursor: not-allowed;
   transform: none; box-shadow: none;
 }
-.btn-small.saved {
-  border-color: var(--success);
-  color: var(--success);
-  background: rgba(16, 185, 129, 0.08);
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
-}
 .btn-small.danger:hover {
   border-color: var(--danger);
-  color: var(--danger);
+  color: var(--danger-text);
   background: var(--danger-soft);
   box-shadow: 0 2px 8px rgba(220, 38, 38, 0.2);
 }
@@ -291,7 +317,9 @@ kbd {
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--panel) 0%, rgba(241, 245, 249, 0) 100%);
+  /* 末端写成 transparent（预乘插值下与 rgba(241,245,249,0) 等价），
+     免得留下一个会被误读成「浅色硬编码」的残留 */
+  background: linear-gradient(180deg, var(--panel) 0%, transparent 100%);
 }
 .header-actions { display: flex; gap: 6px; width: 100%; align-items: center; justify-content: space-between; }
 
@@ -322,7 +350,7 @@ kbd {
 .more-wrap .more-menu { left: auto; right: 0; }
 .more-menu div { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .more-menu div.menu-danger { color: var(--danger); }
-.more-menu div.menu-danger:hover { color: var(--danger); background: rgba(220, 38, 38, 0.07); }
+.more-menu div.menu-danger:hover { color: var(--danger-text); background: rgba(220, 38, 38, 0.07); }
 
 /* 导入方式选择菜单 */
 .import-menu {
@@ -403,7 +431,7 @@ kbd {
   animation: rise-in var(--t-med) var(--ease);
 }
 .tree-batchbar .count { flex: 1; color: var(--text-2); font-variant-numeric: tabular-nums; font-weight: 500; }
-.tree-batchbar .del { border-color: var(--danger); color: var(--danger); background: rgba(220, 38, 38, 0.06); }
+.tree-batchbar .del { border-color: var(--danger); color: var(--danger-text); background: rgba(220, 38, 38, 0.06); }
 .tree-batchbar .del:disabled { opacity: 0.4; }
 .tree-row {
   /* 固定行高：虚拟滚动按 26px/行 窗口化渲染（ChapterTree ROW_H） */
@@ -416,6 +444,25 @@ kbd {
 }
 .tree-row.dir { font-weight: 600; color: var(--text-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
 .tree-row.dir:hover { background: var(--accent-soft); color: var(--accent); }
+/* 文件行 = 可点的行 + 行内独立删除入口（ChapterTree 的 .tree-row-wrap）。
+   删除键做成行的兄弟节点：行本身是 role="button"，里面再套 button 是嵌套可交互元素。 */
+.tree-row-wrap { display: flex; align-items: center; height: 26px; flex-shrink: 0; }
+.tree-row-wrap > .tree-row { flex: 1; min-width: 0; }
+.tree-name { overflow: hidden; text-overflow: ellipsis; }
+.tree-row-wrap .tree-del {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; margin-right: 3px; padding: 0;
+  border: none; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted);
+  /* 常显但低对比：藏到 hover 才出现等于用户找不到（这正是这次的反馈） */
+  opacity: 0.4; cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+.tree-row-wrap:hover .tree-del,
+.tree-row-wrap:focus-within .tree-del { opacity: 1; }
+.tree-row-wrap .tree-del:hover { color: var(--danger-text); background: var(--danger-soft); }
+.tree-row-wrap .tree-del:focus-visible { opacity: 1; outline: 2px solid var(--accent-ring); outline-offset: 1px; }
 .tree-row.file:hover { background: var(--panel); color: var(--text); }
 .tree-row.file.active {
   position: relative;
@@ -671,7 +718,6 @@ kbd {
   font-weight: 600;
   text-align: left;
 }
-.editor-host .lp-table tbody tr:nth-child(even) td { background: rgba(241, 245, 249, 0.6); }
 .editor-wrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .editor-wrap .editor-host { flex: 1; min-height: 0; }
 /* 正文按可读宽度居中：窗口越宽，两侧留白越多，行长恒定不过宽；
@@ -716,6 +762,9 @@ kbd {
   transition: all var(--t-fast) var(--ease);
 }
 .cm-ctx-item:hover { background: var(--accent-soft); border-color: var(--border-accent); }
+.cm-ctx-item.danger { color: var(--danger-text); }
+.cm-ctx-item.danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+.cm-ctx-item.danger > span { display: inline-flex; align-items: center; gap: 6px; }
 .cm-ctx-item:focus-visible { background: var(--accent-soft); border-color: var(--border-accent); outline: 2px solid var(--border-accent); outline-offset: -2px; }
 .cm-ctx-sep { height: 1px; margin: 5px 4px; background: var(--border); }
 .cm-ctx-item kbd {
@@ -763,7 +812,7 @@ kbd {
   font-size: 16px; color: var(--text-2); margin-bottom: 8px;
   font-weight: 500;
 }
-.shortcut-hint { margin-top: 20px; line-height: 2.6; }
+.shortcut-hint { margin-top: 14px; line-height: 2; }
 
 /* 空状态三步教学 */
 .teach-steps {
@@ -828,7 +877,11 @@ kbd {
 .markdown-body th {
   background: var(--panel); font-weight: 600;
 }
-.markdown-body tr:nth-child(even) td { background: rgba(241, 245, 249, 0.6); }
+/* 表格斑马纹：编辑区可编辑表格与预览区表格共用同一条规则。
+   原来是两条一模一样的 rgba(241,245,249,0.6)（硬编码浅色），深色主题下
+   等于给深底盖一层 60% 白，正文 2.7:1。合并成一处，并改用随主题翻转的 text 淡色。 */
+.editor-host .lp-table tbody tr:nth-child(even) td,
+.markdown-body tr:nth-child(even) td { background: color-mix(in srgb, var(--text) 4%, transparent); }
 .markdown-body hr {
   border: none; border-top: 1px dashed var(--border-strong);
   margin: 24px 0;
@@ -1025,11 +1078,13 @@ a.wikilink.missing::after {
   letter-spacing: -0.03em; font-weight: 750;
   background: linear-gradient(180deg, var(--text) 40%, var(--muted) 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 [data-theme='dark'] .review-front h2 {
   background: linear-gradient(180deg, #ffffff 40%, #94a3b8 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 .blurred-title {
@@ -1084,10 +1139,10 @@ a.wikilink.missing::after {
 .rate small { color: var(--muted); font-size: var(--fs-micro); display: block; margin-top: 2px; }
 .rate:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
 .rate:active { transform: translateY(0) scale(0.96); }
-.rate.again:hover { border-color: #ef4444; color: #ef4444; background: rgba(239, 68, 68, 0.08); box-shadow: 0 4px 14px rgba(239, 68, 68, 0.25); }
-.rate.hard:hover  { border-color: #f59e0b; color: #f59e0b; background: rgba(245, 158, 11, 0.08); box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25); }
+.rate.again:hover { border-color: #ef4444; color: var(--danger-text); background: rgba(239, 68, 68, 0.08); box-shadow: 0 4px 14px rgba(239, 68, 68, 0.25); }
+.rate.hard:hover  { border-color: #f59e0b; color: var(--amber-text); background: rgba(245, 158, 11, 0.08); box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25); }
 .rate.good:hover  { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3); }
-.rate.easy:hover  { border-color: #06b6d4; color: #06b6d4; background: rgba(6, 182, 212, 0.08); box-shadow: 0 4px 14px rgba(6, 182, 212, 0.25); }
+.rate.easy:hover  { border-color: #06b6d4; color: var(--cyan-text); background: rgba(6, 182, 212, 0.08); box-shadow: 0 4px 14px rgba(6, 182, 212, 0.25); }
 
 /* ============================================================ M5 解剖图谱（3D 分屏） */
 .anatomy-overlay {
@@ -1192,8 +1247,75 @@ a.wikilink.missing::after {
 }
 .viewer3d-error {
   position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
-  background: rgba(220, 38, 38, 0.92); color: #fff;
+  background: var(--danger); color: var(--danger-ink);
   padding: 8px 18px; border-radius: var(--r-md); font-size: var(--fs-body);
+}
+/* 结构笔记卡片：点 3D 结构后贴着光标浮现，位置由 core/anatomyCard 计算后写进 left/top */
+.anatomy-note-card {
+  position: absolute; z-index: 20;
+  width: min(360px, 48%);
+  max-height: min(62%, 520px);
+  display: flex; flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  animation: rise-in var(--t-med) var(--ease);
+}
+.anatomy-note-card__head {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) var(--sp-1);
+}
+.anatomy-note-card__title {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.anatomy-note-card__name {
+  font-size: var(--fs-title); font-weight: 600; color: var(--accent);
+  overflow-wrap: anywhere;
+}
+.anatomy-note-card__en {
+  font-size: var(--fs-micro); color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.anatomy-note-card__meta {
+  padding: 0 var(--sp-3) var(--sp-2);
+  font-size: var(--fs-micro); line-height: 1.5;
+}
+.anatomy-note-card__body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+/* 正文复用预览渲染器：卡片里不要它的大留白与 760px 版心，也不要再叠一层入场动画 */
+.anatomy-note-card__body .preview { padding: 0; max-width: none; animation: none; }
+.anatomy-note-card__body .markdown-body { font-size: var(--fs-body); }
+.anatomy-note-card__body .markdown-body h1 {
+  font-size: 16px; border-bottom: none; padding-bottom: 0; margin: 0 0 var(--sp-2);
+}
+.anatomy-note-card__body .markdown-body h2 { font-size: 15px; margin: 1.1em 0 0.4em; }
+.anatomy-note-card__body .markdown-body h3,
+.anatomy-note-card__body .markdown-body h4 { font-size: var(--fs-body); margin: 1em 0 0.3em; }
+.anatomy-note-card__body .markdown-body p { margin: 6px 0; line-height: 1.75; }
+.anatomy-note-card__body .markdown-body li { margin: 3px 0; line-height: 1.7; }
+.anatomy-note-card__empty { padding: var(--sp-3) 0; text-align: center; }
+.anatomy-note-card__empty p { margin: 4px 0; }
+.anatomy-note-card__empty p:first-child { font-weight: 600; color: var(--text-2); }
+.anatomy-note-card__foot {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+.anatomy-note-card__cta {
+  width: auto; flex: none;
+  padding: 6px 14px; font-size: var(--fs-control);
+}
+.anatomy-note-card__path {
+  flex: 1; min-width: 0;
+  font-size: var(--fs-micro); text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .anatomy-panel {
   width: min(400px, 90vw);
@@ -2061,31 +2183,89 @@ a.wikilink.missing::after {
   color: var(--accent);
 }
 .opt:disabled { cursor: default; }
+/* 正确 / 错误态：底色 + 描边 + 序号圈 + 尾部标记四个冗余信号已经说清了结果，
+   正文一律保持正文色。此前正文直接吃 --success，浅色下是 #10b981 落在自己的 12% 底色上，
+   实测 2.27:1（连 3:1 都不到）；两态用同一套「内描边」而不是一边发光一边描边，视觉才对称。 */
 .opt.right {
   border-color: var(--success);
-  background: rgba(16, 185, 129, 0.12);
-  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
   font-weight: 600;
-  box-shadow: 0 0 16px -2px rgba(16, 185, 129, 0.35);
+  box-shadow: inset 0 0 0 1px var(--success);
 }
 .opt.right b {
   border-color: var(--success);
   background: var(--success);
-  color: #fff;
+  color: var(--success-ink);
 }
+.opt.right .opt-mark { color: var(--success-text); }
 .opt.wrong {
   border-color: var(--danger);
-  background: rgba(239, 68, 68, 0.12);
-  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   font-weight: 600;
-  box-shadow: 0 0 16px -2px rgba(239, 68, 68, 0.35);
+  box-shadow: inset 0 0 0 1px var(--danger);
 }
 .opt.wrong b {
   border-color: var(--danger);
   background: var(--danger);
-  color: #fff;
+  color: var(--danger-ink);
 }
+.opt.wrong .opt-mark { color: var(--danger-text); }
 .opt-mark { margin-left: auto; font-weight: 700; }
+/* 选项批注：作答后每个选项右侧一支铅笔，写下的批注显示在该选项正下方。
+   选项按钮作答后即 disabled，铅笔必须做成它的兄弟节点——按钮不能套按钮。
+   铅笔做成「安静的幽灵图标」：四个描边圆钮并排会读成一列工具栏，跟它所属的选项脱钩；
+   指针进到这一行（或键盘聚焦其中）才提亮，已经写了批注的常亮。 */
+.quiz-opt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px 8px;
+}
+.quiz-opt > .opt { grid-column: 1; }
+.opt-note-btn {
+  grid-column: 2; grid-row: 1; align-self: center;
+  color: var(--muted);
+  background: transparent; border-color: transparent; box-shadow: none;
+  opacity: 0.55;
+}
+.quiz-opt:hover .opt-note-btn,
+.quiz-opt:focus-within .opt-note-btn { opacity: 1; }
+.opt-note-btn:hover, .opt-note-btn:focus-visible {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent; box-shadow: none;
+  opacity: 1;
+}
+.opt-note-btn.has-note {
+  color: var(--accent);
+  background: var(--accent-soft);
+  opacity: 1;
+}
+/* 批注卡片与选项框同宽同边：此前缩进 50px 去对齐选项正文，
+   结果右边贴齐、左边缩进 50px，一张带底色的卡片这样摆就像没对齐。 */
+.opt-note, .opt-note-edit { grid-column: 1; }
+.opt-note {
+  display: flex; align-items: flex-start; gap: 7px;
+  padding: 7px 12px 7px 11px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: var(--fs-caption); line-height: 1.7;
+  animation: rise-in var(--t-med) var(--ease);
+}
+.opt-note-icon { flex-shrink: 0; margin-top: 3px; display: inline-flex; color: var(--accent); opacity: 0.8; }
+.opt-note-text { min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--text-2); }
+.opt-note-edit { display: flex; flex-direction: column; gap: 4px; }
+.opt-note-input {
+  width: 100%; min-height: 58px;
+  border: 1px solid var(--border-accent); border-radius: var(--r-sm);
+  padding: 7px 10px;
+  font-size: var(--fs-caption); line-height: 1.7;
+  background: var(--bg-raised); color: var(--text);
+  resize: vertical;
+}
+.opt-note-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); outline: none; }
+.opt-note-hint { font-size: var(--fs-micro); color: var(--muted); }
 .quiz-answer {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -2095,17 +2275,34 @@ a.wikilink.missing::after {
 }
 .quiz-answer b { font-size: var(--fs-micro); color: var(--muted); letter-spacing: 0.06em; }
 .quiz-answer p { margin: 6px 0 0; line-height: 1.7; }
+/* 解析框跟着结果走色：蓝色是「提示」语义，落在「答对了 / 答错了」上是错的。
+   标题做成实心状态药丸（吃 --success-ink / --danger-ink），避免又出现
+   「--success 文字压在自己的淡色底上」这种 2.x:1 的组合；正文回到 --text-2。 */
 .quiz-expl {
   margin-top: var(--sp-4);
   border-radius: var(--r-md);
   padding: 12px 16px;
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  color: var(--warn-text);
+  border: 1px solid var(--border);
+  color: var(--text-2);
   font-size: var(--fs-body);
   animation: rise-in var(--t-med) var(--ease);
 }
-.quiz-expl b { display: block; margin-bottom: 4px; font-size: var(--fs-caption); letter-spacing: 0.04em; }
+.quiz-expl.is-right {
+  background: color-mix(in srgb, var(--success) 9%, transparent);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+.quiz-expl.is-wrong {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 26%, transparent);
+}
+.quiz-expl b {
+  display: inline-flex; align-items: center;
+  margin-bottom: 6px; padding: 3px 10px;
+  border-radius: 999px;
+  font-size: var(--fs-micro); letter-spacing: 0.04em;
+}
+.quiz-expl.is-right b { background: var(--success); color: var(--success-ink); }
+.quiz-expl.is-wrong b { background: var(--danger); color: var(--danger-ink); }
 .quiz-expl p { margin: 0; line-height: 1.7; }
 .quiz-actions { display: flex; gap: 10px; margin-top: var(--sp-4); }
 .quiz-actions.center { justify-content: center; }
@@ -2113,7 +2310,9 @@ a.wikilink.missing::after {
   position: sticky; bottom: 0;
   display: flex; align-items: center; gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-6) var(--sp-4);
-  background: linear-gradient(180deg, rgba(255,255,255,0), var(--bg-raised) 30%);
+  /* 起手用 transparent：渐变按预乘插值，等价于「目标色零透明」，两个主题都只淡出、不串色。
+     此前写死 rgba(255,255,255,0)，深色主题下就是在深色面板底部糊一层白雾。 */
+  background: linear-gradient(180deg, transparent, var(--bg-raised) 30%);
 }
 .quiz-next { width: auto; padding: 10px 26px; font-size: var(--fs-lead); margin-left: auto; }
 .quiz-import {
@@ -2160,11 +2359,20 @@ a.wikilink.missing::after {
   font-size: 64px; font-weight: 800;
   letter-spacing: -0.03em; line-height: 1;
   font-variant-numeric: tabular-nums;
-  background: linear-gradient(180deg, var(--accent) 0%, #a5b4fc 100%);
+  /* 渐变尾端原来是写死的 #a5b4fc：浅色主题下白底压浅紫只有 1.99:1（64px 大字也要 3:1）。
+     改成按主题向正文色混合——浅色下变深、深色下变浅，一条规则两个主题都 ≥6:1。 */
+  background: linear-gradient(180deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 45%, var(--text)) 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-.quiz-result .score small { font-size: 16px; font-weight: 500; margin-left: 4px; color: var(--muted); }
+.quiz-result .score small {
+  font-size: 16px; font-weight: 500; margin-left: 4px;
+  /* -webkit-text-fill-color 会被子元素继承，不显式复位的话「分」会一直是透明的，
+     露出父级的渐变而不是这里想要的静默灰。 */
+  color: var(--muted);
+  -webkit-text-fill-color: var(--muted);
+}
 .quiz-wrong-list {
   margin-top: var(--sp-5); text-align: left;
   border: 1px solid var(--border);
@@ -2177,10 +2385,16 @@ a.wikilink.missing::after {
   font-size: var(--fs-body);
 }
 .quiz-wrong-item + .quiz-wrong-item { border-top: 1px solid var(--border); }
-.quiz-wrong-item span { flex: 1; min-width: 0; }
+.quiz-wrong-item span { flex: 1; min-width: 0; font-weight: 600; }
+/* 正解做成淡色药丸：此前是 --accent 蓝字，既跟「正确」无关，13px 蓝字也偏灰；
+   文字用 --text-2，颜色语义交给底色和描边。 */
 .quiz-wrong-item i {
-  font-style: normal; color: var(--accent); font-size: var(--fs-caption);
+  font-style: normal; color: var(--text-2); font-size: var(--fs-caption);
   white-space: nowrap;
+  padding: 3px 10px; border-radius: 999px;
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ============================================================ 智能草稿 */
@@ -2392,16 +2606,21 @@ a.wikilink.missing::after {
 .pdf-popover span + span { border-left: 1px solid rgba(255, 255, 255, 0.35); padding-left: 10px; }
 .pdf-popover .pdf-popover-btn { cursor: pointer; }
 .pdf-popover .pdf-popover-btn:hover { opacity: 0.82; }
-/* 弹层里的快捷键小标签：底色是强调色，用半透明白样式替代全局浅色 kbd */
-.pdf-popover kbd {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.4);
+/* 强调色填充之上的快捷键小标签：全局浅色 kbd 放在实心主按钮 / 浮层上，
+   深色主题只剩 1.28:1、浅色 1.65:1（浅底浅字）。这里统一换成
+   「同色系半透明底 + 该表面的 ink」：浅色主题按钮是深靛蓝配白字，
+   小标签就压暗；深色主题反过来（浅靛蓝配墨字），小标签就提亮。 */
+.btn-primary kbd, .pdf-popover kbd {
+  background: rgba(8, 9, 13, 0.22);
+  border-color: rgba(255, 255, 255, 0.28);
+  border-bottom-color: rgba(255, 255, 255, 0.42);
   color: var(--accent-ink);
 }
-/* 深色下浮层底色是浅靛蓝，白描边会糊掉，改用墨色描边 */
+[data-theme='dark'] .btn-primary kbd,
 [data-theme='dark'] .pdf-popover kbd {
-  background: rgba(16, 22, 43, 0.12);
-  border-color: rgba(16, 22, 43, 0.3);
+  background: rgba(255, 255, 255, 0.32);
+  border-color: rgba(8, 9, 13, 0.24);
+  border-bottom-color: rgba(8, 9, 13, 0.38);
 }
 /* 按行选取（扫描版）：关掉原生选区，改用自绘高亮，避免 OCR 文字层顺序导致的跳行 */
 /* 几何选区（默认开）：禁用原生选区，改用自绘高亮——绝对定位的文字层上原生划选
@@ -2599,9 +2818,8 @@ a.wikilink.missing::after {
 .excerpt-item:hover { transform: translateY(-1px); }
 .heat-row:hover .heat-fill { filter: brightness(1.08); }
 
-/* 选项/评分按钮：圆角更柔和，选中/正确态更饱满 */
+/* 选项/评分按钮：圆角更柔和 */
 .opt, .rate, .type-chip { border-radius: 10px; }
-.opt.right { box-shadow: inset 0 0 0 1px var(--accent); }
 
 /* 行内主按钮（入库/下一题/再练一轮）：保持胶囊但页面内行内右对齐，不被 block/100% 拉通 */
 .draft-gen, .quiz-next, .quiz-result .btn-primary {
@@ -2848,23 +3066,25 @@ a.wikilink.missing::after {
   box-shadow: 0 0 8px var(--accent);
 }
 .preview.placeholder .hero-title {
-  font-size: 34px; font-weight: 800; letter-spacing: -0.035em;
+  font-size: 30px; font-weight: 800; letter-spacing: -0.035em;
   margin: 6px 0 0;
   background: linear-gradient(180deg, var(--text) 40%, var(--muted) 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   line-height: 1.2;
 }
 [data-theme='dark'] .preview.placeholder .hero-title {
   background: linear-gradient(180deg, #ffffff 40%, #94a3b8 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 .preview.placeholder .hero-sub {
-  color: var(--muted); font-size: 14.5px; margin: 4px 0 0; max-width: 540px; line-height: 1.8;
+  color: var(--muted); font-size: 14px; margin: 4px 0 0; max-width: 460px; line-height: 1.7;
   letter-spacing: -0.01em;
 }
-.hero-cta { display: flex; gap: 14px; margin-top: 16px; }
+.hero-cta { display: flex; gap: 14px; margin-top: 14px; }
 .hero-cta .hero-primary {
   width: auto; padding: 11px 26px; font-size: 14px; display: inline-flex; align-items: center; gap: 8px;
   border-radius: 999px;
@@ -2902,6 +3122,13 @@ a.wikilink.missing::after {
   --danger: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.12);
   --success: #34d399;
+  --danger-ink: #3b0a0a;
+  /* 深色下原色压在自身淡底上本来就够（危险 5.8:1），这里给出同一套出口，
+     免得共享规则在深色主题下取到浅色的深变体。 */
+  --danger-text: #fca5a5;
+  --amber-text: #fcd34d;
+  --cyan-text: #67e8f9;
+  --success-text: #34d399;
   --warn-bg: #1e2a44;
   --warn-border: #33477a;
   --warn-text: #a5b8f5;
@@ -3084,10 +3311,11 @@ a.wikilink.missing::after {
   font-variant-numeric: tabular-nums;
 }
 .brain-readout-name { color: #94a3b8; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 英文原名作为第二标签：字号降一级、压暗，中文名仍然是主读对象 */
+/* 英文原名作为第二标签：字号降一级、压暗，中文名仍然是主读对象。
+   原来是 #64748b：压在读数条的 72% 深底上只有 3.97:1（11px 小字要 4.5:1）。 */
 .brain-readout-en {
   max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: var(--fs-micro); color: #64748b;
+  font-size: var(--fs-micro); color: #7c8da3;
 }
 .brain-legend {
   position: absolute; right: 10px; top: 10px; z-index: 2;
@@ -3147,11 +3375,13 @@ a.wikilink.missing::after {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 10px;
   width: min(560px, 100%);
-  margin: 30px auto 0;
+  margin: 22px auto 0;
   text-align: left;
 }
+/* 5 个格子在 2 列网格里必然剩一个孤儿格：让第 5 条整行，块面反而齐了 */
+.welcome-stage > .preview.placeholder .teach-step.wide { grid-column: 1 / -1; }
 .preview.placeholder .teach-step {
-  padding: 10px 16px; gap: 10px; font-size: 13px;
+  padding: 8px 14px; gap: 10px; font-size: 13px;
   background: var(--panel-glass-strong);
   backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);

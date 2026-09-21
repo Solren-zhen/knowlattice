@@ -7,6 +7,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import { Viewer, Worker } from '@react-pdf-viewer/core';
 import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
 import '@react-pdf-viewer/core/lib/styles/index.css';
@@ -15,6 +16,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { renderAsync } from 'docx-preview';
 import { detectScannedPdf, saveLastPdf, getLastPdf } from '../core/pdfLib';
 import { toast } from '../core/feedback';
+import { netErrorHint } from '../core/netError';
 import { generateDraft, draftToMarkdown, type Draft } from '../core/noteGen';
 import { normalizePdfSelection } from '../core/pdfText';
 import {
@@ -26,6 +28,14 @@ import Loading from './Loading';
 
 /** 静态资源根：base './' 时构建产物为 './'，GitHub Pages 子路径也能正确加载 */
 const BASE = import.meta.env.BASE_URL;
+
+/** 载入随包示例 PDF。显式检查 r.ok：以前直接 `.arrayBuffer()`，404 时会把错误页的 HTML
+ *  当 PDF 喂给解析器，报出来的是一句和「文件没找到」毫无关系的解析错误。 */
+async function fetchSamplePdf(): Promise<ArrayBuffer> {
+  const r = await fetch(`${BASE}sample-lecture.pdf`);
+  if (!r.ok) throw new Error(`示例文件读取失败 (HTTP ${r.status})`);
+  return r.arrayBuffer();
+}
 
 interface Props {
   onSave: (dir: string, title: string, content: string) => Promise<string>;
@@ -107,12 +117,15 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
   /** savedMsg auto-clear timer (cleared on unmount) */
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Esc 关闭
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+  // Esc 关闭。走全局 Esc 栈，并按层退：划选弹层开着先收弹层 → 焦点在输入框里先退出输入框
+  // → 都没有才关整个对照面板（以前一次 Esc 会把面板连同右栏草稿一起关掉）。
+  useEsc((e) => {
+    if (selected) {
+      setSelected(null);
+      return;
+    }
+    escThenClose(onClose)(e);
+  });
 
   // Clear pending timers on unmount so they cannot fire after the view closes.
   useEffect(() => () => {
@@ -166,7 +179,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
       }
       setFileName(name);
     } catch (e) {
-      toast(`文档打开失败：${(e as Error).message}`, 'err');
+      toast(`文档打开失败：${netErrorHint(e)}`, 'err');
     } finally {
       setBusy(false);
     }
@@ -336,7 +349,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
       savedTimerRef.current = setTimeout(() => setSavedMsg(''), 4000);
     } catch (e) {
-      toast((e as Error).message, 'err');
+      toast(netErrorHint(e), 'err');
     } finally {
       setSaving(false);
     }
@@ -363,7 +376,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      toast((e as Error).message, 'err');
+      toast(netErrorHint(e), 'err');
     }
   };
 
@@ -431,9 +444,9 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
           className="btn-small" disabled={busy}
           onClick={async () => {
             try {
-              const buf = await fetch(`${BASE}sample-lecture.pdf`).then((r) => r.arrayBuffer());
+              const buf = await fetchSamplePdf();
               await openDoc('sample-lecture.pdf', buf);
-            } catch (e) { toast((e as Error).message, 'err'); }
+            } catch (e) { toast(netErrorHint(e), 'err'); }
           }}
         >
           载入示例
@@ -483,9 +496,9 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
                 className="btn-small"
                 onClick={async () => {
                   try {
-                    const buf = await fetch(`${BASE}sample-lecture.pdf`).then((r) => r.arrayBuffer());
+                    const buf = await fetchSamplePdf();
                     await openDoc('sample-lecture.pdf', buf);
-                  } catch (e) { toast((e as Error).message, 'err'); }
+                  } catch (e) { toast(netErrorHint(e), 'err'); }
                 }}
               >载入示例</button>
             </div>

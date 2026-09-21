@@ -1,7 +1,7 @@
 /**
  * M5 · 3D 解剖渲染器（原生 three.js，无 react-three-fiber 依赖）。
  * - 按系统懒加载 GLB（Draco 压缩），点击拾取结构，悬停高亮
- * - 单击 = 选中；双击 = 打开/创建笔记
+ * - 单击 = 选中并把点击坐标交给父组件（用于在光标旁浮现结构笔记卡片）
  * 数据：Anatria-3D（CC BY-SA 4.0，Z-Anatomy / BodyParts3D 派生）
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -10,7 +10,7 @@ import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { loadZhDict, zhOrganName, type AnatomyManifest, type ManifestOrgan } from '../core/anatomy';
+import { loadZhDict, modelLoadHint, systemMeshFiles, zhOrganName, type AnatomyManifest, type ManifestOrgan } from '../core/anatomy';
 import { assignMuscleLayers, LAYER_LABELS } from '../core/muscleLayer';
 import { nextDegraded } from '../core/adaptiveQuality';
 import { PointerTap } from '../core/pointerTap';
@@ -19,8 +19,8 @@ interface Props {
   manifest: AnatomyManifest;
   /** 当前选中（来自列表或 3D），用于双向高亮 */
   selectedId: string | null;
-  /** 3D 中单击选中结构 */
-  onSelect: (organ: ManifestOrgan | null) => void;
+  /** 3D 中单击选中结构；at = 点击点在视口中的坐标（供笔记卡片贴着光标浮现） */
+  onSelect: (organ: ManifestOrgan | null, at?: { x: number; y: number }) => void;
 }
 
 /** 静态资源根：base './' 时构建产物为 './'，GitHub Pages 子路径也能正确加载 */
@@ -224,7 +224,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     renderer.domElement.style.touchAction = 'none';
     renderer.domElement.setAttribute(
       'aria-label',
-      '3D 解剖视图：拖拽旋转，滚轮缩放，单击选中结构，同一位置再点可穿透到下一层'
+      '3D 解剖视图：拖拽旋转，滚轮缩放，单击选中结构并在光标旁浮现该结构的笔记卡片，同一位置再点可穿透到下一层'
     );
 
     // 灯光总量要和 albedo 同量级：加了环境贴图后原来的强度会把模型冲成死白（ACES 还会去饱和）
@@ -495,12 +495,13 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       // 拖拽旋转视角 / 双指缩放 不触发选择
       if (!tap.up(e.pointerId, e.clientX, e.clientY)) return;
       const cur = liveRef.current;
+      const at = { x: e.clientX, y: e.clientY };
       const sameSpot = lastUp && Math.hypot(e.clientX - lastUp.x, e.clientY - lastUp.y) < 8;
       lastUp = { x: e.clientX, y: e.clientY };
       // 同一位置连续单击：在重叠结构间穿透切换（筋膜 → 肌肉 → 更深层）
       if (sameSpot && hitStack.length > 1) {
         hitIdx = (hitIdx + 1) % hitStack.length;
-        cur.onSelect(hitStack[hitIdx]);
+        cur.onSelect(hitStack[hitIdx], at);
         return;
       }
       hitStack = pickAll(e.clientX, e.clientY);
@@ -508,8 +509,8 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       const organ = hitStack[0] ?? null;
       // 切换逻辑：唯一命中且已是当前选中 = 取消；点空白处也取消
       if (organ && organ.organ_id === cur.selectedId && hitStack.length === 1)
-        cur.onSelect(null);
-      else cur.onSelect(organ);
+        cur.onSelect(null, at);
+      else cur.onSelect(organ, at);
     };
     let hoverRaf = 0;
     let hoverX = 0, hoverY = 0;
@@ -620,9 +621,17 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     const t = threeRef.current;
     if (!t || t.loadedSystems.has(system)) return;
     setLoadingSystems((s) => new Set(s).add(system));
+    // 一个系统可能对应**多个**文件：digestive / endocrine / respiratory 的内脏器官在
+    // visceral_male.glb 里（见 core/anatomy.systemMeshFiles）。第一个是主文件，它失败才算
+    // 整个系统失败；附加文件失败只提示影响范围。以前只取「第一条 organ 的 mesh_file」，
+    // 于是这 13 个结构在列表里点得到、3D 里永远不显示。
+    const files = systemMeshFiles(manifest, system);
+    // GLB 导出时节点名被归一化：空格→下划线、去除点号（"Calcaneus.l" → "Calcaneusl"）
+    const normalize = (s: string) => s.replace(/\./g, '').replace(/ /g, '_');
+    const picked: THREE.Object3D[] = [];
+    // 直接记住每个节点对应的 organ：visceral_male.glb 与主文件大量重名，事后按名字反查会串
+    const pickedOrgan = new Map<THREE.Object3D, ManifestOrgan>();
     try {
-      const file = manifest.organs.find((o) => o.system === system)?.mesh_file;
-      if (!file) throw new Error(`系统 ${system} 无模型文件`);
       const loader = new GLTFLoader();
       if (!dracoRef.current) {
         const d = new DRACOLoader();
@@ -630,55 +639,76 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
         dracoRef.current = d;
       }
       loader.setDRACOLoader(dracoRef.current);
-      // 用 onProgress 上报下载百分比（Draco 解码阶段没有进度，会停在 99% 直到完成）
-      const gltf = await new Promise<GLTF>((resolve, reject) => {
-        loader.load(
-          `${BASE}anatomy/${file}`,
-          resolve,
-          (ev) => {
-            if (!ev.lengthComputable || !ev.total) return;
-            const pct = Math.min(99, Math.round((ev.loaded / ev.total) * 100));
-            setLoadProgress((m) => {
-              if (m.get(system) === pct) return m;
-              const next = new Map(m);
-              next.set(system, pct);
-              return next;
-            });
-          },
-          reject
-        );
-      });
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        let gltf: GLTF;
+        try {
+          // 用 onProgress 上报下载百分比（Draco 解码阶段没有进度，会停在 99% 直到完成）
+          gltf = await new Promise<GLTF>((resolve, reject) => {
+            loader.load(
+              `${BASE}anatomy/${file}`,
+              resolve,
+              (ev) => {
+                if (!ev.lengthComputable || !ev.total) return;
+                // 多文件时按「第几个文件 + 该文件内进度」折算，整体仍然单调递增
+                const pct = Math.min(
+                  99,
+                  Math.round(((i + ev.loaded / ev.total) / files.length) * 100)
+                );
+                setLoadProgress((m) => {
+                  if (m.get(system) === pct) return m;
+                  const next = new Map(m);
+                  next.set(system, pct);
+                  return next;
+                });
+              },
+              reject
+            );
+          });
+        } catch (e) {
+          console.error('[AnatomyViewer3D]', e);
+          if (i === 0) {
+            setError(modelLoadHint(e, file));
+            return;
+          }
+          // 附加文件缺失：已加载的部分照常显示，只把「少的是哪一块、影响几个结构」说清楚
+          const affected = manifest.organs.filter((o) => o.mesh_file === file).length;
+          setError(`${modelLoadHint(e, file)}（这个系统还有 ${affected} 个结构靠它显示）`);
+          break;
+        }
+
+        // 只认「manifest 说属于这个文件」的节点。visceral_male.glb 与主文件大量同名
+        // （digestive 47 个结构里 44 个名字在两个文件里都有），只按名字匹配会把同一个
+        // 结构加两遍：organMap 被覆盖、多出来的网格留在场景里。
+        const byNode = new Map<string, ManifestOrgan>();
+        for (const o of manifest.organs) {
+          if (o.system !== system || o.mesh_file !== file) continue;
+          byNode.set(o.node, o);
+          byNode.set(normalize(o.node), o);
+        }
+        gltf.scene.traverse((obj) => {
+          const organ = byNode.get(obj.name);
+          if (!organ) return;
+          const mesh = obj as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          // 共享材质（系统 × 是否筋膜）；结构颜色写进顶点色，不再逐结构 clone 材质
+          const shared = t.getMaterials(organ.system, isFascia(organ), mesh.material as THREE.Material);
+          mesh.material = shared.base;
+          mesh.geometry.setAttribute('color', organColorAttribute(mesh.geometry, organ));
+          // 拾取用：organ 反查键 + 本地包围盒（供射线粗筛，省掉对上千网格的三角形求交）
+          mesh.userData.organId = organ.organ_id;
+          if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+          mesh.userData.bbox = mesh.geometry.boundingBox;
+          picked.push(obj);
+          pickedOrgan.set(obj, organ);
+        });
+      }
 
       const group = new THREE.Group();
       group.name = `system-${system}`;
-      // 该系统内用到的 node → organ 映射
-      // GLB 导出时节点名被归一化：空格→下划线、去除点号（"Calcaneus.l" → "Calcaneusl"）
-      const normalize = (s: string) => s.replace(/\./g, '').replace(/ /g, '_');
-      const byNode = new Map<string, ManifestOrgan>();
-      for (const o of manifest.organs) {
-        if (o.system !== system) continue;
-        byNode.set(o.node, o);
-        byNode.set(normalize(o.node), o);
-      }
-      const picked: THREE.Object3D[] = [];
-      gltf.scene.traverse((obj) => {
-        const organ = byNode.get(obj.name);
-        if (!organ) return;
-        const mesh = obj as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        // 共享材质（系统 × 是否筋膜）；结构颜色写进顶点色，不再逐结构 clone 材质
-        const shared = t.getMaterials(organ.system, isFascia(organ), mesh.material as THREE.Material);
-        mesh.material = shared.base;
-        mesh.geometry.setAttribute('color', organColorAttribute(mesh.geometry, organ));
-        // 拾取用：organ 反查键 + 本地包围盒（供射线粗筛，省掉对上千网格的三角形求交）
-        mesh.userData.organId = organ.organ_id;
-        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-        mesh.userData.bbox = mesh.geometry.boundingBox;
-        picked.push(obj);
-      });
       // 遍历结束后再移动节点（遍历中改父层级会导致 children 数组移位越界）
       for (const obj of picked) {
-        const organ = byNode.get(obj.name)!;
+        const organ = pickedOrgan.get(obj)!;
         group.add(obj);
         t.organMap.set(organ.organ_id, { mesh: obj as THREE.Mesh, organ });
       }
@@ -719,7 +749,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       }
     } catch (e) {
       console.error('[AnatomyViewer3D]', e);
-      setError((e as Error).message);
+      setError(modelLoadHint(e, files[0]));
     } finally {
       setLoadingSystems((s) => {
         const n = new Set(s);
@@ -960,7 +990,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
         </div>
       )}
       {error && <div className="viewer3d-error">{error}</div>}
-      <div className="viewer3d-hint muted">单击选中 · 同一位置再点可穿透到下一层 · 拖拽旋转 · 滚轮缩放</div>
+      <div className="viewer3d-hint muted">单击选中并弹出笔记卡片 · 同一位置再点可穿透到下一层 · 拖拽旋转 · 滚轮缩放</div>
     </div>
   );
 }

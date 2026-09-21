@@ -65,6 +65,11 @@ export class WebAdapter implements StorageAdapter {
     return rec?.content ?? '';
   }
 
+  async exists(path: string): Promise<boolean> {
+    const db = await this.getDB();
+    return (await db.get('files', path)) !== undefined;
+  }
+
   async write(path: string, content: string): Promise<void> {
     const db = await this.getDB();
     const rec: FileRecord = {

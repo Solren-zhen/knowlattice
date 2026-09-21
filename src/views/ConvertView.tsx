@@ -3,10 +3,12 @@
  * 面板模式与 DraftGen 一致：转换 → 预览/编辑 → 复制 / 下载 / 入库为笔记。
  */
 import { useRef, useState } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import MarkdownIt from 'markdown-it';
 import { docxToMarkdown, pdfToMarkdown, type ConvertResult } from '../core/convert';
 import { anydocErrorCode, anydocToMarkdown } from '../core/anydoc';
 import { ocrPdfToMarkdown } from '../core/ocr';
+import { netErrorHint } from '../core/netError';
 import { toast } from '../core/feedback';
 import { IconConvert, IconClose } from './icons';
 import Loading from './Loading';
@@ -20,6 +22,8 @@ interface Props {
 }
 
 export default function ConvertView({ onSave, onClose }: Props) {
+  // Esc 关闭；焦点在可编辑的转换结果里时先退出输入框，再按一次才关——避免未入库的结果丢掉
+  useEsc(escThenClose(onClose));
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const [result, setResult] = useState<ConvertResult | null>(null);
@@ -116,7 +120,7 @@ export default function ConvertView({ onSave, onClose }: Props) {
       toast(`已入库：${path}`, 'ok');
       onClose();
     } catch (e) {
-      toast((e as Error).message, 'err');
+      toast(netErrorHint(e), 'err');
     } finally {
       savingRef.current = false;
     }

@@ -2,51 +2,27 @@
  * 待办清单（Todo）：本地优先的简单待办，持久化到 localStorage。
  * 增 / 勾完成 / 删 / 全部·进行中·已完成过滤 / 清空已完成。
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import { IconTrash, IconTodo, IconClose } from './icons';
+import { loadTodos, saveTodos, newTodoId, type Todo } from '../core/todos';
 
-interface Todo {
-  id: string;
-  text: string;
-  done: boolean;
-  createdAt: number;
-  completedAt?: number;
-}
-
-const KEY = 'knowlattice-todos';
 type Filter = 'all' | 'active' | 'done';
 
-function load(): Todo[] {
-  try {
-    const a = JSON.parse(localStorage.getItem(KEY) ?? '[]');
-    return Array.isArray(a) ? a : [];
-  } catch {
-    return [];
-  }
-}
-function save(list: Todo[]) {
-  localStorage.setItem(KEY, JSON.stringify(list));
-}
-
-const uid = () => `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-
 export default function TodoView({ onClose }: { onClose: () => void }) {
-  const [list, setList] = useState<Todo[]>(load);
+  const [list, setList] = useState<Todo[]>(loadTodos);
   const [text, setText] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
 
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+  // Esc 关闭。走全局 Esc 栈；焦点在新增输入框里时先退出输入框，再按一次才关面板
+  useEsc(escThenClose(onClose));
 
   const add = () => {
     const t = text.trim();
     if (!t) return;
-    const next = [{ id: uid(), text: t, done: false, createdAt: Date.now() }, ...list];
+    const next = [{ id: newTodoId(), text: t, done: false, createdAt: Date.now() }, ...list];
     setList(next);
-    save(next);
+    saveTodos(next);
     setText('');
   };
 
@@ -55,19 +31,19 @@ export default function TodoView({ onClose }: { onClose: () => void }) {
       t.id === id ? { ...t, done: !t.done, completedAt: t.done ? undefined : Date.now() } : t
     );
     setList(next);
-    save(next);
+    saveTodos(next);
   };
 
   const remove = (id: string) => {
     const next = list.filter((t) => t.id !== id);
     setList(next);
-    save(next);
+    saveTodos(next);
   };
 
   const clearDone = () => {
     const next = list.filter((t) => !t.done);
     setList(next);
-    save(next);
+    saveTodos(next);
   };
 
   const shown = list.filter((t) =>

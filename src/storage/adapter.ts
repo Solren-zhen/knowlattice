@@ -21,6 +21,9 @@ export interface StorageAdapter {
    *  仅应包含可序列化为字符串的文件（.md 笔记）；二进制附件走 readAllAttachments。 */
   readAll(): Promise<Map<string, string>>;
   read(path: string): Promise<string>;
+  /** 该路径在存储层是否已存在。新建笔记前用它兜底查重：
+   *  内存索引可能因加载失败而残缺，光看内存会把磁盘上已有的笔记当成新笔记覆盖掉。 */
+  exists(path: string): Promise<boolean>;
   write(path: string, content: string): Promise<void>;
   remove(path: string): Promise<void>;
   /** 一次读出全部二进制附件 {path → Blob}。Blob 是惰性句柄，不会把全部字节读进内存。 */

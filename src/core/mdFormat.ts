@@ -6,6 +6,8 @@
  * 输入是文档字符串 + 选区，输出是可直接交给 EditorView.dispatch 的编辑描述。
  * 标记符（`**` / `==` / `*`）只落在文件里，界面由 livePreview 把首尾标记符吃成零宽，
  * 因此使用者在编辑器里永远看不到它们。
+ *
+ * 文件末尾另附 `FORMAT_KEYS`：四个格式命令的键位定义，界面提示与快捷键绑定同源。
  */
 
 export interface MdEdit {
@@ -100,3 +102,10 @@ export function wikiLink(doc: string, from: number, to: number): MdEdit {
   }
   return { changes: [{ from, to, insert: '[[]]' }], selection: { anchor: from + 2, head: from + 2 } };
 }
+
+/**
+ * 键位定义已移到 `./formatKeys`（叶子模块，没有依赖）——首页在入口包里也要读这张表，
+ * 留在这里会把整个 mdFormat 拖进首屏。这里重新导出，老引用（Editor.tsx 等）不用改。
+ */
+export { FORMAT_KEYS } from './formatKeys';
+export type { FormatKey } from './formatKeys';
