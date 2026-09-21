@@ -10,6 +10,7 @@
  *   locale → LangPack 12 条文案（库自带 cn，但这里要贴合笔记场景，所以自己写一份）。
  */
 import { useEffect, useRef } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import MindElixir from 'mind-elixir';
 import 'mind-elixir/style.css';
 import type { LangPack } from 'mind-elixir/i18n';
@@ -204,11 +205,9 @@ export default function MindMapView({ content, title, onClose, onOpenWiki, onSav
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content]);
 
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+  // Esc 退出。走全局 Esc 栈；焦点在思维导图节点里（contenteditable）时先退出编辑，
+  // 再按一次才关面板——避免编辑到一半按 Esc 整张导图连同未保存内容一起消失。
+  useEsc(escThenClose(onClose));
 
   // 点击 [[双链]] 节点 → 打开对应笔记（捕获阶段拦截，避免干扰 mind-elixir 的编辑选中）
   useEffect(() => {

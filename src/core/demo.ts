@@ -4,6 +4,8 @@
  * 数据写入 IndexedDB(knowlattice.files) + localStorage；写入后调用方 reload 重新加载 vault。
  */
 import { openDB } from 'idb';
+import { saveTodos } from './todos';
+import { importDays } from './stats';
 
 const DB_NAME = 'knowlattice';
 interface DemoNote {
@@ -162,8 +164,8 @@ export async function seedDemo(): Promise<number> {
   }
   await tx.done;
   localStorage.setItem('knowlattice-qbanks', JSON.stringify([DEMO_BANK]));
-  localStorage.setItem('knowlattice-todos', JSON.stringify(DEMO_TODOS));
+  saveTodos(DEMO_TODOS);
   localStorage.setItem('knowlattice-mistakes', JSON.stringify(DEMO_MISTAKES));
-  localStorage.setItem('knowlattice-days', JSON.stringify(demoDays()));
+  importDays(demoDays());
   return NOTES.length;
 }

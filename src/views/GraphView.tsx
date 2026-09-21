@@ -11,6 +11,7 @@
  * 错题热力：收录进错题本的节点向危险红渐变 + 放大（可开关）。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEsc } from './useEsc';
 import ForceGraph from 'force-graph';
 import { parseFrontmatter } from '../core/parser';
 import { loadMistakes } from '../core/mistakes';
@@ -140,14 +141,8 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
     return { nodes, links, legend, hasHeat };
   }, [docs, linkIndex, resolveLink, showTags]);
 
-  // 初始化后：Esc 快捷退出
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeRef.current();
-    };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, []);
+  // Esc 快捷退出。走全局 Esc 栈：栈顶是别的面板时先归它，不会一次 Esc 关两层
+  useEsc(() => closeRef.current());
 
   // ---------- 初始化 force-graph ----------
   useEffect(() => {

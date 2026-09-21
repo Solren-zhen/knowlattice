@@ -4,6 +4,7 @@
  * 点击章节可过滤列表，点击条目直达对应笔记，✕ 清除记录。
  */
 import { useMemo, useState } from 'react';
+import { useEsc } from './useEsc';
 import { loadMistakes, clearMistake, chapterHeat, type MistakeMap } from '../core/mistakes';
 import { IconClose } from './icons';
 import { clickable } from './a11y';
@@ -14,6 +15,8 @@ interface Props {
 }
 
 export default function MistakeBook({ onOpenPath, onClose }: Props) {
+  // Esc 关闭（接进全局 Esc 栈，与其余面板一致）
+  useEsc(onClose);
   const [mistakes, setMistakes] = useState<MistakeMap>(loadMistakes);
   const [filterChapter, setFilterChapter] = useState<string | null>(null);
 

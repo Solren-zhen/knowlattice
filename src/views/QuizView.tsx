@@ -2,11 +2,12 @@
  * 题库练习：导入 JSON 题库（文件或粘贴）→ 选库组卷 → 逐题作答 → 结果页错题回顾。
  * 答错且题目关联笔记（note 字段可解析）时自动记入错题本。
  */
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import { useEsc } from './useEsc';
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import {
-  addBank, loadBanks, normalizeQuestions, pickQuestions, removeBank,
+  addBank, loadBanks, normalizeQuestions, pickQuestions, removeBank, setOptionNote,
   parseQuestionsFromText, rowsToQuestions,
   type QuizBank, type QuizQuestion,
 } from '../core/qbank';
@@ -14,7 +15,7 @@ import { recordMistake } from '../core/mistakes';
 import { toast, confirmBox } from '../core/feedback';
 import { markStudy } from '../core/stats';
 import { bankToAnki, downloadFile } from '../core/anki';
-import { IconRestore, IconTrash, IconClose, IconHelp } from './icons';
+import { IconRestore, IconTrash, IconClose, IconHelp, IconPencil } from './icons';
 
 interface Props {
   docs: Map<string, string>;
@@ -38,6 +39,7 @@ const HELP_TEXT = `[
 ]
 字段中文名（题干/选项/答案/解析/章节/笔记）同样支持；
 options 缺省即为简答题，显示答案后自行判定对错。
+optionNotes 逐选项批注，下标对齐 options，可写可不写（应用里作答后点选项右侧的铅笔即可添加）。
 
 · Word(.docx)：直接导入，自动抽取文本并按「1.题干 → A.选项 → 答案：A」识别
 · Excel/CSV：表头含「题干/答案」，选项列用 A/B/C/D 或 选项1..4
@@ -53,6 +55,9 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   const [results, setResults] = useState<(boolean | undefined)[]>([]);
   const [picked, setPicked] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
+  /** 正在写批注的选项下标（null = 没在写）与草稿文本 */
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const docxRef = useRef<HTMLInputElement>(null);
   const xlsxRef = useRef<HTMLInputElement>(null);
@@ -69,14 +74,13 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
     }).then((ok) => { if (ok) onClose(); });
   };
 
-  // Esc 快捷关闭
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') requestClose();
-    };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose, inProgress]);
+  // Esc 快捷关闭（走全局 Esc 栈）。批注输入框里的 Esc 只退出编辑、不关整个面板：
+  // 这里仍按**事件目标**判断（而不是当前焦点）——输入框自己的 onKeyDown 会先退出编辑，
+  // 那时焦点已经不在输入框上了，看焦点就会误判成「该关面板」。
+  useEsc((e) => {
+    if ((e.target as HTMLElement | null)?.dataset?.noteInput) return;
+    requestClose();
+  });
 
   const q = session?.questions[idx];
   const correctCount = results.filter((r) => r === true).length;
@@ -145,6 +149,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
     setResults(new Array(qs.length).fill(undefined));
     setPicked(null);
     setRevealed(false);
+    setEditing(null);
   };
 
   /** 答错且关联笔记存在 → 记入错题本 */
@@ -161,7 +166,29 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   const next = () => {
     setPicked(null);
     setRevealed(false);
+    setEditing(null);
     setIdx((i) => i + 1);
+  };
+
+  // ---------- 选项批注（作答后） ----------
+  /** 打开某选项的批注输入框，草稿取该选项已有的批注 */
+  const beginNote = (i: number) => {
+    setDraft(q?.optionNotes?.[i] ?? '');
+    setEditing(i);
+  };
+
+  /** 存批注：空文本即删除。写完要把面板里的题库列表和本轮题目一起刷新，
+   *  否则同一题再进来读到的还是旧副本。 */
+  const commitNote = (i: number) => {
+    setEditing(null);
+    if (!q || !session) return;
+    if ((q.optionNotes?.[i] ?? '') === draft.trim()) return;
+    const banks = setOptionNote(session.bankName, q.id, i, draft);
+    setBanks(banks);
+    const saved = banks.find((b) => b.name === session.bankName)?.questions.find((x) => x.id === q.id);
+    setSession((s) => (s
+      ? { ...s, questions: s.questions.map((x) => (x.id === q.id ? { ...x, optionNotes: saved?.optionNotes } : x)) }
+      : s));
   };
 
   // ---------- 渲染 ----------
@@ -187,20 +214,61 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
                 {q.options.map((opt, i) => {
                   const isRight = i === q.answer;
                   const cls = !answered ? 'opt' : isRight ? 'opt right' : i === picked ? 'opt wrong' : 'opt';
+                  const letter = String.fromCharCode(65 + i);
+                  const note = q.optionNotes?.[i] ?? '';
                   return (
-                    <button
-                      key={i}
-                      className={cls}
-                      disabled={answered}
-                      onClick={() => {
-                        setPicked(i);
-                        judge(i === q.answer);
-                      }}
-                    >
-                      <b>{String.fromCharCode(65 + i)}</b> {opt}
-                      {answered && isRight && <span className="opt-mark">✓</span>}
-                      {answered && i === picked && !isRight && <span className="opt-mark">✗</span>}
-                    </button>
+                    <div key={i} className="quiz-opt">
+                      <button
+                        className={cls}
+                        disabled={answered}
+                        onClick={() => {
+                          setPicked(i);
+                          judge(i === q.answer);
+                        }}
+                      >
+                        <b>{letter}</b> {opt}
+                        {answered && isRight && <span className="opt-mark">✓</span>}
+                        {answered && i === picked && !isRight && <span className="opt-mark">✗</span>}
+                      </button>
+                      {/* 批注只在答案出现后可写：先看答案再记「为什么」，避免猜着写 */}
+                      {answered && (
+                        <button
+                          className={`btn-icon opt-note-btn${note ? ' has-note' : ''}`}
+                          aria-label={note ? `修改选项 ${letter} 的批注` : `给选项 ${letter} 写批注`}
+                          title={note ? '修改批注' : '给这个选项写批注'}
+                          onClick={() => (editing === i ? setEditing(null) : beginNote(i))}
+                        >
+                          <IconPencil size={14} />
+                        </button>
+                      )}
+                      {answered && editing === i ? (
+                        <div className="opt-note-edit">
+                          <textarea
+                            className="opt-note-input"
+                            data-note-input="1"
+                            rows={2}
+                            autoFocus
+                            value={draft}
+                            placeholder="这个选项为什么对、为什么错，写下来下次一眼看到"
+                            onChange={(e) => setDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') { setEditing(null); return; }
+                              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                e.preventDefault();
+                                commitNote(i);
+                              }
+                            }}
+                            onBlur={() => commitNote(i)}
+                          />
+                          <span className="opt-note-hint">Ctrl/⌘+Enter 保存 · Esc 取消 · 清空即删除</span>
+                        </div>
+                      ) : answered && note ? (
+                        <div className="opt-note">
+                          <span className="opt-note-icon" aria-hidden="true"><IconPencil size={12} /></span>
+                          <span className="opt-note-text">{note}</span>
+                        </div>
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>
@@ -214,7 +282,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
             )}
 
             {answered && q.explanation && (
-              <div className="quiz-expl">
+              <div className={`quiz-expl ${results[idx] ? 'is-right' : 'is-wrong'}`}>
                 <b>{results[idx] ? '✓ 答对了' : '✗ 答错了'}</b>
                 <p>{q.explanation}</p>
               </div>

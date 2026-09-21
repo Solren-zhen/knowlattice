@@ -46,6 +46,7 @@ $Mime = @{
   '.otf'         = 'font/otf'
   '.pdf'         = 'application/pdf'
   '.txt'         = 'text/plain; charset=utf-8'
+  '.md'          = 'text/plain; charset=utf-8'
   '.gz'          = 'application/gzip'
   '.docx'        = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 }
@@ -59,6 +60,68 @@ function Send-Body($stream, [string]$status, [string]$ctype, [byte[]]$bytes) {
 }
 function Send-Text($stream, [string]$status, [string]$text) {
   Send-Body $stream $status 'text/plain; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($text))
+}
+
+# --- Port / origin policy -------------------------------------------------
+# Browsers keep IndexedDB and localStorage per origin, and the origin includes
+# the port. So http://127.0.0.1:8790 and http://127.0.0.1:8791 are two
+# different sites holding two different vaults. Hence:
+#   1. if a KnowLattice is already answering anywhere in the port range, open
+#      it instead of starting a second server (that copy holds the notes);
+#   2. if we are forced onto another port, say so loudly.
+function Test-KnowLattice([int]$p) {
+  $client = $null
+  try {
+    $client = New-Object System.Net.Sockets.TcpClient
+    $client.Connect([System.Net.IPAddress]::Loopback, $p)
+    $stream = $client.GetStream()
+    $stream.ReadTimeout = 2000
+    $req = [Text.Encoding]::ASCII.GetBytes("GET /index.html HTTP/1.0`r`nHost: 127.0.0.1`r`nConnection: close`r`n`r`n")
+    $stream.Write($req, 0, $req.Length)
+    $stream.Flush()
+    $buf = New-Object byte[] 8192
+    $text = ''
+    for ($i = 0; $i -lt 4; $i++) {
+      $n = $stream.Read($buf, 0, $buf.Length)
+      if ($n -le 0) { break }
+      $text += [Text.Encoding]::UTF8.GetString($buf, 0, $n)
+      if ($text.Contains('KnowLattice')) { break }
+    }
+    return ($text.Contains('200 OK') -and $text.Contains('KnowLattice'))
+  } catch {
+    return $false
+  } finally {
+    if ($client) { try { $client.Close() } catch { } }
+  }
+}
+
+$running = 0
+# Which ports in our range already have a listener? One instant query beats
+# connecting to 40 closed ports, which costs ~2s each on Windows.
+$busy = @()
+try {
+  $busy = @(Get-NetTCPConnection -State Listen -ErrorAction Stop |
+    Where-Object { $_.LocalPort -ge $Port -and $_.LocalPort -lt ($Port + 40) } |
+    Select-Object -ExpandProperty LocalPort -Unique | Sort-Object)
+} catch {
+  # NetTCPIP missing (pre-Windows 8): at least check the preferred port.
+  $busy = @($Port)
+}
+foreach ($p in $busy) {
+  if (Test-KnowLattice $p) { $running = $p; break }
+}
+if ($running -gt 0) {
+  $url = "http://127.0.0.1:$running/"
+  Write-Host ''
+  Write-Host "  KnowLattice is already running at  $url" -ForegroundColor Green
+  Write-Host '  Opening that copy: notes are stored per address, so that is where' -ForegroundColor DarkGray
+  Write-Host '  your notes are. (Just unpacked a newer version? Close that window,' -ForegroundColor DarkGray
+  Write-Host '  then start again to run the new one.)' -ForegroundColor DarkGray
+  Write-Host ''
+  if (-not $NoBrowser) {
+    try { Start-Process $url } catch { }
+  }
+  exit 0
 }
 
 $listener = $null
@@ -76,6 +139,13 @@ if (-not $listener) {
   [void](Read-Host 'Press Enter to exit')
   exit 1
 }
+if ($Port -ne 8790) {
+  Write-Host ''
+  Write-Host "  WARNING: port 8790 is taken by another program; using $Port." -ForegroundColor Yellow
+  Write-Host '  Notes are stored per address, so this address starts with its own empty vault:' -ForegroundColor Yellow
+  Write-Host "    http://127.0.0.1:$Port/   is NOT the same site as   http://127.0.0.1:8790/" -ForegroundColor Yellow
+  Write-Host '  Close whatever holds 8790 and start again to get your notes back.' -ForegroundColor Yellow
+}
 
 $url = "http://127.0.0.1:$Port/"
 Write-Host ''
@@ -88,8 +158,33 @@ if (-not $NoBrowser) {
 }
 
 $rootPrefix = $Root + '\'
+# Safety net for anything that still gets through: without it the window vanishes and the
+# browser tab just says "Failed to fetch" with no explanation. Start-KnowLattice.bat runs
+# `if errorlevel 1 pause`, so exiting non-zero keeps this message on screen.
+trap {
+  Write-Host ''
+  Write-Host ("  Server stopped: " + $_.Exception.Message) -ForegroundColor Red
+  Write-Host '  The page already open in your browser can no longer load anything;' -ForegroundColor Yellow
+  Write-Host '  it will report "Failed to fetch". Close that tab, then start' -ForegroundColor Yellow
+  Write-Host '  Start-KnowLattice.bat again. Your notes are still there.' -ForegroundColor Yellow
+  Write-Host ''
+  [void](Read-Host 'Press Enter to exit')
+  exit 1
+}
 while ($true) {
-  $client = $listener.AcceptTcpClient()
+  # AcceptTcpClient() must be guarded: browsers abort connections routinely (cancelled
+  # preconnect, page navigation, aborted lazy-chunk fetch) and on Windows that surfaces here
+  # as a SocketException. With $ErrorActionPreference = 'Stop' a single one of those used to
+  # terminate the whole script - the window disappears, and from then on every request in the
+  # already-open browser tab fails with "Failed to fetch" for no visible reason.
+  $client = $null
+  try {
+    $client = $listener.AcceptTcpClient()
+  } catch {
+    Write-Host ("  [warn] accept failed, still serving: " + $_.Exception.Message) -ForegroundColor DarkYellow
+    Start-Sleep -Milliseconds 50
+    continue
+  }
   try {
     $stream = $client.GetStream()
     $stream.ReadTimeout = 5000
@@ -129,6 +224,11 @@ while ($true) {
     $bytes = [IO.File]::ReadAllBytes($full)
     $ext = [IO.Path]::GetExtension($full).ToLowerInvariant()
     $ctype = $Mime[$ext]
+    # Files like LICENSE / COPYING have no extension; serve them as plain text
+    # instead of letting the browser download them.
+    if (-not $ctype -and [IO.Path]::GetFileNameWithoutExtension($full) -match '^(LICENSE|COPYING|NOTICE|README)$') {
+      $ctype = 'text/plain; charset=utf-8'
+    }
     if (-not $ctype) { $ctype = 'application/octet-stream' }
     Send-Body $stream '200 OK' $ctype $bytes
   } catch {

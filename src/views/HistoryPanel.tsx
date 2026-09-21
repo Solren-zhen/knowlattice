@@ -3,8 +3,10 @@
  * 同时列出「已删除笔记」的残留快照，误删的笔记可从这里找回（core/history）。
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import { listSnapshots, listSnapshotPaths, type Snapshot } from '../core/history';
 import { toast, confirmBox } from '../core/feedback';
+import { netErrorHint } from '../core/netError';
 import { IconHistory, IconClose } from './icons';
 
 interface Props {
@@ -22,6 +24,8 @@ const fmtTime = (at: number) =>
   });
 
 export default function HistoryPanel({ currentPath, existingPaths, onRestore, onClose }: Props) {
+  // Esc 关闭（接进全局 Esc 栈；确认框走捕获阶段，仍先于本层生效）
+  useEsc(escThenClose(onClose));
   const [current, setCurrent] = useState<Snapshot[]>([]);
   const [deleted, setDeleted] = useState<Map<string, Snapshot[]>>(new Map());
   const [preview, setPreview] = useState<Snapshot | null>(null);
@@ -59,7 +63,7 @@ export default function HistoryPanel({ currentPath, existingPaths, onRestore, on
       toast(deletedNote ? `已找回：${snap.path}` : '已恢复此版本', 'ok');
       onClose();
     } catch (e) {
-      toast((e as Error).message, 'err');
+      toast(netErrorHint(e), 'err');
     }
   };
 

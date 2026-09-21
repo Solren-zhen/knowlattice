@@ -18,6 +18,8 @@ import { rebuildLinkIndex, updateLinksForPath, backlinks, type LinkIndex } from 
 import { exportSrsState, importSrsState } from './srs';
 import { exportQbanks, importQbanks } from './qbank';
 import { loadMistakes, importMistakes } from './mistakes';
+import { exportTodos, importTodos } from './todos';
+import { exportDays, importDays } from './stats';
 import { pushSnapshot } from './history';
 
 export interface TreeNode {
@@ -66,20 +68,37 @@ const adapter: StorageAdapter = new WebAdapter();
 /** IndexedDB 并发写入分批大小 */
 const WRITE_BATCH = 100;
 
-/** 批量并行写入（IndexedDB 支持并发事务，但浏览器对并发事务数有限制，分批避免打爆） */
-async function writeMany(entries: Array<{ path: string; content: string }>): Promise<void> {
+/** 批量并行写入（IndexedDB 支持并发事务，但浏览器对并发事务数有限制，分批避免打爆）。
+ *  返回**写失败的路径**：调用方据此报真实成功数，不能把「解析出的条数」当成「写成功的条数」。 */
+async function writeMany(entries: Array<{ path: string; content: string }>): Promise<string[]> {
+  const failed: string[] = [];
   for (let i = 0; i < entries.length; i += WRITE_BATCH) {
     const chunk = entries.slice(i, i + WRITE_BATCH);
-    await Promise.allSettled(chunk.map((f) => adapter.write(f.path, f.content)));
+    const results = await Promise.allSettled(chunk.map((f) => adapter.write(f.path, f.content)));
+    results.forEach((r, j) => {
+      if (r.status === 'rejected') {
+        console.error('批量写入失败：', chunk[j].path, r.reason);
+        failed.push(chunk[j].path);
+      }
+    });
   }
+  return failed;
 }
 
-/** 批量并行删除：与 writeMany 同理，分批限流 */
-async function removeManyFiles(paths: string[]): Promise<void> {
+/** 批量并行删除：与 writeMany 同理，分批限流；返回删失败的路径 */
+async function removeManyFiles(paths: string[]): Promise<string[]> {
+  const failed: string[] = [];
   for (let i = 0; i < paths.length; i += WRITE_BATCH) {
     const chunk = paths.slice(i, i + WRITE_BATCH);
-    await Promise.allSettled(chunk.map((p) => adapter.remove(p)));
+    const results = await Promise.allSettled(chunk.map((p) => adapter.remove(p)));
+    results.forEach((r, j) => {
+      if (r.status === 'rejected') {
+        console.error('批量删除失败：', chunk[j], r.reason);
+        failed.push(chunk[j]);
+      }
+    });
   }
+  return failed;
 }
 
 /** 旧版 dataURL 附件 → Blob（启动迁移与旧备份导入共用） */
@@ -183,9 +202,10 @@ created: ${new Date().toISOString().slice(0, 10)}
 
 | 操作 | 快捷键 | 说明 |
 | --- | --- | --- |
-| 加粗 | Ctrl+B | 再按一次取消；没选中文字时会插入占位内容并选中 |
-| 高亮 | Ctrl+H | 同上，语法是两个等号夹住重点 |
-| 插入双链 | Alt+K | 插入一对左中括号，并弹出笔记名候选，回车选中 |
+| 加粗 | Alt+A | 再按一次取消；没选中文字时会插入占位内容并选中 |
+| 高亮 | Alt+S | 同上，语法是两个等号夹住重点 |
+| 斜体 | Alt+Z | 同上，语法是单个星号夹住 |
+| 插入双链 | Alt+X | 插入一对左中括号，并弹出笔记名候选，回车选中 |
 | 撤销 / 重做 | Ctrl+Z / Ctrl+Y | |
 | 保存 | Ctrl+S | 不按也不会丢，自动保存已经在跑 |
 | 缩进 / 反缩进 | Tab / Shift+Tab | 段落层级就是知识层级 |
@@ -193,7 +213,9 @@ created: ${new Date().toISOString().slice(0, 10)}
 | 笔记前进 / 后退 | Alt+← / Alt+→ | 按打开顺序回退，误关的笔记能找回来 |
 | 关闭当前面板 | Esc | |
 
-加粗与高亮的标记分别是两个星号、两个等号（\`**重点**\`、\`==重点==\`）；双链是两个左中括号。这些符号只存在文件里，编辑时不会显示——要加粗就选中文字按 Ctrl+B，或右键「加粗」，都不必手打符号。
+加粗与高亮的标记分别是两个星号、两个等号（\`**重点**\`、\`==重点==\`），斜体是单个星号；双链是两个左中括号。这些符号只存在文件里，编辑时不会显示——要加粗就选中文字按 Alt+A，或右键「加粗」，都不必手打符号。
+
+四个格式键刻意挤在左手：A/S 是基准键、Z/X 在正下方一行，拇指按住左 Alt 其余手指原地按，一只手就能加格式。之所以不用 Ctrl+字母或数字键：Ctrl+A/S/F 是全选/保存/查找，Alt+D 是浏览器地址栏、Ctrl+数字是切换标签页，这些都拦不住或不该抢。
 
 ## 四、把讲义变成笔记（两条路）
 
@@ -240,6 +262,10 @@ export function useVault() {
   const [attachments, setAttachments] = useState<Map<string, Blob>>(new Map());
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  /** 加载失败原因。非空时应用停在错误页（见 Workspace），不允许进入可写状态 */
+  const [loadError, setLoadError] = useState<string | null>(null);
+  /** 重试计数：自增即重跑加载 effect */
+  const [reloadKey, setReloadKey] = useState(0);
   /** 链接索引：state 持有（替换 ref，规避 render 期访问 ref）。日常保存就地增量更新
    *  （updateLinksForPath），依赖 docs/索引身份的消费者（图谱、反链）随 docs 变化重算。 */
   const [linkIndex, setLinkIndex] = useState<LinkIndex>(() => ({ outgoing: new Map(), incoming: new Map() }));
@@ -247,6 +273,7 @@ export function useVault() {
   const attachmentUrlCache = useRef(new Map<string, string>());
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       // 单遍读出全部笔记与附件；空库首次使用自动创建引导笔记
       const fileMap = await adapter.readAll();
@@ -280,46 +307,59 @@ export function useVault() {
         await adapter.write(ONBOARD_PATH, ONBOARD_CONTENT);
         fileMap.set(ONBOARD_PATH, ONBOARD_CONTENT);
       }
+      if (cancelled) return;
       setLinkIndex(rebuildLinkIndex(fileMap));
       setDocs(fileMap);
       setAttachments(attachmentMap);
       setLoaded(true);
     })().catch((e) => {
+      if (cancelled) return;
       console.error('加载知识库失败：', e);
-      setLoaded(true); // 即使失败也放行进入，保证应用可操作
+      // 这里不再「失败也放行」：库没读出来时 docs 是空的，此后任何新建/查重都以
+      // 「磁盘上没有这篇」为前提，会把真实笔记覆盖掉。改为停在错误页，等用户重试。
+      setLoadError(e instanceof Error ? e.message : String(e));
+      setLoaded(true);
     });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  /** 重新加载知识库（错误页的「重试」按钮） */
+  const retryLoad = useCallback(() => {
+    setLoadError(null);
+    setLoaded(false);
+    setReloadKey((k) => k + 1);
   }, []);
 
-  /** 保存：乐观更新内存（UI 即时生效），落盘异步进行；落盘后异步推入历史快照（fire-and-forget） */
+  /** 保存：**先落盘、再更新内存**。写失败会抛出，调用方据此提示。
+   *  旧写法是「先乐观更新内存、catch 里只 console.error」，于是 IndexedDB 写失败时
+   *  界面照样显示「已保存 ✓」、脏点也消失——用户是在「应用说存住了」的前提下丢稿的。 */
   const save = useCallback(async (path: string, content: string) => {
+    await adapter.write(path, content);
     setDocs((prev) => new Map(prev).set(path, content));
     updateLinksForPath(linkIndex, path, content);
-    try {
-      await adapter.write(path, content);
-      void pushSnapshot(path, content);
-    } catch (e) {
-      console.error('保存失败：', path, e);
-    }
+    void pushSnapshot(path, content);
   }, [linkIndex]);
 
+  /** 删除：先落盘、再改内存；失败抛出且内存保持原样（不会再「删了重启又回来」） */
   const remove = useCallback(async (path: string) => {
+    await adapter.remove(path);
     setDocs((prev) => {
       const next = new Map(prev);
       next.delete(path);
       return next;
     });
     updateLinksForPath(linkIndex, path, '');
-    try {
-      await adapter.remove(path);
-    } catch (e) {
-      console.error('删除失败：', path, e);
-    }
     setCurrentPath((cur) => (cur === path ? null : cur));
   }, [linkIndex]);
 
-  /** 批量删除：先乐观更新 UI，落盘分批限流（避免一次发几千个 IndexedDB 事务） */
-  const removeMany = useCallback(async (paths: string[]) => {
-    const del = new Set(paths);
+  /** 批量删除：落盘分批限流（避免一次发几千个 IndexedDB 事务），返回**删失败的路径**。
+   *  内存只删真正删成功的：失败的留在树里，用户看得见「没删掉」，而不是被蒙住。 */
+  const removeMany = useCallback(async (paths: string[]): Promise<string[]> => {
+    const failed = await removeManyFiles(paths);
+    const failedSet = new Set(failed);
+    const del = new Set(paths.filter((p) => !failedSet.has(p)));
     setDocs((prev) => {
       const next = new Map(prev);
       for (const p of del) next.delete(p);
@@ -327,7 +367,7 @@ export function useVault() {
     });
     for (const p of del) updateLinksForPath(linkIndex, p, '');
     setCurrentPath((cur) => (cur && del.has(cur) ? null : cur));
-    await removeManyFiles([...del]);
+    return failed;
   }, [linkIndex]);
 
   /** 导出全部笔记为单个 .json 备份文件（直接用内存缓存；新附件库不并入 JSON，
@@ -338,7 +378,7 @@ export function useVault() {
       .map(([path, content]) => ({ path, content }));
     const payload = {
       app: 'knowlattice',
-      version: 2,
+      version: 3,
       exportedAt: new Date().toISOString(),
       files,
       // v2 起随备份保存 SRS 复习调度进度（旧版备份无此字段，导入时自动跳过）
@@ -346,6 +386,9 @@ export function useVault() {
       // 题库与错题一并备份（v2 增量字段，旧版本导入时忽略）
       qbanks: exportQbanks(),
       mistakes: loadMistakes(),
+      // v3 起补上待办与打卡：这两样此前只活在 localStorage 里，备份不到、换设备即丢
+      todos: exportTodos(),
+      days: exportDays(),
     };
     const blob = new Blob([JSON.stringify(payload)], {
       type: 'application/json',
@@ -360,7 +403,7 @@ export function useVault() {
 
   /** 从备份 .json 恢复（合并模式：同名路径覆盖，其余保留）；笔记/复习进度/题库/错题一并恢复。
    *  旧版备份里的 dataURL 附件会自动转回 Blob 附件库；恢复后直接并入内存缓存，不再全库重读存储。 */
-  const importBackup = useCallback(async (text: string): Promise<number> => {
+  const importBackup = useCallback(async (text: string): Promise<{ ok: number; failed: number }> => {
     const data = JSON.parse(text) as {
       app?: string;
       version?: number;
@@ -368,6 +411,8 @@ export function useVault() {
       srs?: unknown;
       qbanks?: unknown;
       mistakes?: unknown;
+      todos?: unknown;
+      days?: unknown;
     };
     // 兼容旧版以 medvault 命名的备份：两版文件结构一致，只有 app 字段不同
     if ((data.app !== 'knowlattice' && data.app !== 'medvault') || !Array.isArray(data.files)) {
@@ -377,28 +422,43 @@ export function useVault() {
     const notes = valid.filter((f) => !f.path.startsWith('_attachments/'));
     const legacyAttachments = valid.filter((f) => f.path.startsWith('_attachments/'));
 
-    await writeMany(notes);
+    const failedNotes = await writeMany(notes);
+    const failedSet = new Set(failedNotes);
     const restoredAttachments = new Map<string, Blob>();
+    /** 转不成 Blob、只能按原文当笔记文件存回去的旧附件 */
+    const keptAsFile = new Set<string>();
+    let attachFailed = 0;
     for (const f of legacyAttachments) {
       const blob = dataUrlToBlob(f.content);
-      if (blob) {
-        await adapter.writeAttachment(f.path, blob).catch(() => {});
-        restoredAttachments.set(f.path, blob);
-      } else {
-        // 旧数据无法转 Blob 时按原文保留为笔记文件，至少不丢数据
-        await adapter.write(f.path, f.content).catch(() => {});
+      try {
+        if (blob) {
+          await adapter.writeAttachment(f.path, blob);
+          restoredAttachments.set(f.path, blob);
+        } else {
+          // 旧数据无法转 Blob 时按原文保留为笔记文件，至少不丢数据
+          await adapter.write(f.path, f.content);
+          keptAsFile.add(f.path);
+        }
+      } catch (e) {
+        console.error('附件恢复失败：', f.path, e);
+        attachFailed++;
       }
     }
     if (data.srs) importSrsState(data.srs);
     if (data.qbanks) importQbanks(data.qbanks);
     if (data.mistakes) importMistakes(data.mistakes);
+    if (data.todos) importTodos(data.todos);
+    if (data.days) importDays(data.days);
 
     // 并入内存缓存 + 增量更新链接索引
+    // 只把真正写成功的并入内存：写失败的如果也进内存，当前会话看着一切正常、还弹
+    // 「已恢复 N 篇」，刷新后才永久缺失——这是最难事后归因的一类数据丢失。
+    const okNotes = notes.filter((f) => !failedSet.has(f.path));
     setDocs((prev) => {
       const next = new Map(prev);
-      for (const f of notes) next.set(f.path, f.content);
+      for (const f of okNotes) next.set(f.path, f.content);
       for (const f of legacyAttachments) {
-        if (!restoredAttachments.has(f.path)) next.set(f.path, f.content);
+        if (keptAsFile.has(f.path)) next.set(f.path, f.content);
       }
       return next;
     });
@@ -407,37 +467,35 @@ export function useVault() {
       for (const [path, blob] of restoredAttachments) next.set(path, blob);
       return next;
     });
-    for (const f of notes) updateLinksForPath(linkIndex, f.path, f.content);
-    return notes.length;
+    for (const f of okNotes) updateLinksForPath(linkIndex, f.path, f.content);
+    return { ok: okNotes.length, failed: failedSet.size + attachFailed };
   }, [linkIndex]);
 
-  /** 导入 md 文件夹（相对路径入库，保留目录结构）；返回导入篇数 */
-  const importMdFiles = useCallback(async (files: Array<{ path: string; content: string }>): Promise<number> => {
+  /** 导入 md 文件夹（相对路径入库，保留目录结构）；返回真实成功/失败篇数 */
+  const importMdFiles = useCallback(async (files: Array<{ path: string; content: string }>): Promise<{ ok: number; failed: number }> => {
     const valid: Array<{ path: string; content: string }> = [];
     for (const f of files) {
       const p = f.path.replace(/\\/g, '/');
       if (!p.toLowerCase().endsWith('.md') || !p.trim()) continue;
       valid.push({ path: p, content: f.content });
     }
-    await writeMany(valid);
+    const failedPaths = await writeMany(valid);
+    const failedSet = new Set(failedPaths);
+    const okFiles = valid.filter((f) => !failedSet.has(f.path));
     setDocs((prev) => {
       const next = new Map(prev);
-      for (const f of valid) next.set(f.path, f.content);
+      for (const f of okFiles) next.set(f.path, f.content);
       return next;
     });
-    for (const f of valid) updateLinksForPath(linkIndex, f.path, f.content);
-    return valid.length;
+    for (const f of okFiles) updateLinksForPath(linkIndex, f.path, f.content);
+    return { ok: okFiles.length, failed: failedPaths.length };
   }, [linkIndex]);
 
-  /** 保存图片附件（Blob 存入独立 attachments store），返回 vault 相对路径 */
+  /** 保存图片附件（Blob 存入独立 attachments store），返回 vault 相对路径；写失败抛出 */
   const saveAttachment = useCallback(async (filename: string, blob: Blob): Promise<string> => {
     const path = `_attachments/${filename}`;
+    await adapter.writeAttachment(path, blob);
     setAttachments((prev) => new Map(prev).set(path, blob));
-    try {
-      await adapter.writeAttachment(path, blob);
-    } catch (e) {
-      console.error('附件保存失败：', path, e);
-    }
     return path;
   }, []);
 
@@ -446,6 +504,9 @@ export function useVault() {
     async (dir: string, title: string, template: string) => {
       const path = dir ? `${dir}/${title}.md` : `${title}.md`;
       if (docs.has(path)) throw new Error('同名笔记已存在');
+      // 兜底再问一次存储层：内存索引可能因加载失败/部分写入而残缺，光看内存会把
+      // 磁盘上已有的笔记当成新笔记直接覆盖（这是唯一不可逆的丢数据路径）。
+      if (await adapter.exists(path)) throw new Error('同名笔记已存在');
       await save(path, template);
       setCurrentPath(path);
       return path;
@@ -559,6 +620,8 @@ export function useVault() {
 
   return {
     loaded,
+    loadError,
+    retryLoad,
     docs,
     tree,
     linkIndex,

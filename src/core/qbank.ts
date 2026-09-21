@@ -10,10 +10,12 @@
  *     "answer": 0,                               // 下标 / "A" / 选项原文（兼容 答案）
  *     "explanation": "……",                       // 选填（兼容 解析）
  *     "chapter": "生理学",                        // 选填（兼容 章节）
- *     "note": "氧解离曲线"                        // 选填：关联笔记名，错题直达（兼容 笔记）
+ *     "note": "氧解离曲线",                       // 选填：关联笔记名，错题直达（兼容 笔记）
+ *     "optionNotes": ["右移才放氧", "", "", ""]    // 选填：逐选项批注，下标对齐 options（兼容 选项批注）
  *   }
  * ]
  * options 缺失时为简答题：显示答案后自我判定。
+ * optionNotes 由应用在作答后写入，随题库一起存进备份，不必手写。
  */
 
 export interface QuizQuestion {
@@ -30,6 +32,8 @@ export interface QuizQuestion {
   chapter?: string;
   /** 关联笔记名（走 resolveLink 解析，错题本/打开笔记直达） */
   note?: string;
+  /** 逐选项批注：下标与 options 对齐，空串表示该选项没写。只在作答后可见可写 */
+  optionNotes?: string[];
 }
 
 export interface QuizBank {
@@ -52,10 +56,53 @@ function persist(banks: QuizBank[]) {
   localStorage.setItem(KEY, JSON.stringify(banks));
 }
 
-/** 同名题库覆盖导入；返回更新后的题库列表 */
+/** 同名题库覆盖导入；返回更新后的题库列表。
+ *  重新导入同名题库时按「题干 + 选项」把旧题的选项批注接回新题——批注是用户自己写的，
+ *  不能因为拿到一份修订版题库就静默丢掉。 */
 export function addBank(name: string, questions: QuizQuestion[]): QuizBank[] {
-  const banks = loadBanks().filter((b) => b.name !== name);
-  banks.unshift({ name, importedAt: Date.now(), questions });
+  const all = loadBanks();
+  const prev = all.find((b) => b.name === name);
+  const banks = all.filter((b) => b.name !== name);
+  const carried = prev ? noteIndex(prev.questions) : null;
+  const merged = carried
+    ? questions.map((q) => {
+        const notes = q.optionNotes ?? carried.get(questionKey(q));
+        return notes ? { ...q, optionNotes: notes } : q;
+      })
+    : questions;
+  banks.unshift({ name, importedAt: Date.now(), questions: merged });
+  persist(banks);
+  return banks;
+}
+
+/** 题目内容键：题干 + 选项。同名题库重导时用它把旧批注接回新题。 */
+function questionKey(q: QuizQuestion): string {
+  return `${q.stem}\u0000${q.options.join('\u0000')}`;
+}
+
+/** 内容键 → 非空选项批注 */
+function noteIndex(questions: QuizQuestion[]): Map<string, string[]> {
+  const m = new Map<string, string[]>();
+  for (const q of questions) {
+    if (q.optionNotes?.some(Boolean)) m.set(questionKey(q), q.optionNotes);
+  }
+  return m;
+}
+
+/** 写某题某个选项的批注（去掉首尾空白后为空即删除该批注）。返回更新后的题库列表。
+ *  题库名 / 题号 / 选项下标任一不成立时原样返回，调用方无需先校验。 */
+export function setOptionNote(
+  bankName: string,
+  questionId: string,
+  optionIndex: number,
+  text: string
+): QuizBank[] {
+  const banks = loadBanks();
+  const q = banks.find((b) => b.name === bankName)?.questions.find((x) => x.id === questionId);
+  if (!q || q.type !== 'choice' || optionIndex < 0 || optionIndex >= q.options.length) return banks;
+  const notes = q.options.map((_, i) => q.optionNotes?.[i] ?? '');
+  notes[optionIndex] = text.trim();
+  q.optionNotes = notes.some(Boolean) ? notes : undefined;
   persist(banks);
   return banks;
 }
@@ -111,6 +158,13 @@ function answerIndex(raw: unknown, options: string[]): number {
   return byText;
 }
 
+/** 选项批注归一：截到选项数、补齐缺位、去掉空白项；全空时返回 undefined（不留空数组）。 */
+function alignNotes(raw: unknown, count: number): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const notes = Array.from({ length: count }, (_, i) => String(raw[i] ?? '').trim());
+  return notes.some(Boolean) ? notes : undefined;
+}
+
 /** 任意结构 → QuizQuestion[]；格式非法时抛错（信息面向使用者） */
 export function normalizeQuestions(raw: unknown): QuizQuestion[] {
   const list = Array.isArray(raw)
@@ -131,6 +185,7 @@ export function normalizeQuestions(raw: unknown): QuizQuestion[] {
     const explanation = firstOf<string>(o, ['explanation', '解析', '解释']);
     const chapter = firstOf<string>(o, ['chapter', '章节', '科目']);
     const note = firstOf<string>(o, ['note', '笔记', '相关笔记']);
+    const rawNotes = firstOf<string[]>(o, ['optionNotes', '选项批注']);
     const base = {
       id: `q-${Date.now().toString(36)}-${i}`,
       stem: String(stem).trim(),
@@ -140,7 +195,11 @@ export function normalizeQuestions(raw: unknown): QuizQuestion[] {
     };
     if (options.length >= 2 && rawAnswer !== undefined && answerIndex(rawAnswer, options) >= 0) {
       const ai = answerIndex(rawAnswer, options);
-      out.push({ ...base, type: 'choice', options, answer: ai, answerText: options[ai] });
+      const notes = alignNotes(rawNotes, options.length);
+      out.push({
+        ...base, type: 'choice', options, answer: ai, answerText: options[ai],
+        ...(notes ? { optionNotes: notes } : {}),
+      });
     } else if (rawAnswer !== undefined && String(rawAnswer).trim()) {
       // 无有效选项 → 简答
       out.push({ ...base, type: 'recall', options: [], answer: -1, answerText: String(rawAnswer).trim() });

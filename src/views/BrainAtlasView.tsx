@@ -9,6 +9,7 @@
  * to read MNI coordinates. Sliders control overlay opacity and clip-plane peel.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import { Niivue } from '@niivue/niivue';
 
 type VolumeSpec = Parameters<Niivue['loadVolumes']>[0][number];
@@ -16,6 +17,7 @@ import {
   brainUrl, loadBrainAtlas, matchRegion, regionLabel, regionSide,
   type BrainAtlas, type BrainGroup, type BrainRegion,
 } from '../core/brainAtlas';
+import { netErrorHint } from '../core/netError';
 import { IconBrain, IconClose } from './icons';
 
 interface Props {
@@ -33,6 +35,8 @@ const MODE_LABEL: Record<Mode, string> = {
 };
 
 export default function BrainAtlasView({ onClose }: Props) {
+  // Esc 关闭（接进全局 Esc 栈，与其余面板一致）；焦点在搜索框/滑杆上时先退出该控件
+  useEsc(escThenClose(onClose));
   const [atlas, setAtlas] = useState<BrainAtlas | null>(null);
   const [groupId, setGroupId] = useState('cortical');
   const [query, setQuery] = useState('');
@@ -53,7 +57,7 @@ export default function BrainAtlasView({ onClose }: Props) {
     const st = { alive: true as boolean };
     void loadBrainAtlas()
       .then((d) => { if (st.alive) setAtlas(d); })
-      .catch((e) => { if (st.alive) setError((e as Error).message); });
+      .catch((e) => { if (st.alive) setError(netErrorHint(e)); });
     return () => { st.alive = false; };
   }, []);
 
@@ -94,7 +98,7 @@ export default function BrainAtlasView({ onClose }: Props) {
         // 主动触发一次，让读数在打开时就显示初始位置而不是 --
         nv.createOnLocationChange();
       } catch (e) {
-        if (st.alive) setError((e as Error).message);
+        if (st.alive) setError(netErrorHint(e));
       }
     })();
     return () => {

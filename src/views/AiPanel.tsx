@@ -3,7 +3,8 @@
  * - 预设常用 AI 站点，也可填自定义 URL；选择记忆在 localStorage
  * - 部分站点禁止被网页嵌入（X-Frame-Options），提供「新窗口打开」兜底
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import { IconClose } from './icons';
 import Loading from './Loading';
 
@@ -27,14 +28,8 @@ export default function AiPanel({ onClose }: Props) {
   // 内嵌页首屏是白屏：用统一载入语汇补上「正在加载」的反馈，换站点时重置
   const [frameLoading, setFrameLoading] = useState(true);
 
-  // Esc 快捷关闭
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+  // Esc 快捷关闭。走全局 Esc 栈（只关最上面那一层）；焦点在输入框里时先退出输入框
+  useEsc(escThenClose(onClose));
 
   const pick = (url: string) => {
     if (url !== src) setFrameLoading(true); // 只有真的换站点才重新进入载入态

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import ErrorBoundary from './views/ErrorBoundary.tsx'
 import { initTooltips } from './core/tooltip'
 import { initTheme, initFont } from './core/theme'
 import { migrateLocalStorage, migrateIndexedDb } from './core/migrate'
@@ -31,7 +32,11 @@ if ('serviceWorker' in navigator) {
 void migrateIndexedDb().finally(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App />
+      {/* 兜住懒加载分块取不到（本地服务关掉后最容易发生）：没有它整棵树被卸载 → 白屏，
+          用户只能看到控制台里那行 "Failed to fetch dynamically imported module"。 */}
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </StrictMode>,
   )
 })

@@ -16,7 +16,7 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { livePreview, toggleLivePreview } from '../core/livePreview';
-import { toggleMark, wikiLink } from '../core/mdFormat';
+import { FORMAT_KEYS, toggleMark, wikiLink } from '../core/mdFormat';
 import { insertTable, tableSkeleton, TABLE_MAX_COLS, TABLE_MAX_ROWS, textToTable } from '../core/mdTable';
 import { toast } from '../core/feedback';
 import { IconEye } from './icons';
@@ -45,6 +45,17 @@ const applyWikiLink = (v: EditorView) => {
   // 这里显式拉一次候选，让「插入双链就能从列表里挑笔记」名副其实。
   if (from === to) startCompletion(v);
 };
+
+/**
+ * 四个格式命令：名称 + 键位（来自 core/mdFormat.ts）+ 动作。
+ * 快捷键、右键菜单都由这张表生成，界面提示也从同一处取键名——改键不会再漏改提示。
+ */
+const FORMAT_ACTIONS: Array<{ name: string; key: (typeof FORMAT_KEYS)[keyof typeof FORMAT_KEYS]; run: (v: EditorView) => void }> = [
+  { name: '加粗', key: FORMAT_KEYS.bold, run: (v) => applyMark(v, MARK_BOLD) },
+  { name: '高亮', key: FORMAT_KEYS.highlight, run: (v) => applyMark(v, MARK_HIGHLIGHT) },
+  { name: '斜体', key: FORMAT_KEYS.italic, run: (v) => applyMark(v, MARK_ITALIC) },
+  { name: '插入双链', key: FORMAT_KEYS.wiki, run: (v) => applyWikiLink(v) },
+];
 
 /**
  * 写剪贴板：优先 Clipboard API；非安全上下文或未授权时退回临时 textarea + execCommand。
@@ -198,26 +209,16 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               key: 'Mod-Shift-z',
               run: (v) => { redo(v); return true; },
             },
-            // 行内格式快捷键放在最前：Mod-b / Mod-h / Alt-k 不与 defaultKeymap、
-            // searchKeymap 里的任何绑定冲突，顺序在前保证不被覆盖。
-            {
-              key: 'Mod-b',
-              run: (v) => { applyMark(v, MARK_BOLD); return true; },
-            },
-            {
-              key: 'Mod-h',
-              run: (v) => { applyMark(v, MARK_HIGHLIGHT); return true; },
-            },
-            {
-              key: 'Mod-i',
-              run: (v) => { applyMark(v, MARK_ITALIC); return true; },
-            },
-            // 双链的主键是 Alt+K（两个键）：macOS 上 Option+K 是死键（打出 ˚），改用 ⌘+⌥+K。
-            {
-              key: 'Alt-k',
-              mac: 'Mod-Alt-k',
-              run: (v) => { applyWikiLink(v); return true; },
-            },
+            // 行内格式快捷键：Alt+字母不与上面的撤销/重做冲突，也必须排在
+            // defaultKeymap、searchKeymap 之前，否则会被它们的同键绑定覆盖。
+            // 键位定义见 core/mdFormat.ts（工具栏提示与右键菜单同源）。
+            ...FORMAT_ACTIONS.map((a) => ({
+              key: a.key.cm,
+              mac: a.key.cmMac,
+              run: (v: EditorView) => { a.run(v); return true; },
+            })),
+            // 旧版行内格式键位（Ctrl/⌘+B 加粗、+I 斜体、+H 高亮）已废弃，改到 Alt 系（见 core/mdFormat.ts）。
+            // 它们由 Workspace 里的应用级守卫统一消费——焦点在哪都拦得住，不必在这里再绑一遍。
             ...closeBracketsKeymap,
             ...defaultKeymap,
             ...historyKeymap,
@@ -477,15 +478,15 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
     { label: '↺', title: '撤销（Ctrl/⌘+Z）', run: (v) => undo(v) },
     { label: '↻', title: '重做（Ctrl/⌘+Shift+Z 或 Ctrl+Y）', run: (v) => redo(v) },
     {
-      label: <b>B</b>, title: '加粗（Ctrl/⌘+B，再按一次取消）',
+      label: <b>B</b>, title: `加粗（${FORMAT_KEYS.bold.labelMac}，再按一次取消）`,
       run: (v) => applyMark(v, MARK_BOLD),
     },
     {
-      label: '==', title: '高亮（Ctrl/⌘+H，再按一次取消）',
+      label: '==', title: `高亮（${FORMAT_KEYS.highlight.labelMac}，再按一次取消）`,
       run: (v) => applyMark(v, MARK_HIGHLIGHT),
     },
     {
-      label: <i>I</i>, title: '斜体（Ctrl/⌘+I，再按一次取消）',
+      label: <i>I</i>, title: `斜体（${FORMAT_KEYS.italic.labelMac}，再按一次取消）`,
       run: (v) => applyMark(v, MARK_ITALIC),
     },
     {
@@ -499,7 +500,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
     { label: '⇥', title: '缩进一层（Tab）', run: (v) => indentMore(v) },
     { label: '⇤', title: '反缩进（Shift+Tab）', run: (v) => indentLess(v) },
     {
-      label: '[[', title: '插入双链（Alt+K），接着输入笔记名可自动补全',
+      label: '[[', title: `插入双链（${FORMAT_KEYS.wiki.labelMac}），接着输入笔记名可自动补全`,
       run: (v) => applyWikiLink(v),
     },
     {
@@ -517,12 +518,8 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   ];
 
   /** 选中文字后的右键菜单：格式一栏（另一种施加方式是快捷键），都不需要手打标记符 */
-  const CTX_ACTIONS: Array<{ label: string; keys: string; run: (v: EditorView) => void }> = [
-    { label: '加粗', keys: 'Ctrl+B', run: (v) => applyMark(v, MARK_BOLD) },
-    { label: '高亮', keys: 'Ctrl+H', run: (v) => applyMark(v, MARK_HIGHLIGHT) },
-    { label: '斜体', keys: 'Ctrl+I', run: (v) => applyMark(v, MARK_ITALIC) },
-    { label: '插入双链', keys: 'Alt+K', run: (v) => applyWikiLink(v) },
-  ];
+  const CTX_ACTIONS: Array<{ label: string; keys: string; run: (v: EditorView) => void }> =
+    FORMAT_ACTIONS.map((a) => ({ label: a.name, keys: a.key.label, run: a.run }));
 
   /** 接管了系统右键菜单，就得把它最常用的三项补回来，否则选中文字后点不到复制/粘贴 */
   const CTX_EDIT: Array<{ label: string; keys: string; run: (v: EditorView) => void }> = [
@@ -642,7 +639,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
         >
           <IconEye />
         </button>
-        <span className="cm-toolbar-hint muted">选中文字后右键，或按 Ctrl+B 加粗 / Ctrl+H 高亮 / Ctrl+I 斜体 / Alt+K 双链（标记符不会显示在正文里）</span>
+        <span className="cm-toolbar-hint muted">选中文字后右键，或按 {FORMAT_ACTIONS.map((a) => `${a.key.labelMac} ${a.name}`).join(' / ')}（标记符不会显示在正文里）</span>
       </div>
       <div className="editor-host" ref={hostRef} />
       {menuAt && (

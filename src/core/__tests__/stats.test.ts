@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { last7, markStudy, streak, studyDays } from '../stats';
+import { last7, markStudy, streak, studyDays, exportDays, importDays } from '../stats';
 
 beforeEach(() => localStorage.clear());
 
@@ -43,5 +43,29 @@ describe('stats', () => {
     localStorage.setItem('knowlattice-days', 'not-json');
     expect(studyDays()).toEqual([]);
     expect(streak()).toBe(0);
+  });
+
+  it('exportDays 导出后清空再导入，打卡与连续天数都能回来', () => {
+    markStudy();
+    const dumped = exportDays();
+    expect(dumped[localDate()]).toBe(1);
+    localStorage.clear();
+    expect(streak()).toBe(0);
+    expect(importDays(dumped)).toBe(1);
+    expect(streak()).toBe(1);
+  });
+
+  it('importDays 同日取较大值：重复导入同一份备份不会把次数翻倍', () => {
+    localStorage.setItem('knowlattice-days', JSON.stringify({ '2024-01-01': 5 }));
+    importDays({ '2024-01-01': 2, '2024-01-02': 3 });
+    expect(exportDays()).toEqual({ '2024-01-01': 5, '2024-01-02': 3 });
+  });
+
+  it('importDays 忽略非数字/非正数/非对象输入', () => {
+    expect(importDays(null)).toBe(0);
+    expect(importDays('2024-01-01')).toBe(0);
+    expect(importDays({ '2024-01-01': 'x', '2024-01-02': -1, '2024-01-03': 0 })).toBe(0);
+    expect(importDays({ '2024-01-03': 2 })).toBe(1);
+    expect(exportDays()).toEqual({ '2024-01-03': 2 });
   });
 });

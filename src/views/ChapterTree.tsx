@@ -9,12 +9,13 @@
  * - 虚拟滚动：5227 篇也只渲染视口附近的行（配合 .tree-row 固定 26px 行高）。
  * - 批量删除走一次状态更新（removeMany），避免逐篇触发全树与全索引重建。
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { TreeNode } from '../core/vault';
 import { NOTE_TYPE_LABELS, type NoteType } from '../core/parser';
-import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore } from './icons';
+import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore, IconTrash } from './icons';
 import { toast, confirmBox } from '../core/feedback';
 import { clickable } from './a11y';
+import { useEsc } from './useEsc';
 
 interface Props {
   tree: TreeNode[];
@@ -23,9 +24,9 @@ interface Props {
   onCreate: (dir: string, title: string, type?: NoteType) => void;
   onExport: () => Promise<void>;
   onExportFolder: () => Promise<number>;
-  onImport: (text: string) => Promise<number>;
+  onImport: (text: string) => Promise<{ ok: number; failed: number }>;
   /** 导入 md 文件夹（webkitdirectory 选择目录，相对路径入库） */
-  onImportMd: (files: Array<{ path: string; content: string }>) => Promise<number>;
+  onImportMd: (files: Array<{ path: string; content: string }>) => Promise<{ ok: number; failed: number }>;
   /** 批量删除选中的笔记 */
   onRemove: (paths: string[]) => void;
 }
@@ -45,7 +46,7 @@ interface FlatRow {
 
 /** 单行（memo：仅当本行涉及的状态变化时才重渲染） */
 const Row = memo(function Row({
-  node, depth, count, currentPath, batchMode, sel, open, onOpen, onPickDir, onToggle,
+  node, depth, count, currentPath, batchMode, sel, open, onOpen, onPickDir, onToggle, onDelete, onMenu,
 }: {
   node: TreeNode;
   depth: number;
@@ -60,6 +61,10 @@ const Row = memo(function Row({
   onOpen: (p: string) => void;
   onPickDir: (p: string) => void;
   onToggle: (node: TreeNode) => void;
+  /** 单篇删除（已带确认框，见 ChapterTree.delOne） */
+  onDelete: (path: string) => void;
+  /** 右键唤起单篇操作菜单 */
+  onMenu: (node: TreeNode, e: MouseEvent) => void;
 }) {
   if (node.type === 'file') {
     const name = node.name.replace(/\.md$/, '');
@@ -67,14 +72,33 @@ const Row = memo(function Row({
       ? `${sel ? '取消选择' : '选择'}：${name}`
       : `打开笔记：${name}`;
     return (
-      <div
-        className={`tree-row file ${currentPath === node.path ? 'active' : ''}`}
-        style={{ paddingLeft: depth * 14 + 12 }}
-        onClick={() => (batchMode ? onToggle(node) : onOpen(node.path))}
-        {...clickable(label)}
-      >
-        {batchMode && <span className={`ck ${sel ? 'on' : ''}`}>✓</span>}
-        {name}
+      // 删除键是行的**兄弟**节点而不是子节点：行本身是 role="button"，
+      // 里面再套一个 button 属于嵌套可交互元素，屏幕阅读器会读乱。
+      <div className="tree-row-wrap">
+        <div
+          className={`tree-row file ${currentPath === node.path ? 'active' : ''}`}
+          style={{ paddingLeft: depth * 14 + 12 }}
+          onClick={() => (batchMode ? onToggle(node) : onOpen(node.path))}
+          onContextMenu={(e) => {
+            // 整篇笔记的鼠标入口：右键弹「打开 / 删除整篇」
+            e.preventDefault();
+            if (!batchMode) onMenu(node, e);
+          }}
+          {...clickable(label)}
+        >
+          {batchMode && <span className={`ck ${sel ? 'on' : ''}`}>✓</span>}
+          <span className="tree-name">{name}</span>
+        </div>
+        {!batchMode && (
+          <button
+            className="tree-del"
+            title={`删除笔记：${name}`}
+            aria-label={`删除笔记：${name}`}
+            onClick={() => onDelete(node.path)}
+          >
+            <IconTrash size={13} />
+          </button>
+        )}
       </div>
     );
   }
@@ -192,6 +216,50 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
     });
   };
 
+  /** 单篇删除：行内垃圾桶。此前只能开批量模式勾选、或先打开这篇笔记再从编辑器头部删，
+   *  目录里没有「就删这一篇」的入口（用户反馈：只找得到批量删除）。 */
+  const delOne = useCallback((path: string) => {
+    const name = path.replace(/\.md$/, '').split('/').pop() ?? path;
+    void confirmBox({
+      title: `删除「${name}」？`,
+      detail: '笔记将从知识库中移除；最近的历史快照仍可在「历史版本」中找回。',
+      danger: true,
+      okText: '删除',
+    }).then((ok) => {
+      if (ok) onRemove([path]);
+    });
+  }, [onRemove]);
+
+  // ---------- 整篇笔记的右键菜单 ----------
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string; name: string } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const onMenu = useCallback((node: TreeNode, e: MouseEvent) => {
+    setMenu({ x: e.clientX, y: e.clientY, path: node.path, name: node.name.replace(/\.md$/, '') });
+  }, []);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: Event) => {
+      // 点在菜单自己身上不算「点外面」：否则 pointerdown 先把菜单关掉，
+      // 随后的 click 落在一个已卸载的按钮上，点了等于没点。
+      if (menuRef.current?.contains(e.target as Node)) return;
+      setMenu(null);
+    };
+    const blur = () => setMenu(null);
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('blur', blur);
+    window.addEventListener('resize', blur);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('blur', blur);
+      window.removeEventListener('resize', blur);
+    };
+  }, [menu]);
+
+  // Esc 关菜单：接进全局 Esc 栈，和其它面板一样「一次只退一层」
+  useEsc(() => setMenu(null), menu !== null);
+
   // ---------- 虚拟滚动：扁平化可见行 + 只渲染视口窗口 ----------
   const treeRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -233,8 +301,9 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
       list.push({ path, content: await file.text() });
     }
     try {
-      const n = await onImportMd(list);
-      toast(`已导入 ${n} 篇笔记（md 文件夹）`, 'ok');
+      const r = await onImportMd(list);
+      if (r.failed) toast(`已导入 ${r.ok} 篇，${r.failed} 篇写入失败（存储空间可能不足）`, 'err');
+      else toast(`已导入 ${r.ok} 篇笔记（md 文件夹）`, 'ok');
     } catch (err) {
       toast(`导入失败：${(err as Error).message}`, 'err');
     }
@@ -250,11 +319,16 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
     setCreating(false);
   };
 
-  /** 导出 md 文件夹：先收起菜单，再等导出完成并回报篇数 */
+  /** 导出 md 文件夹：先收起菜单，再等导出完成并回报篇数。
+   *  打包失败（jszip 动态 import 拉不下来、几千篇超时等）必须报出来，否则按钮看着像没生效。 */
   const exportFolder = async () => {
     setMoreOpen(false);
-    const n = await onExportFolder();
-    toast(`已导出 ${n} 篇笔记为 md 文件夹(.zip)，可直接用 Obsidian 打开`, 'ok');
+    try {
+      const n = await onExportFolder();
+      toast(`已导出 ${n} 篇笔记为 md 文件夹(.zip)，可直接用 Obsidian 打开`, 'ok');
+    } catch (err) {
+      toast(`导出失败：${(err as Error).message}`, 'err');
+    }
   };
 
   return (
@@ -284,7 +358,7 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
                 onMouseLeave={() => setMoreOpen(false)}
                 onKeyDown={(e) => { if (e.key === 'Escape') setMoreOpen(false); }}
               >
-                <div onClick={() => { setMoreOpen(false); void onExport(); }} {...clickable()}>
+                <div onClick={() => { setMoreOpen(false); void onExport().catch((err: unknown) => toast(`备份失败：${(err as Error).message}`, 'err')); }} {...clickable()}>
                   <IconBackup /> 备份到 .json
                 </div>
                 <div onClick={() => void exportFolder()} {...clickable()}>
@@ -313,8 +387,12 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
               const reader = new FileReader();
               reader.onload = async () => {
                 try {
-                  const n = await onImport(reader.result as string);
-                  toast(`已恢复 ${n} 篇笔记（备份里的题库 / 复习进度也已一并导入）`, 'ok');
+                  const r = await onImport(reader.result as string);
+                  if (r.failed) {
+                    toast(`已恢复 ${r.ok} 篇，${r.failed} 篇写入失败——这几篇没有进库，请确认存储空间后重新导入`, 'err');
+                  } else {
+                    toast(`已恢复 ${r.ok} 篇笔记（备份里的题库 / 复习进度也已一并导入）`, 'ok');
+                  }
                 } catch (err) {
                   toast((err as Error).message, 'err');
                 }
@@ -368,7 +446,7 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
       <div
         className="tree"
         ref={treeRef}
-        onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
+        onScroll={(e) => { setScrollTop((e.target as HTMLDivElement).scrollTop); setMenu(null); }}
       >
         {total === 0 ? (
           <div className="tree-empty">还没有笔记，点 ＋ 创建第一篇</div>
@@ -393,6 +471,8 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
                 onOpen={onOpen}
                 onPickDir={setTargetDir}
                 onToggle={node.type === 'dir' ? toggleDirOpen : toggleNode}
+                onDelete={delOne}
+                onMenu={onMenu}
               />
             ))}
             <div style={{ height: (total - end) * ROW_H }} aria-hidden />
@@ -412,6 +492,32 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
             删除
           </button>
           <button className="btn-small" onClick={() => { setBatchMode(false); setSelected(new Set()); }}>退出</button>
+        </div>
+      )}
+      {menu && (
+        // 整篇笔记的鼠标入口（用户反馈：目录里只能找到「批量删除」）。
+        // 样式复用编辑器右键菜单那套 .cm-ctx-menu，两处菜单长得一样。
+        <div
+          className="cm-ctx-menu"
+          ref={menuRef}
+          role="menu"
+          aria-label={`笔记操作：${menu.name}`}
+          style={{ left: menu.x, top: menu.y }}
+        >
+          <button
+            className="cm-ctx-item"
+            role="menuitem"
+            onClick={() => { onOpen(menu.path); setMenu(null); }}
+          >
+            打开笔记
+          </button>
+          <button
+            className="cm-ctx-item danger"
+            role="menuitem"
+            onClick={() => { delOne(menu.path); setMenu(null); }}
+          >
+            <span><IconTrash size={13} /> 删除整篇笔记</span>
+          </button>
         </div>
       )}
     </aside>

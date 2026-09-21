@@ -24,6 +24,9 @@ export class TauriAdapter implements StorageAdapter {
   async read(_path: string): Promise<string> {
     throw new Error('TauriAdapter 将在 M4 阶段实现');
   }
+  async exists(_path: string): Promise<boolean> {
+    throw new Error('TauriAdapter 将在 M4 阶段实现');
+  }
   async write(_path: string, _content: string): Promise<void> {
     throw new Error('TauriAdapter 将在 M4 阶段实现');
   }

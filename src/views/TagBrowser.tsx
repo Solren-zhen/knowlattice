@@ -3,6 +3,7 @@
  * 点标签 → 列出该标签下的笔记 → 点笔记直达编辑。定位以标签组织为主的知识库。
  */
 import { useMemo, useState } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import { parseFrontmatter } from '../core/parser';
 import { IconTag, IconClose } from './icons';
 import { clickable } from './a11y';
@@ -14,6 +15,8 @@ interface Props {
 }
 
 export default function TagBrowser({ docs, onOpenPath, onClose }: Props) {
+  // Esc 关闭；焦点在标签搜索框里时先退出输入框，再按一次才关面板
+  useEsc(escThenClose(onClose));
   const [sel, setSel] = useState<string | null>(null);
   const [q, setQ] = useState('');
 

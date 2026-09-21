@@ -208,6 +208,13 @@ export const IconPlus = ({ size = 15 }: P) => (
   </svg>
 );
 
+/** 选项批注：铅笔（与「魔棒 = 智能草稿」分得开，不叠任何附加记号） */
+export const IconPencil = ({ size = 14 }: P) => (
+  <svg {...base(size)}>
+    <path d="M16.8 3.2a2.8 2.8 0 0 1 3.9 3.9L8 19.8l-5.2 1.3 1.3-5.2z" {...wash} fillOpacity={0.1} />
+  </svg>
+);
+
 export const IconBackup = ({ size = 15 }: P) => (
   <svg {...base(size)}>
     <path d="M20.4 15v3.2a2 2 0 0 1-2 2H5.6a2 2 0 0 1-2-2V15" />

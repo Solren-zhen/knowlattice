@@ -3,6 +3,10 @@
 KnowLattice bundles or depends on the third-party assets and libraries listed
 below. Keep this file, plus the per-asset NOTICE files, when redistributing.
 
+**These third-party components are not covered by this project's GPL-3.0 license.**
+`LICENSE` applies to KnowLattice's own source code only; each item below keeps
+its own terms.
+
 ## Bundled data
 
 ### 3D anatomy models

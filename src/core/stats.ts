@@ -66,3 +66,25 @@ export function last7(): Array<{ day: string; count: number }> {
 export function studyDays(): string[] {
   return [...load().keys()].sort();
 }
+
+/** 导出打卡记录（日期 → 当日学习次数）供整包备份 */
+export function exportDays(): Record<string, number> {
+  return Object.fromEntries(load());
+}
+
+/**
+ * 从备份导入打卡记录。合并策略取同日较大值：重复导入同一份备份不会把次数翻倍，
+ * 也不会用旧备份把新进度冲回去。返回并入的天数。
+ */
+export function importDays(state: unknown): number {
+  if (!state || typeof state !== 'object') return 0;
+  const m = load();
+  let n = 0;
+  for (const [day, raw] of Object.entries(state as Record<string, unknown>)) {
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) continue;
+    m.set(day, Math.max(m.get(day) ?? 0, raw));
+    n++;
+  }
+  save(m);
+  return n;
+}

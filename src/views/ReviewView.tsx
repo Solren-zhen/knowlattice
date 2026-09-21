@@ -4,6 +4,7 @@
  * 背面 = 完整内容。评分按钮走 SM-2 调度。
  */
 import { useMemo, useRef, useState } from 'react';
+import { useEsc, escThenClose } from './useEsc';
 import { applyReview, dueQueue, loadCards, srsStats, exportSrsJson, importSrsFromJson, type Rating } from '../core/srs';
 import { toast } from '../core/feedback';
 import { markStudy } from '../core/stats';
@@ -32,6 +33,9 @@ function propKeys(body: string): string[] {
 }
 
 export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, onOpenPath }: Props) {
+  // Esc 关闭（接进全局 Esc 栈）。与面板上的 ✕ 行为一致：复习进度本就随面板关闭而结束，
+  // 这里只是让键盘也能退出；焦点在输入框里时先退出输入框，避免误关。
+  useEsc(escThenClose(onClose));
   const [queue, setQueue] = useState<string[]>(() => dueQueue(paths));
   const srsImportRef = useRef<HTMLInputElement>(null);
   const [revealed, setRevealed] = useState(false);

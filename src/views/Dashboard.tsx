@@ -3,10 +3,12 @@
  * 打卡数据来自复习评卡 / 题库作答（markStudy），存在 localStorage。
  */
 import { useMemo } from 'react';
+import { useEsc } from './useEsc';
 import { srsStats } from '../core/srs';
 import { toast } from '../core/feedback';
 import { loadMistakes } from '../core/mistakes';
 import { loadBanks } from '../core/qbank';
+import { loadTodos } from '../core/todos';
 import { streak, last7 } from '../core/stats';
 import { seedDemo } from '../core/demo';
 import { IconChart, IconClose } from './icons';
@@ -16,17 +18,16 @@ interface Props {
   onClose: () => void;
 }
 
-interface TodoLite { done: boolean }
-
 export default function Dashboard({ docs, onClose }: Props) {
+  // Esc 关闭（接进全局 Esc 栈，与其余面板一致）
+  useEsc(onClose);
   const mdPaths = useMemo(() => [...docs.keys()].filter((p) => p.endsWith('.md')), [docs]);
   const rep = useMemo(() => {
     const r = srsStats(mdPaths);
     const mistakes = Object.keys(loadMistakes()).length;
     const banks = loadBanks();
     const totalQ = banks.reduce((n, b) => n + b.questions.length, 0);
-    let todos: TodoLite[] = [];
-    try { todos = JSON.parse(localStorage.getItem('knowlattice-todos') ?? '[]'); } catch { /* ignore */ }
+    const todos = loadTodos();
     const todoDone = todos.filter((t) => t.done).length;
     const s = streak();
     const days = last7();

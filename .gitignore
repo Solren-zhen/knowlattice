@@ -7,6 +7,9 @@ node_modules/
 # 历史快照
 *.zip
 
+# 离线便携包解压出来的目录（62MB 构建产物，靠 npm run pack 随时重出）
+KnowLattice-离线版-*/
+
 # 下载残留
 *.qkdownloading
 
