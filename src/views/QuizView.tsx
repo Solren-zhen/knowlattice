@@ -7,7 +7,7 @@ import { useEsc } from './useEsc';
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import {
-  addBank, loadBanks, normalizeQuestions, pickQuestions, removeBank, setOptionNote,
+  addBank, loadBanks, parseQbankJson, pickQuestions, removeBank, setOptionNote,
   parseQuestionsFromText, rowsToQuestions,
   type QuizBank, type QuizQuestion,
 } from '../core/qbank';
@@ -41,9 +41,12 @@ const HELP_TEXT = `[
 options 缺省即为简答题，显示答案后自行判定对错。
 optionNotes 逐选项批注，下标对齐 options，可写可不写（应用里作答后点选项右侧的铅笔即可添加）。
 
+· JSON 文件：数组，或 {"name":"题库名","questions":[…]}
 · Word(.docx)：直接导入，自动抽取文本并按「1.题干 → A.选项 → 答案：A」识别
 · Excel/CSV：表头含「题干/答案」，选项列用 A/B/C/D 或 选项1..4
-· 识别不到时会把原文填入输入框，手动整理后再粘贴导入`;
+· 识别不到时会把原文填入输入框，手动整理后再粘贴导入
+· 整库备份（笔记）在这里不认：请走「数据管理 → 导入备份」；这里只吃上面的题库格式
+· 题库存在浏览器 localStorage（每站点约 5 MB）：一次只导几份，导多了会提示存不下`;
 
 export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Props) {
   const [banks, setBanks] = useState<QuizBank[]>(loadBanks);
@@ -93,15 +96,11 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   };
   const doImport = (text: string, fallbackName: string) => {
     try {
-      const raw: unknown = JSON.parse(text);
-      const questions = normalizeQuestions(raw);
-      const named = !Array.isArray(raw) && typeof raw === 'object' && raw !== null
-        ? (raw as { name?: unknown }).name
-        : undefined;
-      const name = typeof named === 'string' && named.trim() ? named.trim() : fallbackName;
+      // 解析与报错都在 core（parseQbankJson）：这条提示是用户唯一的线索，必须可测。
+      const { name, questions } = parseQbankJson(text, fallbackName);
       importQuestions(questions, name);
     } catch (err) {
-      toast(`导入失败：${(err as Error).message}`, 'err');
+      toast(`导入失败：${(err as Error).message}`, 'err', 8000);
     }
   };
   const onFile = (file: File) => {

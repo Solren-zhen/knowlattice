@@ -53,7 +53,20 @@ export function loadBanks(): QuizBank[] {
 }
 
 function persist(banks: QuizBank[]) {
-  localStorage.setItem(KEY, JSON.stringify(banks));
+  const json = JSON.stringify(banks);
+  try {
+    localStorage.setItem(KEY, json);
+  } catch {
+    // 题库是「整份重写」的，localStorage 每站点约 5 MB（按 UTF-16 计）：
+    // 装不下时浏览器抛的是英文 QuotaExceededError，对使用者毫无帮助，
+    // 这里必须自己说清「为什么」和「怎么办」。
+    const mb = ((json.length * 2) / 1024 / 1024).toFixed(1);
+    throw new Error(
+      `题库存不下：浏览器给每个站点约 5 MB 存储，这次要写 ${mb} MB。` +
+        '请先在题库列表里删掉几个不用的（可先「导出题库」备份），' +
+        '或改用「数据管理 → 导入备份」的笔记形式——笔记存在 IndexedDB，容量大得多。'
+    );
+  }
 }
 
 /** 同名题库覆盖导入；返回更新后的题库列表。
@@ -165,6 +178,15 @@ function alignNotes(raw: unknown, count: number): string[] | undefined {
   return notes.some(Boolean) ? notes : undefined;
 }
 
+/** 这份 JSON 是不是「整库备份」（笔记数据）？
+ *  用户极容易把备份文件当成题库文件导入（文件名叫「…题库.json」而入口叫「题库练习」），
+ *  所以报错不能只说「格式不对」，必须直接告诉他该走哪个入口。 */
+function looksLikeVaultBackup(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const o = raw as Record<string, unknown>;
+  return Array.isArray(o.files) && ('exportedAt' in o || typeof o.version === 'number');
+}
+
 /** 任意结构 → QuizQuestion[]；格式非法时抛错（信息面向使用者） */
 export function normalizeQuestions(raw: unknown): QuizQuestion[] {
   const list = Array.isArray(raw)
@@ -172,7 +194,15 @@ export function normalizeQuestions(raw: unknown): QuizQuestion[] {
     : typeof raw === 'object' && raw !== null && Array.isArray((raw as Record<string, unknown>).questions)
       ? (raw as { questions: unknown[] }).questions
       : null;
-  if (!list) throw new Error('题库格式：JSON 数组，或含 questions 数组的对象');
+  if (!list) {
+    if (looksLikeVaultBackup(raw)) {
+      throw new Error(
+        '这是一份「笔记备份」，不是题库文件。请到「数据管理 → 导入备份」导入它；' +
+          '题库文件形如 {"name":"…","questions":[…]}（见 knowlattice-题库/ 目录）。'
+      );
+    }
+    throw new Error('题库格式：JSON 数组，或含 questions 数组的对象');
+  }
   const out: QuizQuestion[] = [];
   list.forEach((item, i) => {
     if (typeof item !== 'object' || item === null) return;
@@ -207,6 +237,24 @@ export function normalizeQuestions(raw: unknown): QuizQuestion[] {
   });
   if (out.length === 0) throw new Error('未解析出有效题目（每题至少需要题干和答案）');
   return out;
+}
+
+/** 解析「题库 JSON 文本」→ 题库名 + 题目；所有失败都抛面向使用者的中文说明。
+ *  放在 core 而不是视图里：这条错误信息是用户唯一能看到的线索，必须能被测到。 */
+export function parseQbankJson(text: string, fallbackName: string): { name: string; questions: QuizQuestion[] } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error('这个文件不是有效的 JSON（可能没下载完整，或选错了文件）。题库文件形如 {"name":"…","questions":[…]}。');
+  }
+  const questions = normalizeQuestions(raw);
+  const named =
+    !Array.isArray(raw) && typeof raw === 'object' && raw !== null
+      ? (raw as { name?: unknown }).name
+      : undefined;
+  const name = typeof named === 'string' && named.trim() ? named.trim() : fallbackName;
+  return { name, questions };
 }
 
 /** 从纯文本（Word 抽取 / 粘贴）启发式解析题目。
