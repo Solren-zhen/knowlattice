@@ -3,8 +3,14 @@
  * 调度状态存 localStorage（轻量、无需后端）；笔记内容本身仍在 vault。
  * 对外保持旧 API 形状（applyReview/dueQueue/srsStats/export/import），
  * 底层 Card 为 ts-fsrs 类型（含 stability/difficulty/state 等）。
+ *
+ * M6+ · 粒度改成「按小节」：调度键不再是笔记路径，而是 core/srsCards.ts 建出来的卡键
+ * （`<path>#<小节标题>`）。旧数据是「一篇一卡」的 `<path>` 键，两种键在同一张表里共存：
+ * 没有小节的笔记仍用 `<path>`（同键，零迁移）；有小节的笔记由首张卡继承旧调度
+ * （见 scheduleOf / applyReview），不会因为改粒度而把进度清零。
  */
 import { createEmptyCard, fsrs, generatorParameters, Rating as FSRSRating, type Card } from 'ts-fsrs';
+import type { ReviewCard } from './srsCards';
 
 export type Rating = 'again' | 'hard' | 'good' | 'easy';
 
@@ -56,42 +62,71 @@ const RATE_MAP: Record<Rating, FSRSRating> = {
 
 const dueMs = (c: Card) => new Date(c.due).getTime();
 
+/**
+ * 一张卡当前的调度状态：自己的键优先；还没有就继承该篇旧的「整篇卡」调度（迁移期）。
+ * 这是「改粒度不丢进度」的关键——旧表里 `path` 那条记录仍然算数，直到这张卡被首次评分。
+ */
+export function scheduleOf(schedules: Record<string, Card>, card: ReviewCard): Card | undefined {
+  return schedules[card.key] ?? (card.legacyKey ? schedules[card.legacyKey] : undefined);
+}
+
 /** 给定卡片按 rating 提交，写入调度状态并返回新卡 */
-export function applyReview(path: string, rating: Rating, now = Date.now()): Card {
+export function applyReview(card: ReviewCard, rating: Rating, now = Date.now()): Card {
   const cards = loadCards();
-  const cur = cards[path] ?? createEmptyCard(now);
+  // 显式标注：createEmptyCard 是泛型（R = Card），在 ?? 右侧会被推成 Card | undefined
+  const cur: Card = scheduleOf(cards, card) ?? createEmptyCard(now);
   const next = f.next(cur, new Date(now), RATE_MAP[rating] as never).card;
-  cards[path] = next;
+  cards[card.key] = next;
+  // 旧「整篇卡」的调度已经落到这张卡上 → 删掉旧键，避免下次再继承一遍（迁移只发生一次）
+  if (card.legacyKey && card.legacyKey !== card.key) delete cards[card.legacyKey];
   save(cards);
   return next;
 }
 
-/** 今日到期队列：due <= 现在 的卡片优先，其余按创建顺序补齐为新卡 */
-export function dueQueue(paths: string[], now = Date.now()): string[] {
+/** 今日到期队列：due <= 现在 的卡片优先（按到期时间升序），其余按笔记顺序补齐为新卡 */
+export function dueQueue(cardsIn: ReviewCard[], now = Date.now()): ReviewCard[] {
   const cards = loadCards();
-  const due: string[] = [];
-  const newOnes: string[] = [];
-  for (const p of paths) {
-    const c = cards[p];
-    if (!c) newOnes.push(p);
-    else if (dueMs(c) <= now) due.push(p);
+  const due: ReviewCard[] = [];
+  const newOnes: ReviewCard[] = [];
+  for (const c of cardsIn) {
+    const s = scheduleOf(cards, c);
+    if (!s) newOnes.push(c);
+    else if (dueMs(s) <= now) due.push(c);
   }
-  due.sort((a, b) => dueMs(cards[a]) - dueMs(cards[b]));
+  due.sort((a, b) => dueMs(scheduleOf(cards, a)!) - dueMs(scheduleOf(cards, b)!));
   return [...due, ...newOnes];
 }
 
-/** 统计信息 */
-export function srsStats(paths: string[], now = Date.now()) {
+/** 统计信息：total/learned/dueNow 都是**卡片**数（一篇笔记可能贡献多张） */
+export function srsStats(cardsIn: ReviewCard[], now = Date.now()) {
   const cards = loadCards();
   let learned = 0;
   let dueNow = 0;
-  for (const p of paths) {
-    const c = cards[p];
-    if (!c) continue;
+  for (const c of cardsIn) {
+    const s = scheduleOf(cards, c);
+    if (!s) continue;
     learned++;
-    if (dueMs(c) <= now) dueNow++;
+    if (dueMs(s) <= now) dueNow++;
   }
-  return { total: paths.length, learned, dueNow };
+  return { total: cardsIn.length, learned, dueNow };
+}
+
+/**
+ * 某篇笔记的复习概况（左侧状态行用）：已排程几张 / 共几张 / 最紧的那张卡。
+ * 一篇笔记切成多张后，「这篇什么时候该复习」= 它所有小节卡里最早到期的那个。
+ */
+export function noteStatus(cardsIn: ReviewCard[], path: string, now = Date.now()) {
+  const schedules = loadCards();
+  const mine = cardsIn.filter((c) => c.path === path);
+  let learned = 0;
+  let soonest: Card | null = null;
+  for (const c of mine) {
+    const s = scheduleOf(schedules, c);
+    if (!s) continue;
+    learned++;
+    if (!soonest || dueMs(s) < dueMs(soonest)) soonest = s;
+  }
+  return { total: mine.length, learned, dueNow: soonest ? dueMs(soonest) <= now : false, card: soonest };
 }
 
 /** 导出全部调度状态（随备份文件保存） */

@@ -5,7 +5,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useVault } from '../core/vault';
 import { noteTemplate, parseFrontmatterCached, type NoteType } from '../core/parser';
 import { appendExcerpt } from '../core/noteGen';
-import { loadCards } from '../core/srs';
+import { noteStatus } from '../core/srs';
+import { buildCards } from '../core/srsCards';
 import { loadMistakes } from '../core/mistakes';
 import {
   loadAnatomyManifest,
@@ -493,15 +494,18 @@ export default function Workspace() {
   }
 
   const activePath = vault.currentPath;
-  const activeCard = activePath ? loadCards()[activePath] : null;
+  // 复习状态按「卡」看：一篇笔记可能切成多节，这里显示最紧的那张 + 已排程节数
+  const activeStatus = activePath ? noteStatus(buildCards([activePath], vault.docs), activePath) : null;
+  const activeCard = activeStatus?.card ?? null;
   const activeMistake = activePath ? loadMistakes()[activePath] : null;
   const activeExam = activePath
     ? parseFrontmatterCached(activePath, vault.docs.get(activePath) ?? '').meta.exam
     : null;
+  const activeSections = activeStatus && activeStatus.total > 1 ? ` · ${activeStatus.learned}/${activeStatus.total} 节` : '';
   const activeDueText = activeCard
-    ? new Date(activeCard.due).getTime() <= Date.now()
-      ? '到期待复习'
-      : `${activeCard.reps} 次 · 下次 ${new Date(activeCard.due).toLocaleDateString('zh-CN')}`
+    ? (activeStatus!.dueNow
+        ? '到期待复习'
+        : `${activeCard.reps} 次 · 下次 ${new Date(activeCard.due).toLocaleDateString('zh-CN')}`) + activeSections
     : null;
 
   return (
