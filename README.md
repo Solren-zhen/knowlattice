@@ -134,7 +134,7 @@ node scripts/qbank-to-vault.mjs [--out <目录>]
 
 ## 项目进度
 
-> 最近更新：2026-09-21 · 入口包 `dist/assets/index-*.js` 约 383 KB（gzip 124 KB；图谱/PDF/公式等按需分块加载），离线包约 41.4 MB（427 个文件），`npm test`（559 项）、`npm run build` 与 `npm run lint` 均通过。
+> 最近更新：2026-09-21 · 入口包 `dist/assets/index-*.js` 约 383 KB（gzip 123 KB；图谱/PDF/公式等按需分块加载），离线包约 41.4 MB（430 个文件），`npm test`（559 项）、`npm run build` 与 `npm run lint` 均通过。
 
 ### 最近更新（2026-09-21）
 
@@ -354,6 +354,8 @@ THIRD-PARTY-NOTICES.md
 - 为什么需要一个小服务：产物是 ES module + WASM，浏览器用 `file://` 打开会被 CORS 拦，必须经 HTTP 提供；服务只绑定本机回环地址，不联网、不上传数据。
 - **构建前会先清 `dist`**（`package.json` 的 `prebuild` → `scripts/clean-dist.mjs`）：本机 `fs.rmSync` 会静默失效，vite 的 `emptyOutDir` 因此清不掉旧分块，会连带打进包（见「最近更新」里的记录）。清不掉直接中止，不产出脏包。
 - 随包资料来自仓库根目录的 `knowlattice-*.json`（应用导出的备份），按 `files` 路径**去重合并**、`qbanks` 合并；因此多份备份会被合成一份。
+- 自动收录有 **8 MB 体积闸门**：题库类备份动辄几十 MB（111548 道题那份 54 MB），自动收进来会把分享包从 41 MB 撑到 100 MB，而同学拿到一堆题库备份也不是「起步数据」。超限的会被跳过并打印一行说明，真要收就用 `--data` 显式指定——显式指定意味着你知道自己在装什么。
+- `npm run pack` 会打印**随包数据摘要**（多少篇笔记 / 几份题库 / 多大 / 笔记顶层目录分布 / 每份来源文件）。分享前看这一行就知道包里有没有不该带的东西。
 - 想带上「应用里刚改过的最新笔记」：先在应用里「⋯ → 备份到 .json」，再 `npm run pack -- --data <刚导出的文件>`。
 
 #### 离线版与网页版的功能一致性（改代码时必须走一遍）
