@@ -44,6 +44,8 @@ export interface Todo {
   subtasks?: Subtask[];
   /** 备注：补充说明（搜索也认它） */
   memo?: string;
+  /** 已投入的番茄数：专注前选这条待办，做完一个番茄 +1（量化投入，不是估的） */
+  pomos?: number;
   /** 手动排序权重（拖拽重排时写入） */
   order?: number;
 }
@@ -352,6 +354,18 @@ export function updateTodo(list: Todo[], id: string, patch: Partial<Todo>): Todo
   return list.map((t) => (t.id === id ? { ...t, ...patch } : t));
 }
 
+/** 完成一个番茄，给这条待办 +1（量化投入：这是真做过的 25 分钟，不是估的） */
+export function bumpPomo(list: Todo[], id: string, n = 1): Todo[] {
+  if (!id || n <= 0) return list;
+  let hit = false;
+  const next = list.map((t) => {
+    if (t.id !== id) return t;
+    hit = true;
+    return { ...t, pomos: (t.pomos ?? 0) + n };
+  });
+  return hit ? next : list;
+}
+
 export function removeTodo(list: Todo[], id: string): Todo[] {
   return list.filter((t) => t.id !== id);
 }
@@ -587,6 +601,7 @@ function sanitize(raw: unknown): Todo | null {
     out.repeat = t.repeat as TodoRepeat;
   }
   if (typeof t.memo === 'string' && t.memo.trim()) out.memo = t.memo.trim();
+  if (typeof t.pomos === 'number' && Number.isFinite(t.pomos) && t.pomos > 0) out.pomos = Math.floor(t.pomos);
   if (typeof t.order === 'number') out.order = t.order;
   if (Array.isArray(t.subtasks)) {
     const subs = t.subtasks
