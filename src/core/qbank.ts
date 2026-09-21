@@ -64,7 +64,7 @@ function persist(banks: QuizBank[]) {
     throw new Error(
       `题库存不下：浏览器给每个站点约 5 MB 存储，这次要写 ${mb} MB。` +
         '请先在题库列表里删掉几个不用的（可先「导出题库」备份），' +
-        '或改用「数据管理 → 导入备份」的笔记形式——笔记存在 IndexedDB，容量大得多。'
+        '或改用笔记形式（笔记树右上角 ⋯ →「从备份 .json 恢复」）——笔记存在 IndexedDB，容量大得多。'
     );
   }
 }
@@ -197,8 +197,8 @@ export function normalizeQuestions(raw: unknown): QuizQuestion[] {
   if (!list) {
     if (looksLikeVaultBackup(raw)) {
       throw new Error(
-        '这是一份「笔记备份」，不是题库文件。请到「数据管理 → 导入备份」导入它；' +
-          '题库文件形如 {"name":"…","questions":[…]}（见 knowlattice-题库/ 目录）。'
+        '这是一份「笔记备份」，不是题库文件。要导入它，请用笔记树右上角 ⋯ →「从备份 .json 恢复」；' +
+          '这里只吃题库格式，形如 {"name":"…","questions":[…]}（题库文件见 knowlattice-题库/ 目录）。'
       );
     }
     throw new Error('题库格式：JSON 数组，或含 questions 数组的对象');

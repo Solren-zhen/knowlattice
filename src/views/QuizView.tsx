@@ -45,7 +45,7 @@ optionNotes 逐选项批注，下标对齐 options，可写可不写（应用里
 · Word(.docx)：直接导入，自动抽取文本并按「1.题干 → A.选项 → 答案：A」识别
 · Excel/CSV：表头含「题干/答案」，选项列用 A/B/C/D 或 选项1..4
 · 识别不到时会把原文填入输入框，手动整理后再粘贴导入
-· 整库备份（笔记）在这里不认：请走「数据管理 → 导入备份」；这里只吃上面的题库格式
+· 整库备份（笔记）在这里不认：请走「笔记树右上角 ⋯ → 从备份 .json 恢复」；这里只吃上面的题库格式
 · 题库存在浏览器 localStorage（每站点约 5 MB）：一次只导几份，导多了会提示存不下`;
 
 export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Props) {
