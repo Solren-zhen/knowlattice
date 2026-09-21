@@ -21,6 +21,7 @@ import { loadMistakes, importMistakes } from './mistakes';
 import { exportTodos, importTodos } from './todos';
 import { exportCardEdits, importCardEdits } from './cardEdits';
 import { exportDays, importDays } from './stats';
+import { exportPomodoros, importPomodoros } from './pomodoro';
 import { pushSnapshot } from './history';
 
 export interface TreeNode {
@@ -379,7 +380,7 @@ export function useVault() {
       .map(([path, content]) => ({ path, content }));
     const payload = {
       app: 'knowlattice',
-      version: 4,
+      version: 5,
       exportedAt: new Date().toISOString(),
       files,
       // v2 起随备份保存 SRS 复习调度进度（旧版备份无此字段，导入时自动跳过）
@@ -392,6 +393,8 @@ export function useVault() {
       days: exportDays(),
       // v4 起补上卡片自定义（改写正/背面、删卡）：和待办同一类问题，不随备份走就会丢
       cardEdits: exportCardEdits(),
+      // v5 起补上番茄专注记录：工作台的「今日/累计/趋势」全靠它，丢了就等于白专注
+      pomodoros: exportPomodoros(),
     };
     const blob = new Blob([JSON.stringify(payload)], {
       type: 'application/json',
@@ -417,6 +420,7 @@ export function useVault() {
       todos?: unknown;
       days?: unknown;
       cardEdits?: unknown;
+      pomodoros?: unknown;
     };
     // 兼容旧版以 medvault 命名的备份：两版文件结构一致，只有 app 字段不同
     if ((data.app !== 'knowlattice' && data.app !== 'medvault') || !Array.isArray(data.files)) {
@@ -454,6 +458,7 @@ export function useVault() {
     if (data.todos) importTodos(data.todos);
     if (data.days) importDays(data.days);
     if (data.cardEdits) importCardEdits(data.cardEdits);
+    if (data.pomodoros) importPomodoros(data.pomodoros);
 
     // 并入内存缓存 + 增量更新链接索引
     // 只把真正写成功的并入内存：写失败的如果也进内存，当前会话看着一切正常、还弹
