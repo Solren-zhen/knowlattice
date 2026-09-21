@@ -67,8 +67,28 @@ describe('评分快捷键 A/S/D/F', () => {
     expect(srsRaw()).toContain('a.md#一、首选检查');
   });
 
-  it('按 a = 忘了：进入错题本并排到队尾，队列前进', async () => {
+  it('空格 = 显示答案：按一下出现评分按钮，再按 d 才评掉', async () => {
     renderView();
+    fireEvent.keyDown(window, { key: ' ' });
+    await screen.findByText('良好');
+    expect(screen.queryByText('显示答案')).toBeNull();
+
+    fireEvent.keyDown(window, { key: 'd' });
+    await waitFor(() => expect(screen.getByText('二、机制')).toBeTruthy());
+    expect(srsRaw()).toContain('a.md#一、首选检查');
+  });
+
+  it('答案已翻开后再按空格不会误评分（免得手一抖把卡评掉）', async () => {
+    renderView();
+    fireEvent.keyDown(window, { key: ' ' });
+    await screen.findByText('良好');
+
+    fireEvent.keyDown(window, { key: ' ' });
+    expect(srsRaw()).toBe('');
+    expect(screen.queryByText('二、机制')).toBeNull();
+  });
+
+  it('按 a = 忘了：进入错题本并排到队尾，队列前进', async () => {    renderView();
     fireEvent.click(screen.getByText('显示答案'));
     await screen.findByText('忘了');
     fireEvent.keyDown(window, { key: 'a' });

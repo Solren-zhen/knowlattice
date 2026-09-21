@@ -14,7 +14,11 @@
  * 这里只做纯函数（解析/分组/排序/统计/完成态迁移），视图只管画——所以能一条条单测。
  */
 export type TodoPriority = 1 | 2 | 3; // 1 高 / 2 中 / 3 低
-export type TodoRepeat = 'daily' | 'weekly';
+/**
+ * 重复规则：`daily` 每天 · `weekdays` 每个工作日（周一到周五）· `weekly` 每周 ·
+ * `biweekly` 每两周 · `monthly` 每月同一天（遇短月夹到月末）。
+ */
+export type TodoRepeat = 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly';
 
 export interface Subtask {
   id: string;
@@ -38,6 +42,8 @@ export interface Todo {
   repeat?: TodoRepeat;
   /** 子任务清单 */
   subtasks?: Subtask[];
+  /** 备注：补充说明（搜索也认它） */
+  memo?: string;
   /** 手动排序权重（拖拽重排时写入） */
   order?: number;
 }
@@ -97,7 +103,48 @@ const PRIORITY_WORDS: Record<string, TodoPriority> = {
   低: 3, 低优: 3, 3: 3,
 };
 
-const REPEAT_WORDS: Record<string, TodoRepeat> = { 每天: 'daily', 每日: 'daily', 每周: 'weekly' };
+const REPEAT_WORDS: Record<string, TodoRepeat> = {
+  每天: 'daily', 每日: 'daily',
+  工作日: 'weekdays', 每个工作日: 'weekdays',
+  每周: 'weekly', 每星期: 'weekly',
+  每两周: 'biweekly', 双周: 'biweekly',
+  每月: 'monthly', 每个月: 'monthly',
+};
+
+export const REPEAT_LABELS: Record<TodoRepeat, string> = {
+  daily: '每天', weekdays: '工作日', weekly: '每周', biweekly: '每两周', monthly: '每月',
+};
+
+const isWeekend = (key: string) => {
+  const [y, m, d] = key.split('-').map(Number);
+  const dow = new Date(y, m - 1, d).getDay();
+  return dow === 0 || dow === 6;
+};
+
+/** 下一次到期日：按重复规则从 base 往后推一格（monthly 遇短月夹到月末，不会溢出到下下月） */
+export function nextDue(base: string, repeat: TodoRepeat): string {
+  if (repeat === 'daily') return addDays(base, 1);
+  if (repeat === 'weekly') return addDays(base, 7);
+  if (repeat === 'biweekly') return addDays(base, 14);
+  if (repeat === 'weekdays') {
+    let d = addDays(base, 1);
+    while (isWeekend(d)) d = addDays(d, 1);
+    return d;
+  }
+  const [y, m, d] = base.split('-').map(Number);
+  const lastDayOfNextMonth = new Date(y, m + 1, 0).getDate();
+  return dayKey(new Date(y, m, Math.min(d, lastDayOfNextMonth)));
+}
+
+/** 把一个 `@…` 词解析成日期键（笔记任务解析也用它，口径只有一份） */
+export function parseDueToken(word: string, today: string): string | null {
+  return parseDueWord(word.replace(/^@/, ''), today);
+}
+
+/** 把一个 `!…` 词解析成优先级 */
+export function parsePriorityToken(word: string): TodoPriority | undefined {
+  return PRIORITY_WORDS[word.replace(/^!/, '')];
+}
 
 /** 把一个 `@…` 词解析成日期键；解析不出来返回 null（当普通文字处理，不吞内容） */
 function parseDueWord(w: string, today: string): string | null {
@@ -150,14 +197,14 @@ export function parseQuickAdd(input: string, today: string, notes: Array<{ name:
       }
     }
     if (w.startsWith('!') && !out.priority) {
-      const p = PRIORITY_WORDS[w.slice(1)];
+      const p = Object.prototype.hasOwnProperty.call(PRIORITY_WORDS, w.slice(1)) ? PRIORITY_WORDS[w.slice(1)] : undefined;
       if (p) {
         out.priority = p;
         continue;
       }
     }
     if (w.startsWith('*') && !out.repeat) {
-      const r = REPEAT_WORDS[w.slice(1)];
+      const r = Object.prototype.hasOwnProperty.call(REPEAT_WORDS, w.slice(1)) ? REPEAT_WORDS[w.slice(1)] : undefined;
       if (r) {
         out.repeat = r;
         continue;
@@ -198,13 +245,21 @@ export const BUCKET_LABELS: Record<DueBucket | 'done', string> = {
   done: '已完成',
 };
 
-export type SortMode = 'manual' | 'due' | 'priority';
+export type SortMode = 'manual' | 'due' | 'priority' | 'created' | 'title';
 
 const PRIORITY_RANK = (t: Todo) => t.priority ?? 9; // 没设优先级的排最后
 
 /** 排序：manual 用拖拽权重（缺省按创建时间倒序，新加的在上），due 按到期日，priority 按优先级 */
 export function sortTodos(list: Todo[], mode: SortMode): Todo[] {
   const arr = [...list];
+  if (mode === 'created') {
+    arr.sort((a, b) => b.createdAt - a.createdAt);
+    return arr;
+  }
+  if (mode === 'title') {
+    arr.sort((a, b) => a.text.localeCompare(b.text, 'zh-Hans-CN'));
+    return arr;
+  }
   if (mode === 'priority') {
     arr.sort((a, b) => PRIORITY_RANK(a) - PRIORITY_RANK(b) || b.createdAt - a.createdAt);
     return arr;
@@ -264,11 +319,12 @@ export function todoStats(list: Todo[], today: string) {
   };
 }
 
-/** 搜索：正文、子任务文字、关联笔记路径都算 */
+/** 搜索：正文、备注、子任务文字、关联笔记路径都算 */
 export function matchesQuery(t: Todo, q: string): boolean {
   const s = q.trim().toLowerCase();
   if (!s) return true;
   if (t.text.toLowerCase().includes(s)) return true;
+  if (t.memo?.toLowerCase().includes(s)) return true;
   if (t.note?.toLowerCase().includes(s)) return true;
   return (t.subtasks ?? []).some((x) => x.text.toLowerCase().includes(s));
 }
@@ -352,11 +408,162 @@ export function completeTodo(list: Todo[], id: string, today: string, now = Date
     done: false,
     completedAt: undefined,
     createdAt: now,
-    due: addDays(base, target.repeat === 'daily' ? 1 : 7),
+    due: nextDue(base, target.repeat),
     order: undefined,
     subtasks: target.subtasks?.map((s) => ({ ...s, done: false })),
   };
   return { list: [spawned, ...next], spawned };
+}
+
+// ---------- M9：整页任务面板用的口径 ----------
+//
+// 左栏「智能列表」、中栏列表、右栏统计三处必须用**同一个**判定，
+// 否则会出现「左栏说今天有 3 条、点进去只有 2 条」这种最招人烦的错。
+
+export type SmartList = 'today' | 'tomorrow' | 'week' | 'overdue' | 'active' | 'done' | 'all';
+
+export const SMART_LABELS: Record<SmartList, string> = {
+  today: '今天',
+  tomorrow: '明天之前',
+  week: '本周内',
+  overdue: '已逾期',
+  active: '全部未完成',
+  done: '已完成',
+  all: '全部',
+};
+
+/** 智能列表的顺序（左栏按这个顺序排） */
+export const SMART_ORDER: SmartList[] = ['today', 'tomorrow', 'week', 'overdue', 'active', 'done', 'all'];
+
+/** 某个智能列表下的空态文案 */
+export const SMART_EMPTY: Record<SmartList, string> = {
+  today: '今天没有要做的了',
+  tomorrow: '明天之前没有要做的了',
+  week: '本周内没有要做的了',
+  overdue: '没有逾期的事，很好',
+  active: '还没有待办，上面输入框敲一条试试',
+  done: '还没有已完成的待办',
+  all: '还没有待办，上面输入框敲一条试试',
+};
+
+/**
+ * 一条待办是否属于某个智能列表。
+ * `today` 含逾期（今天该做的当然包括欠着的），`tomorrow`/`week` 同理是「不晚于」的口径。
+ */
+export function inSmartList(t: Todo, key: SmartList, today: string): boolean {
+  switch (key) {
+    case 'done': return t.done;
+    case 'all': return true;
+    case 'active': return !t.done;
+    case 'overdue': return !t.done && !!t.due && daysBetween(today, t.due) < 0;
+    case 'today': return !t.done && !!t.due && daysBetween(today, t.due) <= 0;
+    case 'tomorrow': return !t.done && !!t.due && daysBetween(today, t.due) <= 1;
+    case 'week': return !t.done && !!t.due && daysBetween(today, t.due) <= 7;
+  }
+}
+
+export function smartCounts(list: Todo[], today: string): Record<SmartList, number> {
+  const out = {} as Record<SmartList, number>;
+  for (const k of SMART_ORDER) out[k] = list.filter((t) => inSmartList(t, k, today)).length;
+  return out;
+}
+
+/** 近 n 天每天完成了多少（按完成时间的本地日期归档），从早到晚 */
+export function todoTrend(list: Todo[], today: string, days = 7): Array<{ day: string; done: number }> {
+  const out: Array<{ day: string; done: number }> = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const day = addDays(today, -i);
+    out.push({ day, done: list.filter((t) => t.completedAt !== undefined && dayKey(t.completedAt) === day).length });
+  }
+  return out;
+}
+
+/**
+ * 连续完成天数。今天还没完成不算断——从昨天往前数，
+ * 否则每天早上打开都会看到「连续 0 天」，等于天天在骂用户。
+ */
+export function todoStreak(list: Todo[], today: string): number {
+  const days = new Set(list.filter((t) => t.completedAt !== undefined).map((t) => dayKey(t.completedAt!)));
+  let n = 0;
+  let cur = days.has(today) ? today : addDays(today, -1);
+  while (days.has(cur)) {
+    n++;
+    cur = addDays(cur, -1);
+  }
+  return n;
+}
+
+/** 按关联笔记分组（没关联的归到「未关联」）；多的一组分在前，左栏用 */
+export function groupByNote(
+  list: Todo[],
+  notes: Array<{ name: string; path: string }>
+): Array<{ key: string; label: string; items: Todo[] }> {
+  const label = new Map(notes.map((n) => [n.path, n.name]));
+  const buckets = new Map<string, Todo[]>();
+  for (const t of list) {
+    const k = t.note ?? '';
+    const arr = buckets.get(k);
+    if (arr) arr.push(t);
+    else buckets.set(k, [t]);
+  }
+  return [...buckets.entries()]
+    .map(([key, items]) => ({
+      key,
+      label: key ? (label.get(key) ?? key.replace(/\.md$/, '').split('/').pop() ?? key) : '未关联笔记',
+      items,
+    }))
+    .sort((a, b) => b.items.length - a.items.length || a.label.localeCompare(b.label, 'zh-Hans-CN'));
+}
+
+// ---------- M9：批量操作 ----------
+
+/** 批量改字段（多选后一起改日期/优先级/关联笔记/备注） */
+export function bulkUpdate(list: Todo[], ids: string[], patch: Partial<Todo>): Todo[] {
+  const set = new Set(ids);
+  return list.map((t) => (set.has(t.id) ? { ...t, ...patch } : t));
+}
+
+export function bulkRemove(list: Todo[], ids: string[]): Todo[] {
+  const set = new Set(ids);
+  return list.filter((t) => !set.has(t.id));
+}
+
+/**
+ * 批量完成/取消。完成态一律走 completeTodo —— 重复任务照样顺延，
+ * 不会因为「批量」就漏掉生成下一条。
+ */
+export function bulkComplete(
+  list: Todo[],
+  ids: string[],
+  done: boolean,
+  today: string,
+  now = Date.now()
+): { list: Todo[]; spawned: Todo[] } {
+  let next = list;
+  const spawned: Todo[] = [];
+  for (const id of ids) {
+    const t = next.find((x) => x.id === id);
+    if (!t || t.done === done) continue;
+    if (done) {
+      const r = completeTodo(next, id, today, now);
+      next = r.list;
+      if (r.spawned) spawned.push(r.spawned);
+    } else {
+      next = toggleTodo(next, id, now);
+    }
+  }
+  return { list: next, spawned };
+}
+
+/** 把已逾期的未完成项顺延到今天（不动已完成的，也不动没排期的） */
+export function rollover(list: Todo[], today: string): { list: Todo[]; moved: number } {
+  let moved = 0;
+  const next = list.map((t) => {
+    if (t.done || !t.due || daysBetween(today, t.due) >= 0) return t;
+    moved++;
+    return { ...t, due: today };
+  });
+  return { list: next, moved };
 }
 
 // ---------- 存储 ----------
@@ -375,7 +582,11 @@ function sanitize(raw: unknown): Todo | null {
   if (typeof t.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.due)) out.due = t.due;
   if (t.priority === 1 || t.priority === 2 || t.priority === 3) out.priority = t.priority;
   if (typeof t.note === 'string' && t.note) out.note = t.note;
-  if (t.repeat === 'daily' || t.repeat === 'weekly') out.repeat = t.repeat;
+  // 用 hasOwnProperty 而不是 `in`/直接取值：`repeat: "toString"` 这类脏数据会撞到原型链上的方法
+  if (typeof t.repeat === 'string' && Object.prototype.hasOwnProperty.call(REPEAT_LABELS, t.repeat)) {
+    out.repeat = t.repeat as TodoRepeat;
+  }
+  if (typeof t.memo === 'string' && t.memo.trim()) out.memo = t.memo.trim();
   if (typeof t.order === 'number') out.order = t.order;
   if (Array.isArray(t.subtasks)) {
     const subs = t.subtasks

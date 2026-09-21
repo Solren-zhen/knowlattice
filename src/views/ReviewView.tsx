@@ -109,12 +109,20 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
     setDone((d) => d + 1);
   };
 
-  // 评分快捷键：显示答案后才生效，且不抢输入框的键
+  // 快捷键：空格显示答案，A 忘了 / S 困难 / D 良好 / F 简单；都不抢输入框的键
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editing || !revealed || !card) return;
+      if (editing || !card) return;
       if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
       if (isEditable(e.target)) return;
+      // 答案还没翻开时空格 = 显示答案（翻开之后空格不响应，免得手一抖把卡评掉）
+      if (!revealed) {
+        if (e.key === ' ') {
+          e.preventDefault();
+          setRevealed(true);
+        }
+        return;
+      }
       const r = RATE_KEYS[e.key.toLowerCase()];
       if (!r) return;
       e.preventDefault();
@@ -323,6 +331,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
                 <button className="btn-primary" onClick={() => setRevealed(true)}>
                   显示答案
                 </button>
+                <p className="muted">也可以直接按 <kbd>空格</kbd></p>
               </>
             )}
           </div>
