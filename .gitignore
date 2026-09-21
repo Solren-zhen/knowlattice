@@ -44,6 +44,10 @@ _yan-agent-backup-*/
 token-cost-calc.univer
 verify2.univer
 
+# Python 字节码（离线包里的 server.py 是 Python 了，本地跑一次就会生成）
+__pycache__/
+*.pyc
+
 # 视觉审计工作区（截图 harness / 基线图 / 演示数据，均本地生成）
 .shots/
 
