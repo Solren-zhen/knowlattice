@@ -134,10 +134,14 @@ node scripts/qbank-to-vault.mjs [--out <目录>]
 
 ## 项目进度
 
-> 最近更新：2026-09-21 · 入口包 `dist/assets/index-*.js` 约 383 KB（gzip 123 KB；图谱/PDF/公式等按需分块加载），离线包约 41.4 MB（430 个文件），`npm test`（559 项）、`npm run build` 与 `npm run lint` 均通过。
+> 最近更新：2026-09-21 · 入口包 `dist/assets/index-*.js` 约 383 KB（gzip 123 KB；图谱/PDF/公式等按需分块加载），离线包约 41.4 MB（435 个文件），`npm test`（567 项）、`npm run build` 与 `npm run lint` 均通过。
 
 ### 最近更新（2026-09-21）
 
+- **离线包支持 macOS / Linux**。此前只有 `Start-KnowLattice.bat`（Windows + PowerShell），Mac 同学拿到包打不开——分享出去等于只发了一半。现在多一套 `start-knowlattice.command` + `server.py`（Python 3 标准库，零依赖），行为与 `server.ps1` 逐条对齐：只监听 127.0.0.1、同一张 MIME 表（`.wasm` 必须是 `application/wasm`，否则浏览器拒绝流式编译）、无扩展名路径回退 `index.html`、「已在运行就打开它」的端口复用策略（笔记按 origin 隔离，换端口 = 空库）、浏览器断连不把服务搞死。
+  - **验收是真跑的**：用免安装 CPython 3.12 起服务，**裸 socket 发原始请求**逐条核对——`.wasm` 返回 `application/wasm`、`../` 与 `%2e%2e%2f` 与 `..%2f..%2f` 三种穿越全 403、无扩展名路由 200 回 index.html、404 是纯文本、HEAD 有 Content-Length 无 body、**连上就断 20 次后服务照常应答**；端口策略两条路都验了（已运行 → 打开旧实例并退出 0；被别的程序占用 → 换端口 + 黄色警告，话术与 PS1 一致）。
+  - **zip 里的可执行位**：macOS 的访达靠 zip 记录里的 Unix 权限位决定 `.command` 能不能双击运行，而 Windows 文件系统没有这个位（bsdtar 写出来是 0644，同学双击只会看到「没有权限」）。pack.mjs 压缩后只改中央目录那两条记录（不动压缩数据、不动 CRC），并用裸字节解析复核 `version-made-by=0x31e` + 模式 `755`。
+  - **漂移守卫**：新增 `src/core/__tests__/packServers.test.ts`（8 项）逐项对账两套实现的 MIME 表、回环监听、SPA 回退、端口策略，以及 pack.mjs 是否把四个启动文件都装进包——只改一边会让某个平台静默失效，这条测试就是防这个。
 - **外部题库批量导入**。绿皮书（976 个 md）与医考帮（1137 个 md）两套 markdown 题库转成晶格能直接吃的 JSON：笔记形式 **976 + 1137 篇**（无损，走「数据管理 → 导入备份」），题库形式 **111,548 道题**（走「题库练习 → 导入题库文件」，127 份、每份 ≤ 0.9 MB）。转换器 `scripts/qbank-to-vault.mjs` 常驻仓库，源更新了重跑一条命令即可。
   - **解析踩的两个坑**（都是数据里长出来的，不是想出来的）：① 选项**不能按行扫**——源里常一行塞 2–3 个选项，还有连写无空格的 `…减少胰岛素用量B.妊娠期对胰岛素敏感性降低…`，改成「扫全部候选字母 → 取从 A 起连续递增的最长链」；② 标记会被加粗（`**【A1】题干：**`，神经病学整个学科都是），行首要容错。改完绿皮书的**漏题从 1330 降到 143**（0.26%）。
   - **验收用晶格自己的导入器**，不用我自己再解析一遍：`normalizeQuestions` 吃下全部 127 份题库、**111,548 题零丢失**；40 MB / 1137 篇的备份走真实 `importBackup` 整包导入，**逐篇内容比对全部一致**（`{ok:1137, failed:0}`）。
@@ -339,8 +343,10 @@ npm run pack -- --data 某份备份.json   # 指定随包资料
 产出仓库根目录 `KnowLattice-离线版-YYYY-MM-DD.zip`（同一天重复打包会覆盖同名产物），结构：
 
 ```
-Start-KnowLattice.bat   双击启动（内部起一个只监听 127.0.0.1 的小服务，无依赖、无需安装）
+Start-KnowLattice.bat   双击启动（Windows；内部起一个只监听 127.0.0.1 的小服务，无依赖、无需安装）
 server.ps1           该服务本体（Windows 自带 PowerShell 5.1 即可）
+start-knowlattice.command   双击启动（macOS / Linux；同一个服务，行为与 .ps1 对齐）
+server.py            该服务本体（macOS / Linux；Python 3 标准库，零依赖）
 app/                 构建产物（全部功能，离线可用）
 data/notes-and-qbanks.json   随包笔记 + 题库 + SRS/错题/待办/打卡/卡片自定义（由备份 .json 合并而来）
 source/              对应源代码（GPL-3.0 第 6 节要求随程序提供）

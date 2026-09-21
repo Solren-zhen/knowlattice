@@ -2,13 +2,27 @@ KnowLattice（晶格）离线版 · 使用说明
 ==================================
 
 一、启动
+  【Windows】
   1. 双击本文件夹里的  Start-KnowLattice.bat
   2. 会弹出一个黑色命令窗口（这是跑在你自己电脑上的小网页服务，正常现象），
      并自动用默认浏览器打开应用。
   3. 用完直接关闭那个黑窗口即可。
 
-  本程序只在 127.0.0.1（本机回环地址）上提供页面，不联网、不上传任何数据。
   首次运行时 Windows 可能弹出安全提示，选择「允许访问 / 仍要运行」即可。
+
+  【macOS / Linux】
+  1. 双击本文件夹里的  start-knowlattice.command
+     （macOS 会把它交给「终端」执行。若提示「无法打开」，右键它 →「打开」；
+      若提示没有执行权限，先在终端里跑一次：chmod +x start-knowlattice.command）
+  2. 会打开一个终端窗口（同样是跑在你自己电脑上的小网页服务），
+     并自动用默认浏览器打开应用。
+  3. 用完直接关闭那个终端窗口即可。
+
+     它需要 Python 3：macOS 上装一次 Xcode 命令行工具就有（终端里执行
+     xcode-select --install）。真没有的话，脚本会直接把这句话打在屏幕上，
+     不会一闪而过。Linux 同理：bash start-knowlattice.command
+
+  本程序只在 127.0.0.1（本机回环地址）上提供页面，不联网、不上传任何数据。
   如果本程序已经在运行，再双击一次不会另起一个，而是直接打开已经开着的那个。
 
 二、导入随包资料（笔记 + 题库）
@@ -40,6 +54,10 @@ KnowLattice（晶格）离线版 · 使用说明
 
 四、常见问题
   · 黑窗口一闪就没了：右键 Start-KnowLattice.bat →「以管理员身份运行」。
+  · 【macOS】双击 start-knowlattice.command 提示「无法打开」：右键它 →「打开」→ 确认；
+    或者先在终端里执行 chmod +x start-knowlattice.command 再双击。
+  · 【macOS】提示找不到 python3 / Python 版本太旧：在终端里执行
+    xcode-select --install，装完再双击一次（脚本里打的就是这句提示）。
   · 浏览器没自动打开：查看黑窗口里显示的地址（形如 http://127.0.0.1:8790/），
     手动复制到浏览器地址栏打开。
   · 端口被占用：程序会自动换一个端口，以黑窗口里显示的地址为准（见上一节：
@@ -47,7 +65,7 @@ KnowLattice（晶格）离线版 · 使用说明
   · 关掉黑窗口后网页打不开是正常的：它是本机的临时服务，再双击启动即可。
   · 页面提示「Failed to fetch」/「Load failed」/「连不上本地服务」：浏览器把请求发出去
     但没送到本机服务上——绝大多数情况是黑窗口已经关掉或崩掉了（也可能是杀毒软件拦了
-    127.0.0.1）。重新双击 Start-KnowLattice.bat，再刷新页面即可。应用现在会直接把这句话
+    127.0.0.1）。重新双击 Start-KnowLattice.bat（macOS 上是 start-knowlattice.command），再刷新页面即可。应用现在会直接把这句话
     翻成中文提示，不会再只甩一句英文原文。
   · 页面显示「知识库加载失败」：浏览器没能读出本地笔记库（隐私模式下存储被禁用、
     磁盘空间不足，或另一个标签页正占着它）。这时应用会停在这个页面、暂时不许编辑，
@@ -64,7 +82,9 @@ KnowLattice（晶格）离线版 · 使用说明
   data/notes-and-qbanks.json  随包笔记与题库备份
   source/                     源代码（GPL-3.0 要求随程序一并提供，详见 source/README.txt）
   server.ps1                  本机小服务器（用 Windows 自带 PowerShell，无需安装任何东西）
-  Start-KnowLattice.bat       启动入口
+  Start-KnowLattice.bat       启动入口（Windows）
+  server.py                   本机小服务器（macOS / Linux 用，行为与 server.ps1 对齐，需 Python 3）
+  start-knowlattice.command   启动入口（macOS / Linux，双击）
   LICENSE                     本软件源代码的 GPL-3.0 许可（仅第 3 版）
   THIRD-PARTY-NOTICES.md      第三方组件与数据许可（不受 GPL 覆盖）
 
