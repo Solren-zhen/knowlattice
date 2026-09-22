@@ -504,7 +504,7 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
       <div className="panel mistake-panel todo-panel" onClick={(e) => e.stopPropagation()}>
         <header className="panel__head">
           <span className="panel__title">
-            <IconTimer /> 番茄工作台
+            <IconTimer /> 工作台
             <span className="muted">
               {' '}· {stats.active} 项未完成
               {stats.overdue ? ` · ${stats.overdue} 项逾期` : ''}

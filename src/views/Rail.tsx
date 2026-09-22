@@ -41,53 +41,59 @@ export default function Rail(p: Props) {
 
   return (
     <nav className="rail" aria-label="主导航">
-      <button className="rail-logo" data-tip="回到主界面" aria-label="回到主界面" onClick={p.onHome}>
-        <IconLogo />
-      </button>
-      <button
-        className={`rail-btn ${p.treeOpen ? 'on' : ''}`}
-        data-tip="目录：折叠 / 展开章节树"
-        aria-label="目录"
-        aria-pressed={p.treeOpen}
-        onClick={p.onToggleTree}
-      >
-        <IconTree />
-      </button>
-      <button className="rail-btn" data-tip="快速搜索（Ctrl+K）" aria-label="搜索" onClick={p.onSearch}>
-        <IconSearch />
-      </button>
-      <button className="rail-btn" data-tip="历史版本：快照与误删找回" aria-label="历史版本" onClick={p.onHistory}>
-        <IconHistory />
-      </button>
-      <button className="rail-btn" data-tip="3D 解剖图谱：结构 ↔ 笔记双向打通" aria-label="解剖图谱" onClick={p.onAnatomy}>
-        <IconBody />
-      </button>
-      <button className="rail-btn" data-tip="脑图谱：MNI152 模板 MRI 对照" aria-label="脑图谱" onClick={p.onBrain}>
-        <IconBrain />
-      </button>
-      <button className="rail-btn" data-tip="知识图谱：全库双链网络图" aria-label="知识图谱" onClick={p.onGraph}>
-        <IconGraph />
-      </button>
-      <div className="rail-sep" />
-      <button className="rail-btn" data-tip="间隔复习（遗忘曲线）" aria-label="间隔复习" onClick={p.onReview}>
-        <IconCards />
-      </button>
-      <button className="rail-btn" data-tip="错题本（薄弱点热力图）" aria-label="错题本" onClick={p.onMistake}>
-        <IconTarget />
-      </button>
-      <button className="rail-btn" data-tip="题库练习：导入 JSON 组卷" aria-label="题库练习" onClick={p.onQuiz}>
-        <IconQuiz />
-      </button>
-      <button className="rail-btn" data-tip="待办清单" aria-label="待办清单" onClick={p.onTodo}>
-        <IconTodo />
-      </button>
-      <button className="rail-btn" data-tip="标签：按 #标签 聚合全库" aria-label="标签" onClick={p.onTag}>
-        <IconTag />
-      </button>
-      <button className="rail-btn" data-tip="学习统计：打卡 / 复习 / 错题" aria-label="学习统计" onClick={p.onDash}>
-        <IconChart />
-      </button>
-      <div className="rail-spacer" />
+      {/* 上组：窗口变矮时只有这一组在内部滚动。
+          下组（AI / 草稿 / PDF / 转换 / 字体 / 主题）钉在底部、不参与滚动——
+          这样字体飞出菜单仍留在不滚动的容器里，.rail 的 overflow:visible 不必动。
+          此前整条轨靠 .rail-spacer 撑开：轨内容固定要 963px，窗口低于这个高度时下组
+          直接溢出到视口外，而 overflow:visible 没有滚动条，那几个入口永远够不着。 */}
+      <div className="rail-scroll">
+        <button className="rail-logo" data-tip="回到主界面" aria-label="回到主界面" onClick={p.onHome}>
+          <IconLogo />
+        </button>
+        <button
+          className={`rail-btn ${p.treeOpen ? 'on' : ''}`}
+          data-tip="目录：折叠 / 展开章节树"
+          aria-label="目录"
+          aria-pressed={p.treeOpen}
+          onClick={p.onToggleTree}
+        >
+          <IconTree />
+        </button>
+        <button className="rail-btn" data-tip="快速搜索（Ctrl+K）" aria-label="搜索" onClick={p.onSearch}>
+          <IconSearch />
+        </button>
+        <button className="rail-btn" data-tip="PDF 对照：左看右记 + 摘录历史" aria-label="PDF 对照" onClick={p.onPdf}>
+          <IconBook />
+        </button>
+        <button className="rail-btn" data-tip="3D 解剖图谱：结构 ↔ 笔记双向打通" aria-label="解剖图谱" onClick={p.onAnatomy}>
+          <IconBody />
+        </button>
+        <button className="rail-btn" data-tip="脑图谱：MNI152 模板 MRI 对照" aria-label="脑图谱" onClick={p.onBrain}>
+          <IconBrain />
+        </button>
+        <button className="rail-btn" data-tip="知识图谱：全库双链网络图" aria-label="知识图谱" onClick={p.onGraph}>
+          <IconGraph />
+        </button>
+        <div className="rail-sep" />
+        <button className="rail-btn" data-tip="间隔复习（遗忘曲线）" aria-label="间隔复习" onClick={p.onReview}>
+          <IconCards />
+        </button>
+        <button className="rail-btn" data-tip="错题本（薄弱点热力图）" aria-label="错题本" onClick={p.onMistake}>
+          <IconTarget />
+        </button>
+        <button className="rail-btn" data-tip="题库练习：导入 JSON 组卷" aria-label="题库练习" onClick={p.onQuiz}>
+          <IconQuiz />
+        </button>
+        <button className="rail-btn" data-tip="待办清单" aria-label="待办清单" onClick={p.onTodo}>
+          <IconTodo />
+        </button>
+        <button className="rail-btn" data-tip="标签：按 #标签 聚合全库" aria-label="标签" onClick={p.onTag}>
+          <IconTag />
+        </button>
+        <button className="rail-btn" data-tip="学习统计：打卡 / 复习 / 错题" aria-label="学习统计" onClick={p.onDash}>
+          <IconChart />
+        </button>
+      </div>
       <div className="rail-sep" />
       <button className="rail-btn" data-tip="AI 助手：内嵌网页问答" aria-label="AI 助手" onClick={p.onAi}>
         <IconAi />
@@ -95,8 +101,8 @@ export default function Rail(p: Props) {
       <button className="rail-btn" data-tip="智能草稿：讲义 / PDF 一键成笔记" aria-label="智能草稿" onClick={p.onDraft}>
         <IconWand />
       </button>
-      <button className="rail-btn" data-tip="PDF 对照：左看右记 + 摘录历史" aria-label="PDF 对照" onClick={p.onPdf}>
-        <IconBook />
+      <button className="rail-btn" data-tip="历史版本：快照与误删找回" aria-label="历史版本" onClick={p.onHistory}>
+        <IconHistory />
       </button>
       <button className="rail-btn" data-tip="格式转换：PDF / Word → Markdown" aria-label="格式转换" onClick={p.onConvert}>
         <IconConvert />
