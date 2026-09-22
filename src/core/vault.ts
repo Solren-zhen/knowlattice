@@ -524,10 +524,29 @@ export function useVault() {
     [docs, save]
   );
 
-  const tree = useMemo(() => buildTree([...docs.keys()]), [docs]);
+  /**
+   * 路径数组：**只在增删文件时换引用**，改正文不换。
+   *
+   * 为什么需要：`docs` 是 `new Map(prev).set(...)`，**每次自动保存（停手 800ms 后）都换
+   * 引用**，于是所有 `useMemo(..., [docs])` 的全库计算每次都重跑——目录树、名称索引、
+   * 链接名的 ICU 中文排序加起来在 5227 篇规模下约 60ms，打字停一下就顿一下，而且库越大
+   * 越明显。但这些结果里只有「哪些路径存在」这一层是保存改不动的。
+   *
+   * 做法：先把路径拼成一个字符串签名，再拆回数组。字符串在依赖数组里按**值**比较，
+   * 所以 `paths` 只在真正增删文件时才换引用。拼接 5227 条路径约 0.5ms，远低于重建目录树。
+   * （路径不含 \u0000，可安全当分隔符。）
+   */
+  const pathSig = useMemo(() => [...docs.keys()].join('\u0000'), [docs]);
+  const paths = useMemo(() => (pathSig ? pathSig.split('\u0000') : []), [pathSig]);
+
+  const tree = useMemo(() => buildTree(paths), [paths]);
+
+  /** 仅 .md 的路径（顺序与 docs 一致，供章节树/复习面板等使用）。同样只在增删时换引用。 */
+  const notePaths = useMemo(() => paths.filter((p) => p.endsWith('.md')), [paths]);
 
   /** 名称 → 路径 索引（文件名 / 一级标题 / alias，小写）。构建一次，之后 O(1) 解析；
-   *  解析结果走 metaCache，内容未变的篇目零成本。仅 .md 参与。 */
+   *  解析结果走 metaCache，内容未变的篇目零成本。仅 .md 参与。
+   *  这一步的开销几乎全在遍历本身（5227 篇约 23ms），签名省不掉，保持原样。 */
   const nameIndex = useMemo(() => {
     const map = new Map<string, string>();
     for (const [path, content] of docs) {
@@ -603,8 +622,13 @@ export function useVault() {
     return count;
   }, [docs, attachments]);
 
-  /** 所有可用链接名（文件名 + 标题 + alias 去重），供 [[ 自动补全。仅 .md 参与。 */
-  const allLinkNames = useMemo(() => {
+  /** 所有可用链接名（文件名 + 标题 + alias 去重），供 [[ 自动补全。仅 .md 参与。
+   *
+   *  排序用 localeCompare(…, 'zh') 是为了**拼音序**（换成码点序，中文列表看着就是乱的），
+   *  但 ICU 排序 1 万条实测约 24ms。这里先算出「名字集合的字符串签名」再排序：字符串在
+   *  依赖数组里按值比较，于是改正文的自动保存（名字没变）不会重排，而增删/改名时签名变化，
+   *  照常重排。签名里用 \u0000 分隔（文件名、标题、alias 都不会含它）。 */
+  const linkNameSig = useMemo(() => {
     const names = new Set<string>();
     for (const [path, content] of docs) {
       if (!path.endsWith('.md')) continue;
@@ -613,8 +637,12 @@ export function useVault() {
       if (title) names.add(title);
       meta.aliases.forEach((a) => names.add(a));
     }
-    return [...names].sort((a, b) => a.localeCompare(b, 'zh'));
+    return [...names].join('\u0000');
   }, [docs]);
+  const allLinkNames = useMemo(
+    () => (linkNameSig ? linkNameSig.split('\u0000').sort((a, b) => a.localeCompare(b, 'zh')) : []),
+    [linkNameSig]
+  );
 
   const currentContent = currentPath ? docs.get(currentPath) ?? '' : null;
 
@@ -634,6 +662,7 @@ export function useVault() {
     retryLoad,
     docs,
     tree,
+    notePaths,
     linkIndex,
     currentPath,
     setCurrentPath,
