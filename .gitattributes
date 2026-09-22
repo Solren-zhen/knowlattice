@@ -12,3 +12,8 @@
 *.command text eol=lf
 *.sh      text eol=lf
 *.py      text eol=lf
+
+# vendor 里的 tarball 是二进制。git 一般能自动识别，但显式钉死更稳——
+# 一旦被当成文本做换行转换，SHA-512 就与 lock 的 integrity 对不上，
+# npm ci 会直接报 integrity 校验失败。
+vendor/*.tgz binary
