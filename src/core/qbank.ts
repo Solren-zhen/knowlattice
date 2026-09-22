@@ -18,6 +18,8 @@
  * optionNotes 由应用在作答后写入，随题库一起存进备份，不必手写。
  */
 
+import { dropBankStats } from './qbankStats';
+
 export interface QuizQuestion {
   id: string;
   /** choice = 选择题；recall = 简答（显示答案后自判） */
@@ -123,6 +125,10 @@ export function setOptionNote(
 export function removeBank(name: string): QuizBank[] {
   const banks = loadBanks().filter((b) => b.name !== name);
   persist(banks);
+  // 逐题作答历史是独立的一份存储（knowlattice-qstats），不随题库走。
+  // 不在这里清掉，它就成了孤儿：那份存储没有淘汰机制，攒到 localStorage
+  // 约 5 MB 上限后写入静默失败，表现是「刷题记录不再增长」。
+  dropBankStats(name);
   return banks;
 }
 

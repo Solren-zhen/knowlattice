@@ -1055,7 +1055,16 @@ a.wikilink.missing::after {
 .editor-host .cm-selectionMatch {
   background: var(--accent-soft);
   border-radius: 3px;
-  outline: 1px solid var(--border-accent);
+  /* 描边必须用实色 --accent，不能用 --border-accent。
+     原先用 --border-accent（32% / 45% 透明）压在底色上只有 1.65:1（浅）/ 2.18:1（深），
+     而 --accent-soft 本身与页面底色只差 1.12:1 / 1.19:1 —— 都远低于「非文字状态指示」
+     要求的 3:1（WCAG 1.4.11）。两者叠加的结果是：除当前命中
+     （.cm-selectionMatch-main，实底 5.97:1）之外，其余命中实际上看不见，
+     也就是「打开笔记后高亮全部命中」里的「全部」并不成立。
+     靠背景色补不回来：浅色主题要达到 3:1 需要约 70% 不透明度，那已经等于实底了。
+     所以让描边承担这个信号（实色 --accent 对底色 5.97:1 / 6.67:1），
+     层次仍然清楚——当前命中是实底，其余命中是描边。 */
+  outline: 1.5px solid var(--accent);
 }
 .editor-host .cm-selectionMatch-main {
   background: var(--accent);

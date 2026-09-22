@@ -37,6 +37,25 @@ its own terms.
                  with GPLv3.
 - Notice       : public/brain/NOTICE
 
+### OCR engine and language data (tesseract.js)
+- Files  : public/tesseract/*.wasm, public/tesseract/*.js   (tesseract.js-core)
+           public/tessdata/chi_sim.traineddata.gz, eng.traineddata.gz
+- License: Apache-2.0 — tesseract.js, tesseract.js-core, and the tessdata_fast
+           traineddata models.
+- Note   : public/tesseract/ ships THREE core builds (~2.7 MB each raw, ~1.0 MB
+           each gzipped). tesseract.js picks exactly one at runtime by browser
+           capability (getCore.js: if/else, no fallback) — relaxed-SIMD for
+           2024+, SIMD for 2021-2024, plain for older browsers. Dropping any of
+           them breaks OCR outright for that class of browser, so all three are
+           kept deliberately.
+
+### Draco mesh decoder
+- Files  : public/draco/draco_decoder.js, draco_decoder.wasm, draco_wasm_wrapper.js
+- Source : Google Draco — https://github.com/google/draco
+- License: Apache-2.0
+- Notice : public/draco/README.md ships alongside the decoder and carries the
+           Apache-2.0 pointer.
+
 ## Libraries
 
 | Library | License | Use |
@@ -61,6 +80,9 @@ its own terms.
 | markdown-it | MIT | Markdown preview |
 | codemirror / @codemirror/* | MIT | editor |
 | react, react-dom | MIT | UI runtime |
+| tesseract.js + tesseract.js-core | Apache-2.0 | OCR for scanned PDFs |
+| katex | MIT | math rendering |
+| @vscode/markdown-it-katex | MIT | KaTeX plugin for markdown-it |
 
 Tauri (Apache-2.0 / MIT) is used for the optional desktop shell.
 
