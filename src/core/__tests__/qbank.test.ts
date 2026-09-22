@@ -12,6 +12,7 @@ import {
   setOptionNote,
   type QuizBank,
 } from '../qbank';
+import { loadStats, recordAnswer, statOf } from '../qbankStats';
 
 beforeEach(() => localStorage.clear());
 
@@ -132,6 +133,20 @@ describe('addBank/removeBank/import/export', () => {
     addBank('b', bank.questions);
     removeBank('a');
     expect(loadBanks().map((b) => b.name)).toEqual(['b']);
+  });
+
+  it('removeBank 连带清掉该题库的逐题历史（不清就是永久孤儿）', () => {
+    addBank('a', bank.questions);
+    addBank('b', bank.questions);
+    recordAnswer('a', 'q-1', true);
+    recordAnswer('b', 'q-1', true);
+    expect(statOf(loadStats(), 'a', 'q-1')).toBeDefined();
+
+    removeBank('a');
+
+    expect(statOf(loadStats(), 'a', 'q-1')).toBeUndefined();
+    // 别的题库不受影响——清错范围会让用户莫名丢进度
+    expect(statOf(loadStats(), 'b', 'q-1')).toBeDefined();
   });
 
   it('导入备份：合并、忽略非法条目', () => {

@@ -153,6 +153,11 @@ node scripts/qbank-to-vault.mjs [--out <目录>]
   - 体积测试当场抓出**两个真 bug**：① `save()` 对 `QStat` 对象调 `JSON.stringify`，`toTuple` 从未被用到（所以是 181 字符/题）；② 写失败时 `cacheRaw` 被设成**未持久化**的 JSON，下次 `loadStats()` 重新解析磁盘旧数据，**把刚答的那题静默丢掉**——改用 `dirty` 标志修掉。配额测试随后又抓出第二处，两处都是「测试写了才发现」而不是「猜出来的」。
 - **影像 / 阅片功能：评估后否决**。技术路径是通的（`niivue` 现成、内容来源也真找到了——PMC-VQA **22.7 万道现成四选一**影像题、VQA-RAD CC0、SLAKE 中英双语），否决理由是**工程量大而收益小**：现成内容是英文论文语气的 VQA（约两三成对中文应试真有用），图多为多子图拼版的论文插图，而真正的阅片（调窗宽窗位）还需 DICOM/NIfTI，用户手上没有影像数据。完整调研留档在 `四功能可行性分析.md` §三。
 - **订正 `public/brain` 的第三方声明**：原先 NOTICE 写「research and educational use；商业再分发前需查 FSL 条款」，查上游许可证原文后发现**写得比实际更严**——FSL 许可证正文明写 Harvard-Oxford 图谱「are released under the CC BY-SA 4.0 licence」（非商业条款只覆盖 FSL 主体与 JHU/Juelich/Striatum/Thalamus），MNI152 模板是 MIT 式宽松许可（McGill 原文「use, copy, modify, and distribute … for any purpose and without fee」）。两者都与 GPLv3 兼容。已改为准确表述，并补上 share-alike 延伸到 `regions.json`（从标签体数据算出的质心，属演绎作品）。**仓库现在没有许可疑点。**
+- **修 `removeBank` 不清逐题历史**：`dropBankStats()` 全项目**从未被调用过**（只在定义和测试里出现），所以删题库后它的逐题历史成了永久孤儿。而那份存储**没有淘汰机制**，两者叠加的后果是：反复导入/删除题库刷题，孤儿累积到 localStorage 约 5 MB 上限后写入开始失败，提示一次之后**静默不再记录**——表现是「刷题记录不再增长」。改在 `removeBank` 里清（责任放存储层，任何调用点都成立），并断言**清错范围**不影响别的题库（那会让用户莫名丢进度）。
+- **修编辑器里「其余命中」实际看不见**。`Ctrl+K` 打开笔记后高亮全部命中——但 `.cm-selectionMatch` 的背景是 `--accent-soft`（8% / 15% 透明），与页面底色只差 **1.12:1（浅）/ 1.19:1（深）**；描边用的 `--border-accent`（32% / 45% 透明）也只有 **1.65:1 / 2.18:1**。两者都远低于「非文字状态指示」要求的 3:1（WCAG 1.4.11），所以除当前命中（`.cm-selectionMatch-main`，实底 5.97:1 / 6.67:1）之外，其余命中等于没高亮。**靠背景色补不回来**：浅色主题要达到 3:1 需要约 70% 不透明度，那已经等于实底了。故让描边改用实色 `--accent`，得 **5.97:1 / 6.67:1**；层次仍然清楚——当前命中是实底，其余命中是描边。
+  - 这条是**算出来的，不是看出来的**：本机没有浏览器自动化（`bsk` CLI 未安装），所以写了对比度核算脚本，把两套主题的实际渲染色（含 alpha 压底）算出来。原先这一项一直挂在「配色取自现有设计令牌，但没肉眼确认过对比度」的未验证清单里——现在它有了确定答案，且答案是不合格。
+- **`THIRD-PARTY-NOTICES.md` 补齐 4 个漏掉的依赖**：`tesseract.js` + `tesseract.js-core`（Apache-2.0，随包 12.34 MB 的 WASM 与语言包）、`Draco`（Apache-2.0，0.73 MB）、`katex`、`@vscode/markdown-it-katex`（均 MIT）。此前 `public/` 共 51.24 MB，其中 **13.07 MB（26%）没有任何许可声明**。许可值取自 `node_modules` 里的 `package.json` 与 LICENSE，不是查文档。
+- **xlsx 不再依赖 SheetJS CDN**：tarball 收进 `vendor/`，`package-lock.json` 里已无任何 `cdn.sheetjs.com` 引用，`npm ci` 离线可复现。详见「已知限制」。
 
 ### 最近更新（2026-09-21）
 
@@ -431,7 +436,7 @@ npm run tauri build
 ## 已知限制
 
 - 扫描版 PDF 无文字层时无法提取，请先 OCR。
-- xlsx 依赖走 SheetJS CDN，网络受限时可能装不上。
+- ~~xlsx 依赖走 SheetJS CDN，网络受限时可能装不上~~ **已解决（2026-09-22）**：SheetJS 已从 npm 下架，npm 上停在 **0.18.5**（2022，带 CVE-2023-30533 原型污染），所以 0.20.3 的 tarball 收进了仓库 `vendor/xlsx-0.20.3.tgz`（2.30 MB，SHA-512 与 lock 的 `integrity` 逐字节一致），`package.json` 改指 `file:vendor/...`。`package-lock.json` 里**已无任何 `cdn.sheetjs.com` 引用**，`npm ci` 实测 `added 339 packages in 13s` 通过——干净安装现在完全可复现，不依赖外部 CDN 的存活。
 - 不要跨平台拷贝 node_modules，换系统请删掉重装。
 
 ## 已知缺口
