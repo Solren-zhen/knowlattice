@@ -3228,11 +3228,20 @@ a.wikilink.missing::after {
 .rail-logo:hover svg { filter: drop-shadow(0 6px 20px rgba(79, 70, 229, 0.65)); }
 .rail-logo:active { transform: scale(0.95); }
 .rail-sep { width: 26px; height: 1px; background: var(--border); margin: 7px 0; flex-shrink: 0; }
-/* 弹性空隙做成一根柔和的竖向脊线：让上下两组图标是「被连起来的分组」 */
-.rail-spacer {
-  flex: 1; width: 1px; margin: 6px 0;
-  background: linear-gradient(180deg, transparent, var(--border) 10%, var(--border) 90%, transparent);
+/* 上组滚动容器：窗口变矮时只有这一组滚，下组（AI/草稿/PDF/转换/字体/主题）钉在底部。
+   为什么不整条轨滚动：.rail 必须保持 overflow:visible，字体飞出菜单才能探出 66px 之外；
+   一旦整条轨变成滚动容器，overflow-x 会被一并算成 auto，飞出菜单会被裁掉。 */
+.rail-scroll {
+  flex: 1; min-height: 0; width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  overflow-y: auto; overflow-x: hidden;
+  /* 滚动条压细，别把 66px 的轨再挤窄 */
+  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 }
+.rail-scroll::-webkit-scrollbar { width: 5px; }
+.rail-scroll::-webkit-scrollbar-track { background: transparent; }
+.rail-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+.rail-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* 超椭圆图标钮：42×42，圆角 12 —— 黄金中控台微按键 */
 .rail-btn {
@@ -3284,6 +3293,20 @@ a.wikilink.missing::after {
 }
 .rail-flyout div:hover { background: var(--accent-soft); color: var(--accent); }
 .rail-flyout div.active { color: var(--accent); font-weight: 600; }
+
+/* 窗口不够高时收紧一档：不收紧时整条轨要 963px，常见的 900px 视口就得滚；
+   收紧后约 840px，900 / 860 都不用滚。再矮的窗口由 .rail-scroll 滚动兜底。
+   图标仍保持 38px 可点区，只是比 42px 略紧凑。
+   位置必须放在 .rail-btn / .rail-logo 等基础规则**之后**：媒体查询不加权重，
+   同权重下靠后的规则获胜，放前面会被 42px 那几条直接盖掉。 */
+@media (max-height: 980px) {
+  .rail { padding: 10px 0 8px; }
+  .rail-scroll { gap: 3px; }
+  .rail-logo { margin-bottom: 6px; }
+  .rail-btn { width: 38px; height: 38px; border-radius: 11px; }
+  .rail-btn svg { width: 18px; height: 18px; }
+  .rail-sep { margin: 5px 0; }
+}
 
 /* ---------- 悬浮工作台 ---------- */
 .deck {
