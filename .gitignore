@@ -58,5 +58,8 @@ knowlattice-题库/
 knowlattice-题库-*.json
 knowlattice-题库-*.md
 
+# 本地分析文档（决策留档，不入库）
+四功能可行性分析.md
+
 # 运行日志（dev server 持续写入，入库会让 git status 永远脏）
 *.log

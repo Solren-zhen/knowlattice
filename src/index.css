@@ -1039,6 +1039,28 @@ a.wikilink.missing::after {
   font-size: var(--fs-caption); color: var(--muted); margin-top: 4px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* 一键搜索的命中高亮：结果列表里的命中词（与编辑器内 ==高亮== 同一套色） */
+.qs-mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 3px; padding: 0 2px;
+  font-weight: 600;
+}
+/* 打开笔记后编辑器内的命中高亮。
+   实际渲染的是 .cm-selectionMatch：CodeMirror 的命中高亮走的是
+   highlightSelectionMatches（以**当前选区**为查询），findNext 选中第一处之后，
+   其余同款命中都带上这个 class。.cm-searchMatch 在 @codemirror/search 里
+   只出现在一条 CSS 规则中、没有任何装饰使用它，写在这里也不会生效。
+   默认主题给的是 #99ff7780（半透明绿），在深色主题里又脏又看不清。 */
+.editor-host .cm-selectionMatch {
+  background: var(--accent-soft);
+  border-radius: 3px;
+  outline: 1px solid var(--border-accent);
+}
+.editor-host .cm-selectionMatch-main {
+  background: var(--accent);
+  color: var(--bg);
+}
 
 /* ============================================================ M6 复习模式 (Linear Bento 卡片) */
 .review-overlay {
@@ -2616,6 +2638,65 @@ a.wikilink.missing::after {
 .bank-name { font-size: var(--fs-body); font-weight: 600; }
 .bank-item .btn-icon { color: var(--muted); }
 .bank-item .btn-icon:hover { color: var(--danger); }
+/* 待复习数量：这是「今天该做什么」的唯一入口，不能和普通灰字混在一起 */
+.bank-due { color: var(--accent); font-weight: 600; }
+
+/* ---------- 自动组题 ---------- */
+.compose-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 7px 0;
+}
+.compose-label {
+  flex: 0 0 52px;
+  display: flex; align-items: center; gap: 5px;
+  padding-top: 4px;
+  font-size: var(--fs-control); font-weight: 600; color: var(--muted);
+}
+.compose-picked {
+  min-width: 17px; padding: 0 5px;
+  border-radius: 999px; text-align: center;
+  font-size: var(--fs-micro); line-height: 17px;
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid var(--border-accent);
+}
+.compose-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.compose-chips--end { justify-content: flex-end; padding-top: 2px; }
+.chip {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  font-size: var(--fs-control); line-height: var(--lh-control);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.chip:hover { border-color: var(--border-accent); color: var(--text); }
+.chip.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+  font-weight: 600;
+}
+.compose-chapters {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+  max-height: 190px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 4px;
+}
+.compose-chapter {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px; border-radius: var(--r-md);
+  font-size: var(--fs-control); color: var(--text-2);
+  cursor: pointer;
+}
+.compose-chapter:hover { background: var(--panel); }
+.compose-chapter.on { color: var(--text); }
+.compose-chapter-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compose-chapter .muted { font-size: var(--fs-micro); }
+.compose-summary { margin: var(--sp-3) 0 0; }
+.compose-summary b { color: var(--accent); }
 .quiz-help {
   padding: var(--sp-3) var(--sp-5) var(--sp-4);
   border-bottom: 1px solid var(--border);

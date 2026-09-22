@@ -12,7 +12,7 @@ import {
   startCompletion,
   type CompletionContext,
 } from '@codemirror/autocomplete';
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { searchKeymap, highlightSelectionMatches, search, findNext, SearchQuery, setSearchQuery } from '@codemirror/search';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { livePreview, toggleLivePreview } from '../core/livePreview';
@@ -109,9 +109,15 @@ interface Props {
   onDraft?: (text: string) => void;
   /** vault 相对路径 → 文件内容，用于实时预览内联渲染图片 */
   readFile?: (path: string) => string | undefined;
+  /**
+   * 从搜索打开笔记时带过来的命中词：跳转并高亮（一键搜索的内容高亮）。
+   * 用 nonce 而不是裸字符串：`value` 每次输入都会变，若 effect 依赖 value，
+   * 用户每敲一个字都会被拽回第一处命中。nonce 只在「新的一次搜索打开」时递增。
+   */
+  highlight?: { query: string; nonce: number } | null;
 }
 
-export default function Editor({ value, onChange, linkNames = [], onOpenLink, onAttach, onDraft, readFile }: Props) {
+export default function Editor({ value, onChange, linkNames = [], onOpenLink, onAttach, onDraft, readFile, highlight }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -225,6 +231,11 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
             ...searchKeymap,
           ]),
           closeBrackets(),
+          // search() 提供 searchState 字段与搜索面板。**必须显式装**：
+          // 只装 searchKeymap（键位）时 Ctrl+F 靠 openSearchPanel 兜底也能开面板，
+          // 但 setSearchQuery 派发的 effect 没有字段接收 → 静默无效，
+          // findNext 也会退化成「打开面板」而不是「跳到第一处命中」。
+          search(),
           highlightSelectionMatches(),
           highlightActiveLine(),
           highlightActiveLineGutter(),
@@ -354,6 +365,26 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
       applyingRef.current = false;
     }
   }, [value]);
+
+  // 从搜索打开笔记：跳到第一处命中，并让全部命中都带上高亮。
+  // 机制要说清，否则很容易误以为高亮是 setSearchQuery 画的：
+  //   · setSearchQuery 只把查询写进 searchState —— 好处是用户接着按 Ctrl+F / F3
+  //     能直接接管这次搜索，不必重敲；
+  //   · 真正画出高亮的是 highlightSelectionMatches（编辑器本来就装了）：它以
+  //     **当前选区**为查询，findNext 把第一处选中之后，其余同款命中就都被标成
+  //     .cm-selectionMatch。所以两者缺一不可——少了 search() 扩展时
+  //     setSearchQuery 静默无效，findNext 还会退化成「打开搜索面板」。
+  // 必须声明在 value 同步之后：同一个 commit 里两个 effect 按声明顺序跑，
+  // 先换成新笔记的内容，再定位——否则会定位到上一篇的文档坐标上。
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const q = highlight?.query.trim() ?? '';
+    view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: q, caseSensitive: false })) });
+    if (!q) return; // 空查询只清掉「已写进搜索框」的查询，不抢焦点、不动选区
+    findNext(view); // 选中第一处并滚动到可见
+    view.focus();
+  }, [highlight]);
 
   const [liveOn, setLiveOn] = useState(true);
   const draftRef = useRef(onDraft);
