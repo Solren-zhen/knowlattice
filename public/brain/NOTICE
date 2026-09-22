@@ -1,16 +1,41 @@
 KnowLattice - brain atlas module - third-party notices
 
+Both bundled datasets are permissively licensed and MAY be redistributed,
+including commercially. They are not covered by this project's GPL-3.0 license;
+each keeps its own terms. See also ../THIRD-PARTY-NOTICES.md.
+
 1. Harvard-Oxford Structural Atlas (cortical lateralized + subcortical)
    Source : FSL / FMRIB, University of Oxford
    Files  : public/brain/ho_cortical_dseg.nii.gz, ho_subcortical_dseg.nii.gz
-   Terms  : distributed with FSL for research and educational use.
-            Check the FSL atlas terms before any commercial redistribution.
-   URL    : https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/Atlases
+            public/brain/regions.json  (centroids derived from the label volumes)
+   License: CC BY-SA 4.0
+            The FSL licence states, verbatim: "The Cerebellum and Harvard-Oxford
+            atlases, whilst not being the property of Oxford, are released under
+            the CC BY-SA 4.0 licence."
+            https://fsl.fmrib.ox.ac.uk/fsl/docs/license.html
+            Note: the FSL non-commercial terms cover the FSL software and the
+            JHU / Juelich / Striatum / Thalamus atlases. Harvard-Oxford is
+            explicitly excluded from them.
+   Terms  : Attribution + share-alike. Redistributing these files, or
+            derivatives of them such as regions.json, requires keeping them
+            under CC BY-SA 4.0 and preserving this attribution.
+            CC BY-SA 4.0 is one-way compatible with GPLv3 (Creative Commons
+            permits relicensing BY-SA 4.0 material as GPLv3), so bundling them
+            in this GPL-3.0 project is permitted.
 
 2. MNI152 template (tpl-MNI152NLin2009cAsym, res-02, T1w)
-   Source : TemplateFlow - https://templateflow.org
+   Source : McConnell Brain Imaging Centre, Montreal Neurological Institute,
+            McGill University (obtained via TemplateFlow - https://templateflow.org)
    Files  : public/brain/mni152_t1_2mm.nii.gz
-   Terms  : MNI template terms, research use.
+   License: permissive, MIT-style. Verbatim: "Permission to use, copy, modify,
+            and distribute this software and its documentation for any purpose
+            and without fee is hereby granted, provided that the above copyright
+            notice appear in all copies."
+            Copyright (C) 1993-2004 Louis Collins, McConnell Brain Imaging
+            Centre, Montreal Neurological Institute, McGill University.
+            https://www.bic.mni.mcgill.ca/ServicesAtlases/ICBM152NLin2009
+   Cite   : VS Fonov et al., "Unbiased average age-appropriate atlases for
+            pediatric studies", NeuroImage 54(1), 2011.
 
 3. Viewer library
    niivue - https://github.com/niivue/niivue - BSD-2-Clause

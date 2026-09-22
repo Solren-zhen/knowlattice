@@ -11,6 +11,8 @@
  * - 只索引 .md 笔记；附件（_attachments dataURL）不进入索引。
  */
 import MiniSearch, { type SearchResult } from 'minisearch';
+import { expandQuery } from './medSynonyms';
+import { parseFrontmatterCached } from './parser';
 
 /** 中英混合分词：连续 ASCII 词元保留，CJK 部分做二元切分 */
 export function bigramTokenize(text: string): string[] {
@@ -36,9 +38,31 @@ export interface SearchDoc {
   content: string;
 }
 
+/** 真正进索引的文档：比 SearchDoc 多一个 aliases 字段（视图用不到，不进公开形状） */
+interface IndexedDoc extends SearchDoc {
+  aliases: string;
+}
+
+const titleOf = (id: string): string => id.replace(/\.md$/, '').split('/').pop()!;
+
+/**
+ * 笔记自己写的 `aliases` 也进索引——这才是**随用户数据长出来**的语义层：
+ * 笔记标题是「心肌梗死」，用户写了 `aliases: [心梗]`，搜「心梗」就该找到它。
+ * 内置词表（medSynonyms.ts）只补词表里有的常见缩写，覆盖不到用户自己的叫法。
+ */
+const aliasText = (id: string, content: string): string =>
+  parseFrontmatterCached(id, content).meta.aliases.join(' ');
+
+const toIndexed = (id: string, content: string): IndexedDoc => ({
+  id,
+  title: titleOf(id),
+  content,
+  aliases: aliasText(id, content),
+});
+
 const toDoc = (id: string, content: string): SearchDoc => ({
   id,
-  title: id.replace(/\.md$/, '').split('/').pop()!,
+  title: titleOf(id),
   content,
 });
 
@@ -59,7 +83,7 @@ export class VaultSearch {
       this.docs.set(path, content);
       if (this.mini) {
         if (this.mini.has(path)) this.mini.discard(path);
-        this.mini.add(toDoc(path, content));
+        this.mini.add(toIndexed(path, content));
       }
       dirty = true;
     }
@@ -83,12 +107,18 @@ export class VaultSearch {
     if (this.mini) return Promise.resolve();
     if (this.warming) return this.warming;
     const m = new MiniSearch({
-      fields: ['title', 'content'],
+      fields: ['title', 'content', 'aliases'],
       tokenize: bigramTokenize,
-      searchOptions: { prefix: true },
+      searchOptions: {
+        prefix: true,
+        // 错字容忍：CJK 二元词只有 2 字，0.2×2 向下取整为 0，所以**只对 ASCII 生效**
+        // （fibrilation → fibrillation）。中文的近似靠 bigram 子串 + 词表 + aliases。
+        fuzzy: 0.2,
+        boost: { title: 3, aliases: 2 },
+      },
     });
     this.warming = m
-      .addAllAsync([...this.docs.entries()].map(([id, c]) => toDoc(id, c)), { chunkSize: 200 })
+      .addAllAsync([...this.docs.entries()].map(([id, c]) => toIndexed(id, c)), { chunkSize: 200 })
       .then(() => {
         this.mini = m;
         this.warming = null;
@@ -135,12 +165,17 @@ export class VaultSearch {
     return c === undefined ? undefined : toDoc(id, c);
   }
 
-  /** 全文搜索：索引未就绪时返回空数组（调用方负责显示构建中状态），绝不同步构建阻塞 UI */
+  /** 全文搜索：索引未就绪时返回空数组（调用方负责显示构建中状态），绝不同步构建阻塞 UI。
+   *
+   *  查询先做语义近似展开（词表 + 原查询），再交给 MiniSearch。**不再手工预分词**：
+   *  旧写法 `bigramTokenize(query).join(' ')` 交给 MiniSearch 后会被**再切一次**，
+   *  于是"氧解离曲线"多出「解解 / 离离 / 曲曲」这类跨词垃圾二元组（匹配不到东西，
+   *  纯属白算）。直接传原串，MiniSearch 用同一个 tokenize 切一次就是对的。 */
   search(query: string): SearchResult[] {
     if (!this.mini) return [];
-    const q = bigramTokenize(query).join(' ');
-    if (!q) return [];
-    return this.mini.search(q, { prefix: true });
+    const terms = expandQuery(query);
+    if (!terms.length) return [];
+    return this.mini.search(terms.join(' '));
   }
 }
 

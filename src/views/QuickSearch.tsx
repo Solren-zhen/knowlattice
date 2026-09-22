@@ -6,25 +6,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEsc } from './useEsc';
 import { vaultSearch, type SearchDoc } from '../core/searchIndex';
+import { buildSnippet, segment, titleHits, type Hit } from '../core/searchHit';
 
 interface Props {
   open: boolean;
   docs: Map<string, string>;
   recents: string[];
   onClose: () => void;
-  onOpenPath: (path: string) => void;
+  /** 打开笔记；第二个参数是命中词，交给编辑器跳转 + 高亮 */
+  onOpenPath: (path: string, highlight?: string) => void;
 }
 
-/** 从正文提取命中片段（含查询词的上下文） */
-function snippet(content: string, query: string, len = 60): string {
-  const body = content.replace(/^---[\s\S]*?---\n?/, '');
-  const q = query.trim();
-  if (!q) return body.slice(0, len);
-  // 用 bigram 的首字符做简单定位
-  const idx = body.toLowerCase().indexOf(q[0].toLowerCase());
-  if (idx < 0) return body.slice(0, len);
-  const start = Math.max(0, idx - 15);
-  return (start > 0 ? '…' : '') + body.slice(start, start + len).replace(/\n/g, ' ');
+/** 把命中区间渲染成 <mark>；片段里可能有多处命中，逐段切 */
+function Marked({ text, hits }: { text: string; hits: Hit[] }) {
+  return (
+    <>
+      {segment(text, hits).map((s, i) => (s.hit ? <mark key={i} className="qs-mark">{s.text}</mark> : s.text))}
+    </>
+  );
 }
 
 export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }: Props) {
@@ -79,6 +78,21 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
       .filter((r) => r.doc);
   }, [query, recents, searchReady]);
 
+  /** 渲染用行：结果 + 标题命中 + 正文片段。依赖里**不含 sel**——
+   *  上下键和鼠标悬停都会改 sel，若把它算进来，每移动一格都要把 20 条结果
+   *  重新定位、重新切片段。 */
+  const rows = useMemo(
+    () =>
+      results.slice(0, 20).map((r) => ({
+        id: r.doc.id,
+        title: r.doc.title,
+        recent: !query && recents.includes(r.doc.id),
+        titleHits: query.trim() ? titleHits(r.doc.title, query) : [],
+        snip: buildSnippet(r.doc.content, query),
+      })),
+    [results, query, recents]
+  );
+
   useEffect(() => {
     if (!open) return;
     const t = setTimeout(() => inputRef.current?.focus(), 30);
@@ -102,7 +116,8 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
   const pick = (i: number) => {
     const r = results[i];
     if (r) {
-      onOpenPath(r.doc.id);
+      // 把命中词一起带过去：编辑器会跳到第一处并高亮全部命中
+      onOpenPath(r.doc.id, query.trim() || undefined);
       onClose();
     }
   };
@@ -134,18 +149,18 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
         <div className="qs-results" ref={resultsRef}>
           {!searchReady && query.trim() && <div className="qs-empty">正在构建全文索引…（仅首次需要几秒）</div>}
             {searchReady && results.length === 0 && <div className="qs-empty">没有匹配「{query}」的笔记</div>}
-          {results.slice(0, 20).map((r, i) => (
+          {rows.map((row, i) => (
             <div
-              key={r.doc.id}
+              key={row.id}
               className={`qs-item ${i === sel ? 'active' : ''}`}
               onMouseEnter={() => setSel(i)}
               onClick={() => pick(i)}
             >
               <div className="qs-title">
-                {r.doc.title}
-                {!query && recents.includes(r.doc.id) && <span className="qs-recent">最近</span>}
+                <Marked text={row.title} hits={row.titleHits} />
+                {row.recent && <span className="qs-recent">最近</span>}
               </div>
-              <div className="qs-snippet">{snippet(r.doc.content, query)}</div>
+              <div className="qs-snippet"><Marked text={row.snip.text} hits={row.snip.hits} /></div>
             </div>
           ))}
         </div>

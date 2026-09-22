@@ -201,6 +201,15 @@ function walk(dir) {
 const cleanSubject = (s) => s.replace(/题库$/, '').replace(/^\d+[_-]/, '').trim();
 const cleanChapter = (s) => s.replace(/^\d+[_-]/, '').replace(/\.md$/i, '').trim();
 
+/**
+ * 题库题目 → 它对应的笔记路径。**笔记与题库题目共用这一个公式**。
+ *
+ * 单独抽出来是为了能被测试直接 import：晶格的 `resolveQuestionNote` 认这条路径，
+ * 两边一旦漂移，「答错自动进错题本」就会再次静默失效——而这种失效不报错、不提示，
+ * 只有把一整套题刷完才会发现错题本是空的。
+ */
+export const questionNotePath = (noteRoot, subject, chapter) => `${noteRoot}/${subject}/${chapter}.md`;
+
 /** 文件里有多少个「题目开始」标记——用来和解析出的题数对账，差值就是漏题 */
 function countMarkers(text) {
   const re = /【\s*([^】]{1,20}?)\s*】/g;
@@ -256,12 +265,16 @@ for (const src of SOURCES) {
     const subject = cleanSubject(parts[0]);
     const chapter = cleanChapter(basename(f));
     const body = readFileSync(f, 'utf8');
-    const qs = parseFile(body, subject, chapter, src.label).map((q) => ({ ...q, subject }));
+    // 关联笔记路径：**只在这里算一次**，题库题目与笔记两边共用同一个值。
+    // 原先两边各写一遍同样的字符串，而题库那侧的字段白名单里根本没有 note——
+    // 于是「答错自动进错题本」在全部 111,548 道题上静默失效（不报错，只是永不收录）。
+    const notePath = questionNotePath(src.noteRoot, subject, chapter);
+    const qs = parseFile(body, subject, chapter, src.label).map((q) => ({ ...q, subject, note: notePath }));
     const markers = countMarkers(body);
     if (markers !== qs.length) gaps.push({ file: rel, markers, parsed: qs.length, diff: markers - qs.length });
     all.push(...qs);
     notes.push({
-      path: `${src.noteRoot}/${subject}/${chapter}.md`,
+      path: notePath,
       content: noteContent(chapter, body, { key: src.key, subject, label: src.label, date: DATE }),
     });
   }
@@ -292,6 +305,8 @@ for (const src of SOURCES) {
       answerText: q.answerText,
       ...(q.explanation ? { explanation: q.explanation } : {}),
       chapter: `${subject}·${q.chapter}`,
+      // 字段白名单：这里漏一个字段，就是一个静默失效的功能（note 就这么漏了）
+      ...(q.note ? { note: q.note } : {}),
     })),
   });
   const sizeOf = (subject, cq, i, n) => Buffer.byteLength(JSON.stringify(payloadFor(subject, cq, i, n)));

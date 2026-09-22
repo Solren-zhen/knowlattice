@@ -2,7 +2,7 @@
  * 题库练习：导入 JSON 题库（文件或粘贴）→ 选库组卷 → 逐题作答 → 结果页错题回顾。
  * 答错且题目关联笔记（note 字段可解析）时自动记入错题本。
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useEsc } from './useEsc';
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
@@ -11,6 +11,12 @@ import {
   parseQuestionsFromText, rowsToQuestions,
   type QuizBank, type QuizQuestion,
 } from '../core/qbank';
+import {
+  DEFAULT_RULES, chapterCounts, composeQuestions, filterPool,
+  type ComposeOrder, type ComposeRules, type ComposeScope,
+} from '../core/qbankCompose';
+import { bankProgress, consumeSaveFailure, loadStats, recordAnswer } from '../core/qbankStats';
+import { buildChapterIndex, questionNoteLabel, resolveQuestionNote } from '../core/qbankNotes';
 import { recordMistake } from '../core/mistakes';
 import { toast, confirmBox } from '../core/feedback';
 import { markStudy } from '../core/stats';
@@ -25,7 +31,8 @@ interface Props {
   onClose: () => void;
 }
 
-type Session = { bankName: string; questions: QuizQuestion[] };
+/** rules 为 null = 不组题，整库洗牌（「全部」入口）；非 null 时「再练一轮」沿用同一套规则 */
+type Session = { bankName: string; questions: QuizQuestion[]; rules: ComposeRules | null };
 
 const HELP_TEXT = `[
   {
@@ -64,6 +71,32 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   const fileRef = useRef<HTMLInputElement>(null);
   const docxRef = useRef<HTMLInputElement>(null);
   const xlsxRef = useRef<HTMLInputElement>(null);
+  /** 组题弹窗正在给哪个题库出题（null = 没开） */
+  const [composing, setComposing] = useState<QuizBank | null>(null);
+  const [rules, setRules] = useState<ComposeRules>(DEFAULT_RULES);
+  /** 逐题历史（localStorage + 模块级缓存）。作答后 recordAnswer 会换掉缓存对象，
+   *  这里重新取一次就能触发重渲染——不需要额外维护一个「踢一脚」的计数器当假依赖。 */
+  const [stats, setStats] = useState(loadStats);
+  /** 配额提示只弹一次：存不下时每次作答都会失败，不能每答一题弹一遍 */
+  const quotaWarnedRef = useRef(false);
+
+  /** 题库列表上的进度行。按 banks/stats 缓存——127 个库 × 上千题，
+   *  每次渲染都重算会把题库面板拖垮。 */
+  const progress = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof bankProgress>>();
+    for (const b of banks) m.set(b.name, bankProgress(b.name, b.questions.map((x) => x.id)));
+    return m;
+  }, [banks, stats]);
+
+  /** 题库笔记索引：题库题目的 chapter 是「学科·章节」，题库笔记路径是
+   *  「题库/<源>/<学科>/<章节>.md」，两边精确对应（详见 core/qbankNotes.ts）。 */
+  const chapterIndex = useMemo(() => buildChapterIndex(docs.keys()), [docs]);
+
+  /** 这道题关联哪篇笔记：note 字段与 chapter 反查都试，都没有就 null。
+   *  必须先试 chapter——转换器产出的题库 note 字段是空的（111,548 题全空），
+   *  只看 note 会让「答错进错题本」静默失效。 */
+  const notePathOf = (question: QuizQuestion) =>
+    resolveQuestionNote(question, resolveLink, chapterIndex, (p) => docs.has(p));
 
   // Exit policy: a practice run in progress must not be lost to a stray click.
   const inProgress = Boolean(session) && results.some((r) => r === true || r === false);
@@ -141,9 +174,10 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   };
 
   // ---------- 练习 ----------
-  const start = (bank: QuizBank, pool?: QuizQuestion[]) => {
-    const qs = pickQuestions({ ...bank, questions: pool ?? bank.questions });
-    setSession({ bankName: bank.name, questions: qs });
+  /** 开一轮练习。rules 为 null 时按旧行为整库洗牌（「全部」入口） */
+  const start = (bank: QuizBank, rules: ComposeRules | null) => {
+    const qs = rules ? composeQuestions(bank, rules, loadStats()) : pickQuestions(bank);
+    setSession({ bankName: bank.name, questions: qs, rules });
     setIdx(0);
     setResults(new Array(qs.length).fill(undefined));
     setPicked(null);
@@ -151,14 +185,23 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
     setEditing(null);
   };
 
-  /** 答错且关联笔记存在 → 记入错题本 */
+  /** 答错且关联笔记存在 → 记入错题本；同时对每道题记一次逐题历史（错题加权与 FSRS 排程的数据源） */
   const judge = (correct: boolean) => {
     if (!q) return;
     markStudy(); // 打卡
     setResults((prev) => prev.map((r, i) => (i === idx ? correct : r)));
-    if (!correct && q.note) {
-      const path = resolveLink(q.note);
-      if (path && docs.has(path)) recordMistake(path, docs.get(path)!);
+    recordAnswer(session!.bankName, q.id, correct);
+    setStats(loadStats());
+    // 配额满时记录只在内存里活着，本轮结束就没了——必须说一声，不能静默丢学习记录
+    if (consumeSaveFailure() && !quotaWarnedRef.current) {
+      quotaWarnedRef.current = true;
+      toast('逐题记录存不下了：浏览器存储已满，本轮的作答历史不会被保留。可先删掉几个不用的题库。', 'err', 9000);
+    }
+    if (!correct) {
+      const path = notePathOf(q);
+      const content = path ? docs.get(path) : undefined;
+      // content 必须存在：错题本要拿原文提章节与标题（core/mistakes.ts）
+      if (path && content !== undefined) recordMistake(path, content);
     }
   };
 
@@ -193,7 +236,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   // ---------- 渲染 ----------
   if (session && q) {
     const answered = results[idx] !== undefined;
-    const notePath = q.note ? resolveLink(q.note) : null;
+    const notePath = notePathOf(q);
     return (
       <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
         <div className="panel quiz-panel" onClick={(e) => e.stopPropagation()}>
@@ -298,7 +341,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
             <div className="quiz-footer">
               {notePath && (
                 <button className="btn-small" onClick={() => { onClose(); onOpenPath(notePath); }}>
-                  打开笔记「{q.note}」
+                  打开笔记「{questionNoteLabel(q, notePath)}」
                 </button>
               )}
               {idx + 1 < session.questions.length ? (
@@ -317,6 +360,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   if (session) {
     const total = session.questions.length;
     const wrong = session.questions.filter((_, i) => results[i] === false);
+    /** 真正进了错题本的错题数（关联不到笔记的题进不去，别把话说满） */
+    const wrongFiled = wrong.filter((w) => notePathOf(w)).length;
     return (
       <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
         <div className="panel quiz-panel" onClick={(e) => e.stopPropagation()}>
@@ -326,11 +371,15 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
           </div>
           <div className="quiz-result">
             <div className="score">{total ? Math.round((correctCount / total) * 100) : 0}<small>分</small></div>
-            <p className="muted">{correctCount} / {total} 题正确{wrong.length > 0 && '，答错的题目已关联错题本'}</p>
+            <p className="muted">{correctCount} / {total} 题正确{wrong.length > 0 && (
+              wrongFiled === wrong.length
+                ? `，答错的 ${wrongFiled} 题已收录进错题本`
+                : `，答错的 ${wrong.length} 题中 ${wrongFiled} 题已收录进错题本`
+            )}</p>
             {wrong.length > 0 && (
               <div className="quiz-wrong-list">
                 {wrong.map((w) => {
-                  const wp = w.note ? resolveLink(w.note) : null;
+                  const wp = notePathOf(w);
                   return (
                     <div key={w.id} className="quiz-wrong-item">
                       <span>{w.stem}</span>
@@ -346,8 +395,95 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
               </div>
             )}
             <div className="quiz-actions center">
-              <button className="btn-primary" onClick={() => start(loadBanks().find((b) => b.name === session.bankName)!)}>再练一轮</button>
+              <button className="btn-primary" onClick={() => {
+                const b = loadBanks().find((x) => x.name === session.bankName);
+                if (b) start(b, session.rules); // 沿用同一套组题规则，不偷偷换回「全部」
+              }}>再练一轮</button>
               <button className="btn-small" onClick={() => setSession(null)}>返回题库列表</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- 自动组题 ----------
+  if (composing) {
+    const b = composing;
+    // 候选池与「将要抽几题」实时算给用户看：范围/章节一改就能看到还剩多少题可抽，
+    // 不然「做错过 + 某章」这种组合抽不到题时，用户只会以为按钮坏了
+    const pool = filterPool(b.questions, rules, stats, b.name);
+    const willPick = rules.count > 0 ? Math.min(rules.count, pool.length) : pool.length;
+    const chapters = chapterCounts(b.questions);
+    const toggleChapter = (c: string) =>
+      setRules((r) => ({
+        ...r,
+        chapters: r.chapters.includes(c) ? r.chapters.filter((x) => x !== c) : [...r.chapters, c],
+      }));
+    return (
+      <div className="panel-backdrop quiz-overlay" onClick={() => setComposing(null)}>
+        <div className="panel quiz-panel" onClick={(e) => e.stopPropagation()}>
+          <div className="panel__head quiz-header">
+            <span className="panel__title quiz-title">自动组题 · {b.name}</span>
+            <button className="btn-icon" onClick={() => setComposing(null)} aria-label="关闭"><IconClose /></button>
+          </div>
+          <div className="panel__body quiz-body">
+            <div className="compose-row">
+              <span className="compose-label">题量</span>
+              <div className="compose-chips">
+                {[10, 20, 50, 100].map((c) => (
+                  <button key={c} className={`chip${rules.count === c ? ' on' : ''}`} onClick={() => setRules((r) => ({ ...r, count: c }))}>{c}</button>
+                ))}
+                <button className={`chip${rules.count === 0 ? ' on' : ''}`} onClick={() => setRules((r) => ({ ...r, count: 0 }))}>全部</button>
+              </div>
+            </div>
+
+            <div className="compose-row">
+              <span className="compose-label">范围</span>
+              <div className="compose-chips">
+                {([
+                  ['all', '全部题目'], ['new', '没做过'], ['wrong', '做错过'], ['due', '今日待复习'],
+                ] as Array<[ComposeScope, string]>).map(([v, label]) => (
+                  <button key={v} className={`chip${rules.scope === v ? ' on' : ''}`} onClick={() => setRules((r) => ({ ...r, scope: v }))}>{label}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="compose-row">
+              <span className="compose-label">顺序</span>
+              <div className="compose-chips">
+                {([['shuffle', '乱序'], ['chapter', '按章节']] as Array<[ComposeOrder, string]>).map(([v, label]) => (
+                  <button key={v} className={`chip${rules.order === v ? ' on' : ''}`} onClick={() => setRules((r) => ({ ...r, order: v }))}>{label}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="compose-row">
+              <span className="compose-label">章节{rules.chapters.length > 0 && <b className="compose-picked">{rules.chapters.length}</b>}</span>
+              <div className="compose-chapters">
+                {chapters.map(({ chapter, count }) => (
+                  <label key={chapter || '~none'} className={`compose-chapter${rules.chapters.includes(chapter) ? ' on' : ''}`}>
+                    <input type="checkbox" checked={rules.chapters.includes(chapter)} onChange={() => toggleChapter(chapter)} />
+                    <span className="compose-chapter-name">{chapter || '未标章节'}</span>
+                    <span className="muted">{count}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="compose-chips compose-chips--end">
+              <button className="chip" onClick={() => setRules((r) => ({ ...r, chapters: [] }))}>不限章节</button>
+              <button className="chip" onClick={() => setRules((r) => ({ ...r, chapters: chapters.map((c) => c.chapter) }))}>全选</button>
+            </div>
+
+            <p className="muted compose-summary">
+              本轮将抽 <b>{willPick}</b> 题（候选 {pool.length} 题）。答错过的题与已到期的题权重更高，会优先出现。
+            </p>
+
+            <div className="quiz-actions">
+              <button className="btn-primary" disabled={willPick === 0} onClick={() => { setComposing(null); start(b, rules); }}>
+                开始练习
+              </button>
+              <button className="btn-small" onClick={() => setRules(DEFAULT_RULES)}>恢复默认</button>
             </div>
           </div>
         </div>
@@ -435,32 +571,45 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
               <p className="muted">导入一份 JSON 题库开始练习；答错的题会自动收录进错题本</p>
             </div>
           )}
-          {banks.map((b) => (
-            <div key={b.name} className="bank-item">
-              <div className="bank-info">
-                <div className="bank-name">{b.name}</div>
-                <div className="muted">{b.questions.length} 题 · {new Date(b.importedAt).toLocaleDateString()} 导入</div>
+          {banks.map((b) => {
+            const p = progress.get(b.name);
+            return (
+              <div key={b.name} className="bank-item">
+                <div className="bank-info">
+                  <div className="bank-name">{b.name}</div>
+                  <div className="muted">
+                    {b.questions.length} 题 · {new Date(b.importedAt).toLocaleDateString()} 导入
+                    {p && p.seen > 0 && (
+                      <>
+                        {' · '}做过 {p.seen}
+                        {p.wrong > 0 && <> · 错过 {p.wrong}</>}
+                        {p.due > 0 && <> · <b className="bank-due">待复习 {p.due}</b></>}
+                      </>
+                    )}
+                  </div>
+                </div>
+                <button className="btn-small" onClick={() => { setRules(DEFAULT_RULES); setComposing(b); }}>组题</button>
+                <button className="btn-small" title="不组题，整库洗牌后全部做完" onClick={() => start(b, null)}>全部</button>
+                <button
+                  className="btn-small"
+                  title="导出本题库为 Anki 导入文件"
+                  onClick={() => downloadFile(`${b.name}-anki.txt`, bankToAnki(b))}
+                >
+                  导 Anki
+                </button>
+                <button
+                  className="btn-icon"
+                  aria-label={`删除题库 ${b.name}`}
+                  onClick={() => {
+                    void confirmBox({ title: `删除题库「${b.name}」？`, danger: true, okText: '删除' })
+                      .then((ok) => { if (ok) setBanks(removeBank(b.name)); });
+                  }}
+                >
+                  <IconTrash />
+                </button>
               </div>
-              <button className="btn-small" onClick={() => start(b)}>开始练习</button>
-              <button
-                className="btn-small"
-                title="导出本题库为 Anki 导入文件"
-                onClick={() => downloadFile(`${b.name}-anki.txt`, bankToAnki(b))}
-              >
-                导 Anki
-              </button>
-              <button
-                className="btn-icon"
-                aria-label={`删除题库 ${b.name}`}
-                onClick={() => {
-                  void confirmBox({ title: `删除题库「${b.name}」？`, danger: true, okText: '删除' })
-                    .then((ok) => { if (ok) setBanks(removeBank(b.name)); });
-                }}
-              >
-                <IconTrash />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

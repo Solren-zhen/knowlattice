@@ -195,6 +195,9 @@ export default function Workspace() {
     localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
   }, []);
 
+  /** 从搜索打开笔记时的高亮词；nonce 递增 = 新的一次搜索（见 Editor 的 highlight 说明） */
+  const [highlight, setHighlight] = useState<{ query: string; nonce: number } | null>(null);
+
   /** 只切换内容（草稿 + 当前路径 + 最近打开），不动导航历史 */
   const openNoteCore = useCallback(
     (path: string) => {
@@ -237,9 +240,12 @@ export default function Workspace() {
     return () => document.removeEventListener('visibilitychange', h);
   }, [flushDraft]);
 
-  /** 打开笔记并记入导航历史 */
+  /** 打开笔记并记入导航历史。第二个参数只有快速搜索会传（命中词，用于跳转+高亮）；
+   *  用 typeof 挡一道——别的入口若把事件对象当第二参传进来，不至于被当成搜索词。 */
   const openNote = useCallback(
-    (path: string) => {
+    (path: string, highlightQuery?: string) => {
+      const q = typeof highlightQuery === 'string' ? highlightQuery.trim() : '';
+      setHighlight((h) => (q ? { query: q, nonce: (h?.nonce ?? 0) + 1 } : null));
       openNoteCore(path);
       setNav((n) => {
         const stack = n.stack.slice(0, n.idx + 1);
@@ -650,6 +656,7 @@ export default function Workspace() {
                   onAttach={(name, blob) => vault.saveAttachment(name, blob)}
                   onDraft={(text) => { setDraftText(text); setDraftOpen(true); }}
                   readFile={readFile}
+                  highlight={highlight}
                 />
               </Suspense>
             </div>
