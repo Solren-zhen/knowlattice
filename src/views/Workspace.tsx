@@ -455,20 +455,23 @@ export default function Workspace() {
     [vault, pushRecent, flushDraft]
   );
 
-  const notePaths = useMemo(
-    () => [...vault.docs.keys()].filter((p) => p.endsWith('.md')),
-    [vault.docs]
-  );
+  // 路径数组改由 vault 提供：它只在增删笔记时换引用，改正文的自动保存不会重建它
+  const notePaths = vault.notePaths;
+  /** PDF 对照的笔记目标列表。**只在面板真的打开时才算**：它对全库逐篇解析 frontmatter
+   *  并新建等量对象，而面板关着的时候这个列表没有任何消费者。 */
   const noteTargets = useMemo(
-    () => notePaths.map((path) => {
-      const parsed = parseFrontmatterCached(path, vault.docs.get(path) ?? '');
-      return {
-        path,
-        title: parsed.title || path.replace(/\.md$/, '').split('/').pop() || path,
-        chapter: parsed.meta.chapter,
-      };
-    }),
-    [notePaths, vault.docs]
+    () =>
+      pdfOpen
+        ? notePaths.map((path) => {
+            const parsed = parseFrontmatterCached(path, vault.docs.get(path) ?? '');
+            return {
+              path,
+              title: parsed.title || path.replace(/\.md$/, '').split('/').pop() || path,
+              chapter: parsed.meta.chapter,
+            };
+          })
+        : [],
+    [pdfOpen, notePaths, vault.docs]
   );
   const noteCount = notePaths.length;
   /** 现存路径集合（历史面板判断「已删除」快照用；memoized 防止面板 effect 重载） */
@@ -476,6 +479,16 @@ export default function Workspace() {
   const wordCount = useMemo(
     () => (draft ? draft.replace(/\s/g, '').length : 0),
     [draft]
+  );
+
+  // 复习状态按「卡」看：一篇笔记可能切成多节，这里显示最紧的那张 + 已排程节数。
+  // 必须 memo：这段原本每次渲染都跑，而编辑器每敲一个字就渲染一次；它读的是 vault.docs
+  // （已落盘内容）而不是草稿，所以按键根本不会改变结果，按保存/切换重算就够了。
+  // 位置必须在这里——下面还有「未加载」「加载失败」两处提前 return，hook 不能放在其后。
+  const activePath = vault.currentPath;
+  const activeStatus = useMemo(
+    () => (activePath ? noteStatus(buildCards([activePath], vault.docs), activePath) : null),
+    [activePath, vault.docs]
   );
 
   if (!vault.loaded) {
@@ -499,9 +512,6 @@ export default function Workspace() {
     );
   }
 
-  const activePath = vault.currentPath;
-  // 复习状态按「卡」看：一篇笔记可能切成多节，这里显示最紧的那张 + 已排程节数
-  const activeStatus = activePath ? noteStatus(buildCards([activePath], vault.docs), activePath) : null;
   const activeCard = activeStatus?.card ?? null;
   const activeMistake = activePath ? loadMistakes()[activePath] : null;
   const activeExam = activePath
