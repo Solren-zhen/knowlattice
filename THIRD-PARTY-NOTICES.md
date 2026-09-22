@@ -21,11 +21,20 @@ its own terms.
            public/brain/ho_cortical_dseg.nii.gz
            public/brain/ho_subcortical_dseg.nii.gz
            public/brain/regions.json
-- MRI template : MNI152NLin2009cAsym via TemplateFlow (https://templateflow.org)
-                 MNI template terms; research use.
+- MRI template : MNI152NLin2009cAsym, McConnell Brain Imaging Centre (McGill),
+                 via TemplateFlow (https://templateflow.org).
+                 Permissive, MIT-style: "Permission to use, copy, modify, and
+                 distribute this software and its documentation for any purpose
+                 and without fee is hereby granted, provided that the above
+                 copyright notice appear in all copies." Copyright (C) 1993-2004
+                 Louis Collins, MNI, McGill University. Cite Fonov et al.,
+                 NeuroImage 54(1), 2011.
 - Parcellation : Harvard-Oxford Structural Atlas, FSL / FMRIB, University of
-                 Oxford. Research and educational use; check the FSL atlas terms
-                 before any commercial redistribution.
+                 Oxford. CC BY-SA 4.0 — the FSL licence states that the
+                 Harvard-Oxford atlases "are released under the CC BY-SA 4.0
+                 licence"; the FSL non-commercial terms do not apply to them.
+                 Attribution + share-alike; CC BY-SA 4.0 is one-way compatible
+                 with GPLv3.
 - Notice       : public/brain/NOTICE
 
 ## Libraries
