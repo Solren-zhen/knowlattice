@@ -130,13 +130,13 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
           <button className="btn-primary hero-primary" onClick={onSearch}>
             <IconSearch /> 快速搜索 <kbd>Ctrl K</kbd>
           </button>
-          <button className="btn" onClick={onGraph}>知识图谱</button>
+          <button className="btn hero-graph" onClick={onGraph}>知识图谱</button>
         </div>
         <div className="teach-steps">
           <div className="teach-step"><kbd>回车</kbd><span>续写下一条</span></div>
           <div className="teach-step"><kbd>Tab</kbd><span>缩进成子要点</span></div>
           <div className="teach-step"><kbd>[[</kbd><span>链接到其他笔记</span></div>
-          <div className="teach-step"><kbd>{FORMAT_HINT}</kbd><span>加粗 / 高亮 / 斜体 / 双链</span></div>
+          <div className="teach-step wide format-hint"><kbd>{FORMAT_HINT}</kbd><span>加粗 / 高亮 / 斜体 / 双链</span></div>
           {/* 第 5 条跨两列：5 个格子在 2 列网格里必然剩一个孤儿格，索性让它整行 */}
           <div className="teach-step wide"><kbd>右键</kbd><span>打开 / 删除整篇笔记</span></div>
         </div>
