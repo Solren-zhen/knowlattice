@@ -465,7 +465,7 @@ export default function Workspace() {
     () =>
       pdfOpen
         ? notePaths.map((path) => {
-            const parsed = parseFrontmatterCached(path, vault.docs.get(path) ?? '');
+            const parsed = parseFrontmatterCached(path, vault.structureDocs.get(path) ?? '');
             return {
               path,
               title: parsed.title || path.replace(/\.md$/, '').split('/').pop() || path,
@@ -473,7 +473,7 @@ export default function Workspace() {
             };
           })
         : [],
-    [pdfOpen, notePaths, vault.docs]
+    [pdfOpen, notePaths, vault.structureDocs]
   );
   const noteCount = notePaths.length;
   /** 现存路径集合（历史面板判断「已删除」快照用；memoized 防止面板 effect 重载） */

@@ -68,7 +68,13 @@ export default function BrainAtlasView({ onClose }: Props) {
     const st = { alive: true as boolean };
     const cort = atlas.groups.find((g) => g.id === 'cortical');
     const sub = atlas.groups.find((g) => g.id === 'subcortical');
-    const nv = new Niivue({ show3Dcrosshair: true, isColorbar: true, textHeight: 0.035 });
+    const nv = new Niivue({
+      show3Dcrosshair: true,
+      isColorbar: false,
+      isAntiAlias: false,
+      forceDevicePixelRatio: 1,
+      textHeight: 0.035,
+    });
     nvRef.current = nv;
     void (async () => {
       try {
