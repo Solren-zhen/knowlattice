@@ -388,3 +388,10 @@ export const IconHelp = ({ size = 15 }: P) => (
     <circle cx="12" cy="16.8" r="1" {...solid} />
   </svg>
 );
+
+export const IconInfo = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <circle cx="12" cy="12" r="8.2" {...wash} />
+    <path d="M12 10.7v5.1M12 7.6v.2" strokeWidth={2} />
+  </svg>
+);

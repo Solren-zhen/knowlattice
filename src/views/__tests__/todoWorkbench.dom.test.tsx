@@ -58,6 +58,7 @@ afterEach(() => {
 describe('工作台外壳', () => {
   it('默认在「待办」页，三个模块都能切', () => {
     renderView();
+    expect(screen.getByRole('dialog', { name: '工作台' }).getAttribute('aria-modal')).toBe('true');
     // 默认落在待办页：原来的面板功能一个不少
     expect(screen.getByPlaceholderText(/加一条/)).toBeTruthy();
     expect(tab('专注')).toBeTruthy();

@@ -2,9 +2,10 @@
  * 打包「KnowLattice 离线版」：把构建产物 + 笔记/题库备份 + 零依赖启动器，组装成一个 zip。
  *
  * 用法：
- *   npm run pack                 # 先构建，再自动收集备份（应用导出的 / 根目录的 knowlattice-*.json）打包
+ *   npm run pack                 # 先构建，只打包应用本体（不携带用户数据）
  *   npm run pack -- --no-build   # 跳过构建，直接用现有 dist
  *   npm run pack -- --data <文件># 指定某一份备份 .json（例如你刚在应用里导出的那份）
+ *   npm run pack -- --data <文件> --private-data # 经授权后才可把题库放入非公开离线包
  *
  * 曾经有个 `--lite`（精简包）：去掉 OCR 组件与冗余字体。**已撤销**，原因是实测数据不支持它：
  * 它省下的 7.3 MB 里 6.73 MB 是 OCR（tesseract 三个 core 变体各 1.01 MB + 两个语言包 3.53 MB），
@@ -27,6 +28,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..');
 const args = process.argv.slice(2);
 const noBuild = args.includes('--no-build');
+const privateData = args.includes('--private-data');
 if (args.includes('--lite')) {
   console.error('[pack] --lite 已撤销，不再产出「精简版」。');
   console.error('[pack] 它省下的 7.3 MB 里 6.73 MB 是扫描版 PDF 的 OCR，去掉等于砍掉这个功能；');
@@ -107,29 +109,16 @@ if (explicitData) {
     console.error(`[pack] 指定的备份无效：${p}`);
     process.exit(1);
   }
+  if (Array.isArray(b.qbanks) && b.qbanks.length && !privateData) {
+    console.error('[pack] 检测到题库数据。公开或默认打包不会收录题库。');
+    console.error('[pack] 仅在确认拥有再分发授权或适用法定例外时，才使用：npm run pack -- --data <文件> --private-data');
+    process.exit(1);
+  }
   sources.push({ p, b });
 } else {
-  // 自动模式只取仓库根目录的 knowlattice-*.json（这些是应用导出的稳定副本），
-  // 避免误收 Downloads 里的旧备份；要带上应用里刚导出的最新版，用 --data 指定。
-  //
-  // 体积闸门：题库类导出动辄几十 MB（111548 道题的备份 54 MB），自动收进来会把分享包
-  // 从 41 MB 撑到 100 MB，而且同学拿到一堆题库备份也不是"起步数据"。超过 8 MB 的一律跳过，
-  // 真要收就 --data 显式指定——显式指定意味着你知道自己在装什么。
-  const AUTO_MAX_BYTES = 8 * 1024 * 1024;
-  for (const f of readdirSync(repo).filter((f) => /^(?:knowlattice|medvault)-.*\.json$/.test(f)).sort()) {
-    const full = join(repo, f);
-    const bytes = statSync(full).size;
-    if (bytes > AUTO_MAX_BYTES) {
-      console.log(`[pack] 跳过 ${f}（${(bytes / 1024 / 1024).toFixed(1)} MB > 自动收录上限 8 MB；要收就 --data 指定）`);
-      continue;
-    }
-    const b = loadBackup(full);
-    if (b) sources.push({ p: full, b });
-  }
-}
-if (sources.length === 0) {
-  console.error('[pack] 没找到任何备份。放一份 knowlattice-*.json 到仓库根目录，或用 --data <文件> 指定。');
-  process.exit(1);
+  // 默认只打包应用本体。仓库根目录的备份即使被 .gitignore 忽略，也可能存在于本机，
+  // 因此不能靠文件名或体积猜测是否应该随包分发；必须由调用者用 --data 明确指定。
+  console.log('[pack] 未指定 --data：生成不携带用户笔记或题库的应用包。');
 }
 
 const fileMap = new Map();

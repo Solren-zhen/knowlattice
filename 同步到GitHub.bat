@@ -31,7 +31,7 @@ if errorlevel 1 (
     exit /b
 )
 
-git push origin main
+git push -u origin HEAD
 if errorlevel 1 (
     echo 推送失败！请检查网络后重试。
     pause

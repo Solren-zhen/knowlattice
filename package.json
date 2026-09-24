@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "prebuild": "node scripts/clean-dist.mjs",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/assert-public-dist.mjs",
     "lint": "oxlint",
     "test": "vitest run",
     "preview": "vite preview",
@@ -36,7 +36,7 @@
     "markdown-it": "^15.0.0",
     "mind-elixir": "^6.0.0-next.4",
     "minisearch": "^7.2.0",
-    "pdfjs-dist": "^3.11.174",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "sql.js": "^1.14.2",

@@ -125,7 +125,7 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
       <div className="preview placeholder">
         <div className="hero-badge">晶格 · KnowLattice</div>
         <h1 className="hero-title">你的知识库，从这里开始</h1>
-        <p className="hero-sub">一文件一知识点 · 缩进即层级 · [[双链]] 织成知识网</p>
+        <p className="hero-sub">笔记沉淀知识 · 层级梳理思路 · 双链串联全局</p>
         <div className="hero-cta">
           <button className="btn-primary hero-primary" onClick={onSearch}>
             <IconSearch /> 快速搜索 <kbd>Ctrl K</kbd>

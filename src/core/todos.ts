@@ -1,5 +1,5 @@
 /**
- * 待办清单（Todo）：本地优先，持久化到 localStorage，与 SRS / 题库 / 打卡同策略。
+ * 待办清单（Todo）：本地优先，持久化到 localStorage，与 SRS / 打卡同策略。
  *
  * 单独成模块的原因：待办原先只有 TodoView 自己知道 key 和数据形状，
  * Dashboard 又抄了一份 JSON.parse，整包备份则完全不知道它存在——

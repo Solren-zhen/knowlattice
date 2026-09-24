@@ -17,6 +17,7 @@ import { parseFrontmatterCached } from './parser';
 import { rebuildLinkIndex, updateLinksForPath, backlinks, type LinkIndex } from './linkIndex';
 import { exportSrsState, importSrsState } from './srs';
 import { exportQbanks, importQbanks } from './qbank';
+import { exportQuestionStats, importQuestionStats } from './qbankStats';
 import { loadMistakes, importMistakes } from './mistakes';
 import { exportTodos, importTodos } from './todos';
 import { exportCardEdits, importCardEdits } from './cardEdits';
@@ -29,6 +30,16 @@ export interface TreeNode {
   path: string;
   type: 'dir' | 'file';
   children?: TreeNode[];
+}
+
+/** 只接受 vault 内的 POSIX 相对路径；导入备份与未来的 Tauri 文件适配器共用。 */
+export function safeVaultPath(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw || raw.includes('\0')) return null;
+  const path = raw.replace(/\\/g, '/');
+  if (path.startsWith('/') || /^[A-Za-z]:\//.test(path)) return null;
+  const parts = path.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..')) return null;
+  return path;
 }
 
 /** 从扁平路径列表构建目录树 */
@@ -338,30 +349,43 @@ export function useVault() {
    *  旧写法是「先乐观更新内存、catch 里只 console.error」，于是 IndexedDB 写失败时
    *  界面照样显示「已保存 ✓」、脏点也消失——用户是在「应用说存住了」的前提下丢稿的。 */
   const save = useCallback(async (path: string, content: string) => {
-    await adapter.write(path, content);
-    setDocs((prev) => new Map(prev).set(path, content));
-    updateLinksForPath(linkIndex, path, content);
-    void pushSnapshot(path, content);
+    const safePath = safeVaultPath(path);
+    if (!safePath) throw new Error('文件路径不安全');
+    await adapter.write(safePath, content);
+    setDocs((prev) => new Map(prev).set(safePath, content));
+    updateLinksForPath(linkIndex, safePath, content);
+    void pushSnapshot(safePath, content);
   }, [linkIndex]);
 
   /** 删除：先落盘、再改内存；失败抛出且内存保持原样（不会再「删了重启又回来」） */
   const remove = useCallback(async (path: string) => {
-    await adapter.remove(path);
+    const safePath = safeVaultPath(path);
+    if (!safePath) throw new Error('文件路径不安全');
+    await adapter.remove(safePath);
     setDocs((prev) => {
       const next = new Map(prev);
-      next.delete(path);
+      next.delete(safePath);
       return next;
     });
-    updateLinksForPath(linkIndex, path, '');
-    setCurrentPath((cur) => (cur === path ? null : cur));
+    updateLinksForPath(linkIndex, safePath, '');
+    setCurrentPath((cur) => (cur === safePath ? null : cur));
   }, [linkIndex]);
 
   /** 批量删除：落盘分批限流（避免一次发几千个 IndexedDB 事务），返回**删失败的路径**。
    *  内存只删真正删成功的：失败的留在树里，用户看得见「没删掉」，而不是被蒙住。 */
   const removeMany = useCallback(async (paths: string[]): Promise<string[]> => {
-    const failed = await removeManyFiles(paths);
+    const entries = paths.map((original) => ({ original, safe: safeVaultPath(original) }));
+    const invalid = entries.filter((entry) => !entry.safe).map((entry) => entry.original);
+    const safePaths = entries.flatMap((entry) => entry.safe ? [entry.safe] : []);
+    const failedSafe = await removeManyFiles(safePaths);
+    const failedSafeSet = new Set(failedSafe);
+    const failed = [...invalid, ...entries
+      .filter((entry) => entry.safe && failedSafeSet.has(entry.safe))
+      .map((entry) => entry.original)];
     const failedSet = new Set(failed);
-    const del = new Set(paths.filter((p) => !failedSet.has(p)));
+    const del = new Set(entries
+      .filter((entry) => entry.safe && !failedSet.has(entry.original))
+      .map((entry) => entry.original));
     setDocs((prev) => {
       const next = new Map(prev);
       for (const p of del) next.delete(p);
@@ -380,13 +404,14 @@ export function useVault() {
       .map(([path, content]) => ({ path, content }));
     const payload = {
       app: 'knowlattice',
-      version: 5,
+      version: 6,
       exportedAt: new Date().toISOString(),
       files,
       // v2 起随备份保存 SRS 复习调度进度（旧版备份无此字段，导入时自动跳过）
       srs: exportSrsState(),
       // 题库与错题一并备份（v2 增量字段，旧版本导入时忽略）
-      qbanks: exportQbanks(),
+      qbanks: await exportQbanks(),
+      qbankStats: await exportQuestionStats(),
       mistakes: loadMistakes(),
       // v3 起补上待办与打卡：这两样此前只活在 localStorage 里，备份不到、换设备即丢
       todos: exportTodos(),
@@ -416,6 +441,7 @@ export function useVault() {
       files?: { path: string; content: string }[];
       srs?: unknown;
       qbanks?: unknown;
+      qbankStats?: unknown;
       mistakes?: unknown;
       todos?: unknown;
       days?: unknown;
@@ -426,7 +452,13 @@ export function useVault() {
     if ((data.app !== 'knowlattice' && data.app !== 'medvault') || !Array.isArray(data.files)) {
       throw new Error('不是有效的 晶格 备份文件');
     }
-    const valid = data.files.filter((f) => f.path && typeof f.content === 'string');
+    const valid: Array<{ path: string; content: string }> = [];
+    let invalidFiles = 0;
+    for (const f of data.files) {
+      const path = safeVaultPath(f?.path);
+      if (!path || typeof f?.content !== 'string') { invalidFiles++; continue; }
+      valid.push({ path, content: f.content });
+    }
     const notes = valid.filter((f) => !f.path.startsWith('_attachments/'));
     const legacyAttachments = valid.filter((f) => f.path.startsWith('_attachments/'));
 
@@ -453,7 +485,8 @@ export function useVault() {
       }
     }
     if (data.srs) importSrsState(data.srs);
-    if (data.qbanks) importQbanks(data.qbanks);
+    if (data.qbanks) await importQbanks(data.qbanks);
+    if (data.qbankStats) await importQuestionStats(data.qbankStats);
     if (data.mistakes) importMistakes(data.mistakes);
     if (data.todos) importTodos(data.todos);
     if (data.days) importDays(data.days);
@@ -478,15 +511,16 @@ export function useVault() {
       return next;
     });
     for (const f of okNotes) updateLinksForPath(linkIndex, f.path, f.content);
-    return { ok: okNotes.length, failed: failedSet.size + attachFailed };
+    return { ok: okNotes.length, failed: failedSet.size + attachFailed + invalidFiles };
   }, [linkIndex]);
 
   /** 导入 md 文件夹（相对路径入库，保留目录结构）；返回真实成功/失败篇数 */
   const importMdFiles = useCallback(async (files: Array<{ path: string; content: string }>): Promise<{ ok: number; failed: number }> => {
     const valid: Array<{ path: string; content: string }> = [];
+    let invalidFiles = 0;
     for (const f of files) {
-      const p = f.path.replace(/\\/g, '/');
-      if (!p.toLowerCase().endsWith('.md') || !p.trim()) continue;
+      const p = safeVaultPath(f.path);
+      if (!p || !p.toLowerCase().endsWith('.md') || typeof f.content !== 'string') { invalidFiles++; continue; }
       valid.push({ path: p, content: f.content });
     }
     const failedPaths = await writeMany(valid);
@@ -498,12 +532,13 @@ export function useVault() {
       return next;
     });
     for (const f of okFiles) updateLinksForPath(linkIndex, f.path, f.content);
-    return { ok: okFiles.length, failed: failedPaths.length };
+    return { ok: okFiles.length, failed: failedPaths.length + invalidFiles };
   }, [linkIndex]);
 
   /** 保存图片附件（Blob 存入独立 attachments store），返回 vault 相对路径；写失败抛出 */
   const saveAttachment = useCallback(async (filename: string, blob: Blob): Promise<string> => {
-    const path = `_attachments/${filename}`;
+    const path = safeVaultPath(`_attachments/${filename}`);
+    if (!path) throw new Error('附件路径不安全');
     await adapter.writeAttachment(path, blob);
     setAttachments((prev) => new Map(prev).set(path, blob));
     return path;

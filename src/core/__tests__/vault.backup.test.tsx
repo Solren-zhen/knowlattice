@@ -7,6 +7,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { getAllQuestionStats, resetQbankStorageForTests } from '../../storage/qbank';
+import { initializeStats, recordAnswer, resetQbankStatsForTests, statOf } from '../qbankStats';
 
 const h = vi.hoisted(() => ({
   readAll: (async () => new Map<string, string>()) as () => Promise<Map<string, string>>,
@@ -45,8 +47,10 @@ function Probe() {
 
 const store = (key: string): unknown[] => JSON.parse(localStorage.getItem(key) ?? '[]') as unknown[];
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear();
+  resetQbankStatsForTests();
+  await resetQbankStorageForTests();
   h.readAll = async () => new Map();
   backupText = '';
   captured = null;
@@ -60,6 +64,7 @@ afterEach(() => cleanup());
 
 describe('整包备份：番茄记录不丢', () => {
   it('导出带上番茄记录，清空后导入能回来（待办里的番茄数也一起）', async () => {
+    await recordAnswer('备份题库', 'q-1', false, Date.UTC(2026, 0, 15, 9));
     localStorage.setItem('knowlattice-pomodoros', JSON.stringify([
       { id: 'p-1', day: '2026-09-21', endedAt: 1758400000000, minutes: 25, taskId: 't-1' },
     ]));
@@ -71,11 +76,12 @@ describe('整包备份：番茄记录不丢', () => {
     render(<Probe />);
     await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
     fireEvent.click(screen.getByText('导出'));
-    expect(captured).not.toBeNull();
+    await waitFor(() => expect(captured).not.toBeNull());
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
     expect(payload.app).toBe('knowlattice');
-    expect(payload.version).toBe(5);
+    expect(payload.version).toBe(6);
+    expect(payload.qbankStats).toMatchObject({ '备份题库': { 'q-1': { wrong: 1 } } });
     expect(payload.pomodoros).toEqual([
       { id: 'p-1', day: '2026-09-21', endedAt: 1758400000000, minutes: 25, taskId: 't-1' },
     ]);
@@ -86,6 +92,8 @@ describe('整包备份：番茄记录不丢', () => {
     localStorage.removeItem('knowlattice-pomodoros');
     localStorage.removeItem('knowlattice-todos');
     localStorage.removeItem('knowlattice-days');
+    await resetQbankStorageForTests();
+    resetQbankStatsForTests();
     backupText = JSON.stringify(payload);
     fireEvent.click(screen.getByText('导入'));
 
@@ -93,6 +101,8 @@ describe('整包备份：番茄记录不丢', () => {
     expect(store('knowlattice-pomodoros')[0]).toMatchObject({ id: 'p-1', minutes: 25, taskId: 't-1' });
     expect(store('knowlattice-todos')[0]).toMatchObject({ id: 't-1', pomos: 1 });
     expect(localStorage.getItem('knowlattice-days')).toContain('2026-09-21');
+    await expect(getAllQuestionStats()).resolves.toHaveLength(1);
+    expect(statOf(await initializeStats(), '备份题库', 'q-1')?.wrong).toBe(1);
   });
 
   it('旧版备份（没有 pomodoros 字段）照样能导入，不会炸', async () => {

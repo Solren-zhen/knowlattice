@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { getAllQuestionStats, resetQbankStorageForTests } from '../../storage/qbank';
 import {
   addBank,
   exportQbanks,
@@ -12,9 +13,13 @@ import {
   setOptionNote,
   type QuizBank,
 } from '../qbank';
-import { loadStats, recordAnswer, statOf } from '../qbankStats';
+import { loadStats, recordAnswer, resetQbankStatsForTests, statOf } from '../qbankStats';
 
-beforeEach(() => localStorage.clear());
+beforeEach(async () => {
+  localStorage.clear();
+  resetQbankStatsForTests();
+  await resetQbankStorageForTests();
+});
 
 describe('normalizeQuestions', () => {
   it('中文字段名 + 字母答案 → 选择题', () => {
@@ -121,49 +126,73 @@ describe('addBank/removeBank/import/export', () => {
     questions: [{ id: 'q-1', type: 'recall', stem: '1?', options: [], answer: -1, answerText: 'a' }],
   };
 
-  it('同名覆盖导入', () => {
-    addBank('生理', bank.questions);
-    addBank('生理', bank.questions.concat([{ ...bank.questions[0], id: 'q-2' }]));
-    expect(loadBanks()).toHaveLength(1);
-    expect(loadBanks()[0].questions).toHaveLength(2);
+  it('首次加载迁移旧题库，并在 IndexedDB 写入成功后移除旧键', async () => {
+    localStorage.setItem('knowlattice-qbanks', JSON.stringify([bank]));
+    expect(await loadBanks()).toEqual([bank]);
+    expect(localStorage.getItem('knowlattice-qbanks')).toBeNull();
   });
 
-  it('removeBank 只删目标', () => {
-    addBank('a', bank.questions);
-    addBank('b', bank.questions);
-    removeBank('a');
-    expect(loadBanks().map((b) => b.name)).toEqual(['b']);
+  it('迁移旧题库不覆盖 IndexedDB 中较新的同名题库', async () => {
+    const newer = { ...bank, importedAt: 200, questions: bank.questions.concat([{ ...bank.questions[0], id: 'new' }]) };
+    await importQbanks([newer]);
+    localStorage.setItem('knowlattice-qbanks', JSON.stringify([bank]));
+    expect((await loadBanks())[0]).toEqual(newer);
   });
 
-  it('removeBank 连带清掉该题库的逐题历史（不清就是永久孤儿）', () => {
-    addBank('a', bank.questions);
-    addBank('b', bank.questions);
-    recordAnswer('a', 'q-1', true);
-    recordAnswer('b', 'q-1', true);
+  it('同名覆盖导入', async () => {
+    await addBank('生理', bank.questions);
+    await addBank('生理', bank.questions.concat([{ ...bank.questions[0], id: 'q-2' }]));
+    expect(await loadBanks()).toHaveLength(1);
+    expect((await loadBanks())[0].questions).toHaveLength(2);
+  });
+
+  it('removeBank 只删目标', async () => {
+    await addBank('a', bank.questions);
+    await addBank('b', bank.questions);
+    await removeBank('a');
+    expect((await loadBanks()).map((b) => b.name)).toEqual(['b']);
+  });
+
+  it('removeBank 连带清掉该题库的逐题历史（不清就是永久孤儿）', async () => {
+    await addBank('a', bank.questions);
+    await addBank('b', bank.questions);
+    await recordAnswer('a', 'q-1', true);
+    await recordAnswer('b', 'q-1', true);
     expect(statOf(loadStats(), 'a', 'q-1')).toBeDefined();
 
-    removeBank('a');
+    await removeBank('a');
 
     expect(statOf(loadStats(), 'a', 'q-1')).toBeUndefined();
     // 别的题库不受影响——清错范围会让用户莫名丢进度
     expect(statOf(loadStats(), 'b', 'q-1')).toBeDefined();
   });
 
-  it('导入备份：合并、忽略非法条目', () => {
-    addBank('existing', []);
-    const n = importQbanks([bank, { name: 42 }, { not: 'bank' }]);
-    expect(n).toBe(1);
-    expect(loadBanks().map((b) => b.name).sort()).toEqual(['existing', '生理']);
-    expect(loadBanks().find((b) => b.name === '生理')!.importedAt).toBe(100);
+  it('删除前也会先迁移旧逐题记录，避免清理后重新变成孤儿', async () => {
+    await addBank('待删除', bank.questions);
+    localStorage.setItem('knowlattice-qstats', JSON.stringify({
+      '待删除': { 'q-1': [100, 1, 1, 0, 0, 0, 0, 0, 0, -1, 1] },
+    }));
+    await removeBank('待删除');
+    expect(await getAllQuestionStats()).toEqual([]);
+    expect(localStorage.getItem('knowlattice-qstats')).toBeNull();
   });
 
-  it('exportQbanks 与导入回环', () => {
-    addBank('回环', bank.questions);
-    const state = exportQbanks();
-    localStorage.clear();
-    expect(loadBanks()).toEqual([]);
-    expect(importQbanks(state)).toBe(1);
-    expect(loadBanks()[0].name).toBe('回环');
+  it('导入备份：合并、忽略非法条目', async () => {
+    await addBank('existing', []);
+    const n = await importQbanks([bank, { name: 42 }, { not: 'bank' }]);
+    expect(n).toBe(1);
+    expect((await loadBanks()).map((b) => b.name).sort()).toEqual(['existing', '生理']);
+    expect((await loadBanks()).find((b) => b.name === '生理')!.importedAt).toBe(100);
+  });
+
+  it('exportQbanks 与导入回环', async () => {
+    await addBank('回环', bank.questions);
+    const state = await exportQbanks();
+    await resetQbankStorageForTests();
+    resetQbankStatsForTests();
+    expect(await loadBanks()).toEqual([]);
+    expect(await importQbanks(state)).toBe(1);
+    expect((await loadBanks())[0].name).toBe('回环');
   });
 });
 
@@ -189,34 +218,34 @@ describe('选项批注', () => {
   };
   const seed = () => addBank('生理', [choice]);
 
-  it('写入的是指定选项，且落盘可读回', () => {
-    seed();
-    setOptionNote('生理', 'q-c1', 1, '  右移是亲和力下降  ');
-    const notes = loadBanks()[0].questions[0].optionNotes;
+  it('写入的是指定选项，且落盘可读回', async () => {
+    await seed();
+    await setOptionNote('生理', 'q-c1', 1, '  右移是亲和力下降  ');
+    const notes = (await loadBanks())[0].questions[0].optionNotes;
     expect(notes).toEqual(['', '右移是亲和力下降', '']);
   });
 
-  it('同一题多次批注互不覆盖', () => {
-    seed();
-    setOptionNote('生理', 'q-c1', 0, '正确项：记住 P50 增大');
-    setOptionNote('生理', 'q-c1', 2, '亲和力增大是左移');
-    expect(loadBanks()[0].questions[0].optionNotes)
+  it('同一题多次批注互不覆盖', async () => {
+    await seed();
+    await setOptionNote('生理', 'q-c1', 0, '正确项：记住 P50 增大');
+    await setOptionNote('生理', 'q-c1', 2, '亲和力增大是左移');
+    expect((await loadBanks())[0].questions[0].optionNotes)
       .toEqual(['正确项：记住 P50 增大', '', '亲和力增大是左移']);
   });
 
-  it('清空即删除，全部清空后不留空数组', () => {
-    seed();
-    setOptionNote('生理', 'q-c1', 1, '先写一条');
-    setOptionNote('生理', 'q-c1', 1, '   ');
-    expect(loadBanks()[0].questions[0].optionNotes).toBeUndefined();
+  it('清空即删除，全部清空后不留空数组', async () => {
+    await seed();
+    await setOptionNote('生理', 'q-c1', 1, '先写一条');
+    await setOptionNote('生理', 'q-c1', 1, '   ');
+    expect((await loadBanks())[0].questions[0].optionNotes).toBeUndefined();
   });
 
-  it('题库名/题号/下标不成立时原样返回', () => {
-    seed();
-    setOptionNote('不存在的库', 'q-c1', 0, 'x');
-    setOptionNote('生理', 'q-nope', 0, 'x');
-    setOptionNote('生理', 'q-c1', 9, 'x');
-    expect(loadBanks()[0].questions[0].optionNotes).toBeUndefined();
+  it('题库名/题号/下标不成立时原样返回', async () => {
+    await seed();
+    await setOptionNote('不存在的库', 'q-c1', 0, 'x');
+    await setOptionNote('生理', 'q-nope', 0, 'x');
+    await setOptionNote('生理', 'q-c1', 9, 'x');
+    expect((await loadBanks())[0].questions[0].optionNotes).toBeUndefined();
   });
 
   it('导入时读入 optionNotes，并按选项数补齐/裁齐', () => {
@@ -229,15 +258,15 @@ describe('选项批注', () => {
       .toBeUndefined();
   });
 
-  it('重导同名题库时按题干+选项接回旧批注', () => {
-    seed();
-    setOptionNote('生理', 'q-c1', 1, '右移是亲和力下降');
+  it('重导同名题库时按题干+选项接回旧批注', async () => {
+    await seed();
+    await setOptionNote('生理', 'q-c1', 1, '右移是亲和力下降');
     // 修订版：同一道题换了 id，另加一道新题
-    addBank('生理', [
+    await addBank('生理', [
       { ...choice, id: 'q-new-1' },
       { ...choice, id: 'q-new-2', stem: '另一题', options: ['x', 'y'], answer: 0, answerText: 'x' },
     ]);
-    const questions = loadBanks()[0].questions;
+    const questions = (await loadBanks())[0].questions;
     expect(questions[0].optionNotes).toEqual(['', '右移是亲和力下降', '']);
     expect(questions[1].optionNotes).toBeUndefined();
   });

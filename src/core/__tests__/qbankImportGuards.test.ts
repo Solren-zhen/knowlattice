@@ -8,8 +8,9 @@
  * 这个坑迟早会有人踩，所以报错要自己指路，而不是只说格式不对。
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { afterEach, describe, expect, it } from 'vitest';
-import { addBank, parseQbankJson } from '../qbank';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resetQbankStorageForTests } from '../../storage/qbank';
+import { addBank, loadBanks, parseQbankJson } from '../qbank';
 
 const repo = new URL('../../../', import.meta.url);
 const backupPath = new URL('knowlattice-导入-绿皮书题库.json', repo);
@@ -28,6 +29,11 @@ function catchMessage(fn: () => unknown): string {
 }
 
 describe('题库导入：失败也要指路', () => {
+  beforeEach(async () => {
+    localStorage.clear();
+    await resetQbankStorageForTests();
+  });
+
   it('笔记备份文件 → 明确告知走「从备份 .json 恢复」', () => {
     const backup = {
       app: 'knowlattice',
@@ -67,31 +73,26 @@ describe('题库导入：失败也要指路', () => {
   });
 });
 
-describe('题库存不下时：不能把浏览器英文原文甩给用户', () => {
+describe('题库存储', () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   afterEach(() => {
     if (original) Object.defineProperty(globalThis, 'localStorage', original);
     else delete (globalThis as Record<string, unknown>).localStorage;
   });
 
-  it('配额写满 → 中文说明 + 两条出路', () => {
+  it('保存到 IndexedDB，不依赖 localStorage 配额', async () => {
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       value: {
-        getItem: () => '[]',
+        getItem: () => null,
         setItem: () => {
           throw new Error("Failed to execute 'setItem' on 'Storage': exceeded the quota.");
         },
+        removeItem: () => {},
       },
     });
-    const msg = catchMessage(() =>
-      addBank('大题库', [{ id: 'q1', type: 'recall', stem: '题', options: [], answer: -1, answerText: '答' }])
-    );
-    expect(msg).toMatch(/题库存不下/);
-    expect(msg).toMatch(/约 5 MB/);
-    expect(msg).toMatch(/删掉几个/);
-    expect(msg).toMatch(/从备份 \.json 恢复/);
-    expect(msg).not.toMatch(/quota|Storage/); // 英文原文不该漏出去
+    await addBank('大题库', [{ id: 'q1', type: 'recall', stem: '题', options: [], answer: -1, answerText: '答' }]);
+    expect(await loadBanks()).toHaveLength(1);
   });
 });
 

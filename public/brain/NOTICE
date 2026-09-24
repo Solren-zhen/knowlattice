@@ -1,8 +1,8 @@
 KnowLattice - brain atlas module - third-party notices
 
-Both bundled datasets are permissively licensed and MAY be redistributed,
-including commercially. They are not covered by this project's GPL-3.0 license;
-each keeps its own terms. See also ../THIRD-PARTY-NOTICES.md.
+The bundled datasets may be redistributed, including commercially, subject to
+the separate terms below. They are not covered by this project's GPL-3.0
+license; each keeps its own terms. See also ../THIRD-PARTY-NOTICES.md.
 
 1. Harvard-Oxford Structural Atlas (cortical lateralized + subcortical)
    Source : FSL / FMRIB, University of Oxford

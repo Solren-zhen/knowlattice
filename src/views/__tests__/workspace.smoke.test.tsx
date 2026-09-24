@@ -5,7 +5,7 @@
  * 只断言「结构存在 + 关键流程可达」，不测像素。
  */
 import 'fake-indexeddb/auto';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { openDB } from 'idb';
 import Workspace from '../Workspace';
@@ -58,6 +58,71 @@ describe('Workspace 布局冒烟', () => {
     }
     cleanup();
   });
+
+  it('导航可展开为带分组的文字标签，并记住偏好', async () => {
+    localStorage.removeItem('knowlattice-rail-expanded');
+    const { container } = render(<Workspace />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '展开导航标签' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: '展开导航标签' }));
+    expect(container.querySelector('.rail')?.classList.contains('rail--expanded')).toBe(true);
+    expect(screen.getByText('工作区')).toBeTruthy();
+    expect(screen.getByText('学习')).toBeTruthy();
+    expect(localStorage.getItem('knowlattice-rail-expanded')).toBe('true');
+    cleanup();
+    localStorage.removeItem('knowlattice-rail-expanded');
+  });
+
+  it('目录入口会真实折叠章节卡片，并同步无障碍状态', async () => {
+    const { container } = render(<Workspace />);
+    const toggle = await screen.findByRole('button', { name: '目录' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('.card.c-tree')).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(container.querySelector('.card.c-tree')).toBeNull();
+    expect(container.querySelector('.deck')?.classList.contains('with-tree')).toBe(false);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('.card.c-tree')).toBeTruthy();
+    cleanup();
+  });
+
+  it('手机窄屏首次进入直接展示欢迎页，目录保持为可打开的抽屉', async () => {
+    localStorage.removeItem('knowlattice-rail-expanded');
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: ['(max-width: 700px)', '(max-width: 980px)', '(max-width: 1040px)'].includes(query),
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const { container } = render(<Workspace />);
+
+    await waitFor(() => expect(screen.getByText('你的知识库，从这里开始')).toBeTruthy());
+    expect(container.querySelector('.card.c-tree')).toBeNull();
+    expect(container.querySelector('.deck')?.classList.contains('with-tree')).toBe(false);
+    expect(screen.getByRole('button', { name: '目录' }).getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
+    fireEvent.click(screen.getByRole('button', { name: '目录' }));
+    expect(container.querySelector('.card.c-tree')).toBeTruthy();
+    const row = [...container.querySelectorAll('.tree-row.file')]
+      .find((candidate) => candidate.textContent?.includes('波尔效应'));
+    expect(row).toBeTruthy();
+    fireEvent.click(row as HTMLElement);
+    await waitFor(() => expect(container.querySelector('.cm-editor')).toBeTruthy(), { timeout: 8000 });
+    expect(container.querySelector('.card.c-tree')).toBeNull();
+    expect(container.querySelector('.card.c-insp')).toBeNull();
+
+    const backlinksToggle = container.querySelector<HTMLButtonElement>('.editor-toolbar button[aria-controls="backlinks-panel"]');
+    expect(backlinksToggle?.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(backlinksToggle!);
+    expect(container.querySelector('.card.c-insp')).toBeTruthy();
+    expect(backlinksToggle?.getAttribute('aria-expanded')).toBe('true');
+    cleanup();
+    vi.unstubAllGlobals();
+  }, 20000);
 
   it('未打开笔记时：目录卡片 + 欢迎页同时可见，目录列出全部笔记', async () => {
     const { container } = render(<Workspace />);

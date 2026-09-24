@@ -9,7 +9,7 @@ let _pdfjs: any = null;
 export async function loadPdfjs(): Promise<any> {
   if (_pdfjs) return _pdfjs;
   const pdfjs: any = await import('pdfjs-dist');
-  const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.js?url')).default;
+  const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
   _pdfjs = pdfjs;
   return pdfjs;

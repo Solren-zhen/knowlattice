@@ -11,9 +11,11 @@
  *     并同步反映到题库列表的进度行上。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import QuizView from '../QuizView';
 import type { QuizQuestion } from '../../core/qbank';
+import { getAllQuestionStats, resetQbankStorageForTests } from '../../storage/qbank';
+import { loadStats, resetQbankStatsForTests } from '../../core/qbankStats';
 
 const BANK = '绿皮书·生理学';
 const CH1 = '生理学·第1章 绪论';
@@ -43,19 +45,26 @@ const DOCS = new Map<string, string>([
   [NOTE2, '# 第2章 细胞的基本功能\n\n- 定义: 静息电位是细胞未受刺激时的膜电位\n'],
 ]);
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear();
+  resetQbankStatsForTests();
+  await resetQbankStorageForTests();
   localStorage.setItem('knowlattice-qbanks', JSON.stringify([
     { name: BANK, importedAt: Date.now(), questions: QUESTIONS },
   ]));
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  document.querySelectorAll('[data-quiz-test-opener]').forEach((opener) => opener.remove());
+});
 
-function setup() {
-  return render(
+async function setup() {
+  const rendered = render(
     <QuizView docs={DOCS} resolveLink={() => null} onOpenPath={vi.fn()} onClose={vi.fn()} />
   );
+  await screen.findByRole('button', { name: '组题' });
+  return rendered;
 }
 
 /** 打开某个题库的组题弹窗 */
@@ -66,8 +75,70 @@ const chip = (name: string) => screen.getByRole('button', { name });
 const text = (c: HTMLElement) => c.textContent ?? '';
 
 describe('自动组题 · 弹窗', () => {
-  it('实时显示候选与将抽题量，题量选择真的生效', () => {
-    const { container } = setup();
+  it('默认收起导入细节，用户需要时再展开', async () => {
+    const { container } = await setup();
+    expect(container.querySelector('.quiz-import')?.hasAttribute('hidden')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '导入题库' }));
+    expect(container.querySelector('.quiz-import')?.hasAttribute('hidden')).toBe(false);
+    expect(screen.getByRole('button', { name: '收起导入' }).getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('空题库首次打开时直接展示导入选项', async () => {
+    localStorage.removeItem('knowlattice-qbanks');
+    await resetQbankStorageForTests();
+    const rendered = render(
+      <QuizView docs={DOCS} resolveLink={() => null} onOpenPath={vi.fn()} onClose={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: '收起导入' })).toBeTruthy());
+    expect(rendered.container.querySelector('.quiz-import')?.hasAttribute('hidden')).toBe(false);
+  });
+
+  it('进入组题子界面后保留对话框焦点，返回外层后关闭可还焦到启动点', async () => {
+    const opener = document.createElement('button');
+    opener.textContent = '打开题库';
+    opener.dataset.quizTestOpener = 'true';
+    document.body.appendChild(opener);
+    opener.focus();
+    const rendered = await setup();
+
+    openCompose();
+    const composeDialog = screen.getByRole('dialog', { name: `自动组题：${BANK}` });
+    expect(composeDialog.contains(document.activeElement)).toBe(true);
+    fireEvent.click(composeDialog.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!);
+    expect(screen.getByRole('dialog', { name: '题库练习' })).toBeTruthy();
+
+    rendered.unmount();
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    opener.remove();
+  });
+
+  it('对话框有可访问名称、限制 Tab 焦点并在关闭后还焦', async () => {
+    const opener = document.createElement('button');
+    opener.textContent = '打开题库';
+    opener.dataset.quizTestOpener = 'true';
+    document.body.appendChild(opener);
+    opener.focus();
+    const rendered = await setup();
+    const dialog = screen.getByRole('dialog', { name: '题库练习' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+
+    const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not([disabled])'));
+    const first = buttons[0];
+    const last = dialog.querySelector('summary') as HTMLElement;
+    expect(last).toBeTruthy();
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    rendered.unmount();
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    opener.remove();
+  });
+
+  it('实时显示候选与将抽题量，题量选择真的生效', async () => {
+    const { container } = await setup();
     openCompose();
 
     // 默认 20 题 > 题库 12 题 → 只能给 12
@@ -82,8 +153,8 @@ describe('自动组题 · 弹窗', () => {
     expect(text(container)).not.toContain('组题 · '); // 弹窗已关
   });
 
-  it('章节筛选真的在过滤，且候选数随之变化', () => {
-    const { container } = setup();
+  it('章节筛选真的在过滤，且候选数随之变化', async () => {
+    const { container } = await setup();
     openCompose();
     expect(text(container)).toContain('候选 12 题');
 
@@ -97,8 +168,8 @@ describe('自动组题 · 弹窗', () => {
     expect(text(container)).toContain('候选 12 题');
   });
 
-  it('候选为 0 时禁用「开始练习」，而不是让用户点了没反应', () => {
-    const { container } = setup();
+  it('候选为 0 时禁用「开始练习」，而不是让用户点了没反应', async () => {
+    const { container } = await setup();
     openCompose();
     // 没做过任何题 → 「做错过」必然是空池
     fireEvent.click(chip('做错过'));
@@ -108,8 +179,8 @@ describe('自动组题 · 弹窗', () => {
   });});
 
 describe('自动组题 · 作答落盘', () => {
-  it('答错一题：逐题历史与错题本都写了，题库列表的进度行跟着更新', () => {
-    setup();
+  it('答错一题：逐题历史与错题本都写了，题库列表的进度行跟着更新', async () => {
+    await setup();
     openCompose();
     fireEvent.click(chip('10'));
     fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
@@ -117,19 +188,15 @@ describe('自动组题 · 作答落盘', () => {
     // 正确答案是第 1 个选项，这里点第 2 个 → 答错
     fireEvent.click(screen.getByRole('button', { name: /容易结合氧/ }));
 
-    const raw = localStorage.getItem('knowlattice-qstats');
-    expect(raw).toBeTruthy();
-    const stats = JSON.parse(raw!) as Record<string, Record<string, number[]>>;
-    expect(Object.keys(stats[BANK])).toHaveLength(1);
-    // 紧凑数组，不是对象（存储体积的设计前提）
-    expect(Array.isArray(Object.values(stats[BANK])[0])).toBe(true);
+    await waitFor(() => expect(Object.keys(loadStats()[BANK] ?? {})).toHaveLength(1));
+    expect((await getAllQuestionStats())[0].tuple).toHaveLength(11);
 
     // 答错且能关联到笔记 → 错题本也要有
     expect(localStorage.getItem('knowlattice-mistakes')).toBeTruthy();
 
     // 重开面板：进度行应显示做过 1 / 错过 1
     cleanup();
-    const again = setup();
+    const again = await setup();
     expect(text(again.container)).toContain('做过 1');
     expect(text(again.container)).toContain('错过 1');
 

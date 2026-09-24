@@ -6,6 +6,7 @@
 import { openDB } from 'idb';
 import { saveTodos, dayKey, addDays, type Todo } from './todos';
 import { importDays } from './stats';
+import { importQbanks } from './qbank';
 
 const DB_NAME = 'knowlattice';
 interface DemoNote {
@@ -171,7 +172,7 @@ export async function seedDemo(): Promise<number> {
     tx.objectStore('files').put({ path: n.path, content, mtime, size: new TextEncoder().encode(content).length });
   }
   await tx.done;
-  localStorage.setItem('knowlattice-qbanks', JSON.stringify([DEMO_BANK]));
+  await importQbanks([DEMO_BANK]);
   saveTodos(DEMO_TODOS);
   localStorage.setItem('knowlattice-mistakes', JSON.stringify(DEMO_MISTAKES));
   importDays(demoDays());
