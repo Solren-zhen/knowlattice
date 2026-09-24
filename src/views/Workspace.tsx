@@ -45,6 +45,7 @@ import DraftGen from './DraftGen';
 import TodoView from './TodoView';
 import TagBrowser from './TagBrowser';
 import Dashboard from './Dashboard';
+import SafetyNotice from './SafetyNotice';
 import {
   IconSave, IconTrash, IconChevron, IconBack, IconFwd, IconSearch,
   IconFolder, IconLink, IconClose,
@@ -70,7 +71,7 @@ export default function Workspace() {
   const vault = useVault();
   const [draft, setDraft] = useState<string | null>(null); // 编辑中内容（未保存）
   const [dirty, setDirty] = useState(false);
-  const [showBacklinks, setShowBacklinks] = useState(true);
+  const [showBacklinks, setShowBacklinks] = useState(() => window.matchMedia?.('(max-width: 980px)').matches !== true);
   const [mindOpen, setMindOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -88,8 +89,9 @@ export default function Workspace() {
   const [pdfOpen, setPdfOpen] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(false);
   /** 目录卡片显隐（导航轨「目录」按钮切换，窄屏可收起给正文让位） */
-  const [treeOpen, setTreeOpen] = useState(true);
+  const [treeOpen, setTreeOpen] = useState(() => window.matchMedia?.('(max-width: 700px)').matches !== true);
   const [anatomyManifest, setAnatomyManifest] = useState<AnatomyManifest | null>(null);
   const [anatomySelected, setAnatomySelected] = useState<ManifestOrgan | null>(null);
   /** 结构笔记卡片：点击点（视口坐标；null = 从列表选中 → 停靠）+ 本次选择是否已被手动关掉 */
@@ -516,18 +518,35 @@ export default function Workspace() {
   const activeMistake = activePath ? loadMistakes()[activePath] : null;
   const activeExam = activePath
     ? parseFrontmatterCached(activePath, vault.docs.get(activePath) ?? '').meta.exam
-    : null;
+        : null;
   const activeSections = activeStatus && activeStatus.total > 1 ? ` · ${activeStatus.learned}/${activeStatus.total} 节` : '';
   const activeDueText = activeCard
     ? (activeStatus!.dueNow
         ? '到期待复习'
         : `${activeCard.reps} 次 · 下次 ${new Date(activeCard.due).toLocaleDateString('zh-CN')}`) + activeSections
     : null;
+  const activeRailItem = searchOpen ? 'search'
+    : pdfOpen ? 'pdf'
+      : anatomyOpen ? 'anatomy'
+        : brainOpen ? 'brain'
+          : graphOpen ? 'graph'
+            : reviewOpen ? 'review'
+              : mistakeOpen ? 'mistake'
+                : quizOpen ? 'quiz'
+                  : todoOpen ? 'todo'
+                    : tagOpen ? 'tag'
+                      : dashOpen ? 'dashboard'
+                        : aiOpen ? 'ai'
+                          : draftOpen ? 'draft'
+                            : historyOpen ? 'history'
+                              : convertOpen ? 'convert'
+                                : null;
 
   return (
     <div className="app" onKeyDown={onKeyDown} tabIndex={-1}>
       {/* 左侧导航轨：功能入口 + 字体/主题切换（见 Rail.tsx） */}
       <Rail
+        activeItem={activeRailItem}
         treeOpen={treeOpen}
         onToggleTree={() => setTreeOpen((v) => !v)}
         onHome={goHome}
@@ -546,6 +565,7 @@ export default function Workspace() {
         onDraft={openDraft}
         onPdf={() => setPdfOpen(true)}
         onConvert={() => setConvertOpen(true)}
+        onNotice={() => setNoticeOpen(true)}
       />
 
       {/* 悬浮工作台：目录 / 编辑 / 关联 三张卡片漂在背景之上 */}
@@ -562,7 +582,10 @@ export default function Workspace() {
             <ChapterTree
               tree={vault.tree}
               currentPath={vault.currentPath}
-              onOpen={openNote}
+              onOpen={(path) => {
+                openNote(path);
+                if (window.matchMedia?.('(max-width: 700px)').matches) setTreeOpen(false);
+              }}
               onCreate={handleCreate}
               onExport={() => vault.exportAll()}
               onExportFolder={() => vault.exportMdFolder()}
@@ -617,6 +640,8 @@ export default function Workspace() {
                   className="btn-small"
                   onClick={() => setShowBacklinks(!showBacklinks)}
                   title="关联面板：反链 / 复习 / 错题 / 真题"
+                  aria-expanded={showBacklinks}
+                  aria-controls="backlinks-panel"
                 >
                   关联 <IconChevron open={showBacklinks} />
                 </button>
@@ -672,7 +697,7 @@ export default function Workspace() {
             </div>
 
             {showBacklinks && (
-              <div className="card c-insp">
+              <div className="card c-insp" id="backlinks-panel">
                 <div className="card-head">
                   <IconLink size={15} />
                   <span>关联 · {vault.currentBacklinks.length}</span>
@@ -809,8 +834,16 @@ export default function Workspace() {
         />
       )}
       {tagOpen && <TagBrowser docs={vault.docs} onOpenPath={(p) => { setTagOpen(false); openNote(p); }} onClose={() => setTagOpen(false)} />}
-      {dashOpen && <Dashboard docs={vault.docs} onClose={() => setDashOpen(false)} />}
+      {dashOpen && (
+        <Dashboard
+          docs={vault.docs}
+          onClose={() => setDashOpen(false)}
+          onOpenReview={() => { setDashOpen(false); setReviewOpen(true); }}
+          onOpenQuiz={() => { setDashOpen(false); setQuizOpen(true); }}
+        />
+      )}
       {aiOpen && <AiPanel onClose={() => setAiOpen(false)} />}
+      {noticeOpen && <SafetyNotice onClose={() => setNoticeOpen(false)} />}
       {draftOpen && (
         <DraftGen
           initialText={draftText}

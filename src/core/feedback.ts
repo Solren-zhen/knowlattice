@@ -48,23 +48,48 @@ export function confirmBox(opts: ConfirmOptions): Promise<boolean> {
     if (typeof document === 'undefined') { resolve(false); return; }
     const overlay = document.createElement('div');
     overlay.className = 'mv-confirm-overlay';
-    overlay.innerHTML = `
-      <div class="mv-confirm" role="alertdialog" aria-modal="true" aria-label="${opts.title}">
-        <div class="mv-confirm-title">${opts.danger ? '<span class="mv-confirm-danger-dot"></span>' : ''}${opts.title}</div>
-        ${opts.detail ? `<div class="mv-confirm-detail"></div>` : ''}
-        <div class="mv-confirm-actions">
-          <button class="mv-confirm-cancel">${opts.cancelText ?? '取消'}</button>
-          <button class="mv-confirm-ok ${opts.danger ? 'danger' : ''}">${opts.okText ?? '确定'}</button>
-        </div>
-      </div>`;
-    if (opts.detail) {
-      // detail 走 textContent 防注入（innerHTML 只用于固定结构）
-      overlay.querySelector('.mv-confirm-detail')!.textContent = opts.detail;
+    const titleText = String(opts.title ?? '');
+    const dialog = document.createElement('div');
+    dialog.className = 'mv-confirm';
+    dialog.setAttribute('role', 'alertdialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', titleText);
+
+    const title = document.createElement('div');
+    title.className = 'mv-confirm-title';
+    if (opts.danger) {
+      const dot = document.createElement('span');
+      dot.className = 'mv-confirm-danger-dot';
+      title.append(dot);
     }
+    title.append(document.createTextNode(titleText));
+    dialog.append(title);
+
+    if (opts.detail) {
+      const detail = document.createElement('div');
+      detail.className = 'mv-confirm-detail';
+      detail.textContent = String(opts.detail);
+      dialog.append(detail);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'mv-confirm-actions';
+    const cancel = document.createElement('button');
+    cancel.className = 'mv-confirm-cancel';
+    cancel.textContent = String(opts.cancelText ?? '取消');
+    const ok = document.createElement('button');
+    ok.className = `mv-confirm-ok${opts.danger ? ' danger' : ''}`;
+    ok.textContent = String(opts.okText ?? '确定');
+    actions.append(cancel, ok);
+    dialog.append(actions);
+    overlay.append(dialog);
     document.body.appendChild(overlay);
     requestAnimationFrame(() => overlay.classList.add('on'));
 
+    let finished = false;
     const done = (result: boolean) => {
+      if (finished) return;
+      finished = true;
       overlay.classList.remove('on');
       setTimeout(() => overlay.remove(), 180);
       document.removeEventListener('keydown', onKey, true);
@@ -81,6 +106,6 @@ export function confirmBox(opts: ConfirmOptions): Promise<boolean> {
       else if (t.classList.contains('mv-confirm-cancel') || t === overlay) done(false);
     });
     // 默认聚焦确认键，Enter 直接触发
-    requestAnimationFrame(() => (overlay.querySelector('.mv-confirm-ok') as HTMLElement | null)?.focus());
+    requestAnimationFrame(() => ok.focus());
   });
 }

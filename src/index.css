@@ -1990,6 +1990,43 @@ a.wikilink.missing::after {
     border-left: none; border-top: 1px solid var(--border);
     max-height: 42vh;
   }
+  .todo-panel > .panel__head {
+    min-height: 0; height: auto; flex-wrap: wrap; gap: 8px 10px; padding: 10px 16px;
+  }
+  .todo-panel .panel__title { order: 0; flex: 1 1 100%; min-width: 0; }
+  .todo-panel .wb-tabs { order: 1; flex: 0 0 auto; margin-left: 0; }
+  .todo-panel .panel__actions {
+    order: 2; flex: 1 1 360px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 4px;
+  }
+}
+@media (max-width: 600px) {
+  .panel.todo-panel { width: calc(100vw - 32px); max-width: calc(100vw - 32px); }
+  .todo-panel > .panel__head {
+    min-height: 0; height: auto; flex-wrap: wrap; gap: 8px 6px; padding: 10px 12px;
+  }
+  .todo-panel .panel__title { order: 0; flex: 1 1 100%; min-width: 0; }
+  .todo-panel .panel__title > .muted { display: none; }
+  .todo-panel .wb-tabs { order: 1; flex: 1 1 100%; width: 100%; margin: 0; justify-content: flex-start; }
+  .todo-panel .panel__actions {
+    order: 2; display: flex; flex: 1 1 100%; min-width: 0; flex-wrap: wrap; justify-content: flex-start; gap: 4px;
+  }
+  .todo-panel .panel__actions > button { flex-shrink: 0; white-space: nowrap; }
+  .todo-panel .panel__actions > .wb-chip { margin-right: auto; }
+  .todo-body {
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden; min-width: 0;
+  }
+  .todo-side {
+    display: flex; align-items: center; gap: 6px; max-width: 100%;
+    overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); padding: 4px 8px;
+  }
+  .todo-side__group { display: flex; align-items: center; gap: 4px; flex: none; margin: 0; }
+  .todo-side__title { display: none; }
+  .todo-side__item { width: auto; flex: none; padding: 6px 8px; white-space: nowrap; }
+  .todo-main-col { grid-column: 1; min-width: 0; min-height: 0; }
+  .todo-detail { grid-column: 1; max-height: 24vh; min-height: 0; border-left: 0; border-top: 1px solid var(--border); }
+  .todo-foot { max-height: 18vh; overflow-y: auto; }
+  .todo-foot__grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ============================================================ M10：番茄工作台（专注 / 待办 / 统计）
@@ -2127,6 +2164,15 @@ a.wikilink.missing::after {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   gap: 10px; padding: var(--sp-3) var(--sp-4);
 }
+.dash-next {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin: 0 var(--sp-4) var(--sp-3); padding: 14px 16px;
+  border: 1px solid var(--border-accent); border-radius: var(--r-lg);
+  background: var(--accent-soft);
+}
+.dash-next > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.dash-next strong { font-size: var(--fs-body); color: var(--text); }
+.dash-next .btn-primary { width: auto; flex-shrink: 0; padding: 8px 14px; font-size: var(--fs-control); }
 .dash-card {
   background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: 14px; padding: 16px 18px;
@@ -2156,8 +2202,10 @@ a.wikilink.missing::after {
   display: flex; align-items: flex-end; gap: 8px; height: 96px;
   border-bottom: 1px solid var(--border); padding-bottom: 6px;
 }
-.dash-bar-wrap { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.dash-bar-wrap { flex: 1; display: grid; grid-template-rows: 15px minmax(0, 1fr) 22px; justify-items: center; height: 100%; }
+.dash-bar-count { min-height: 15px; color: var(--text-2); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .dash-bar {
+  align-self: end;
   width: 55%; max-width: 24px; border-radius: 6px 6px 0 0;
   background: linear-gradient(180deg, var(--accent) 0%, #818cf8 100%);
   box-shadow: 0 0 12px var(--accent-soft);
@@ -2169,12 +2217,14 @@ a.wikilink.missing::after {
   filter: brightness(1.15);
 }
 .dash-bar-label { font-size: var(--fs-micro); margin-top: 5px; color: var(--muted); font-weight: 500; }
+.dash-bar-wrap.is-today .dash-bar-label { color: var(--accent); font-weight: 700; }
 .dash-tip { padding: 0 var(--sp-4) var(--sp-3); font-size: var(--fs-caption); }
 .dash-demo {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 0 var(--sp-4) var(--sp-3); font-size: var(--fs-caption);
 }
-.dash-demo .muted { max-width: 420px; }
+.dash-demo .muted { max-width: 420px; line-height: 1.65; }
+.dash-tip { line-height: 1.7; }
 
 /* ============================================================ 思维导图
    节点配色走 MindMapView.tsx 里的 theme（22 个 CSS 变量，值全部指向本项目 token，
@@ -2625,6 +2675,24 @@ a.wikilink.missing::after {
   padding: var(--sp-4) var(--sp-5);
   border-bottom: 1px solid var(--border);
 }
+.quiz-import[hidden] { display: none; }
+.quiz-help[hidden] { display: none; }
+.quiz-import-toggle.btn-primary { width: auto; padding: 6px 12px; font-size: var(--fs-control); }
+.quiz-empty .btn-primary { width: auto; margin: 14px auto 0; padding: 9px 18px; font-size: var(--fs-control); }
+.bank-more { position: relative; flex-shrink: 0; }
+.bank-more > summary {
+  list-style: none; display: inline-flex; align-items: center; justify-content: center;
+  min-height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-md);
+  color: var(--text-2); background: var(--bg-raised); font-size: var(--fs-control); cursor: pointer;
+}
+.bank-more > summary::-webkit-details-marker { display: none; }
+.bank-more > summary:hover { border-color: var(--border-accent); color: var(--accent); background: var(--accent-soft); }
+.bank-more-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 5;
+  display: flex; flex-direction: column; gap: 4px; min-width: 132px; padding: 6px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-raised); box-shadow: var(--shadow-lg);
+}
+.bank-more-menu .btn-small { justify-content: flex-start; border-color: transparent; box-shadow: none; }
 .quiz-paste {
   flex: 1; min-width: 200px;
   border: 1px solid var(--border-strong); border-radius: var(--r-sm);
@@ -3088,13 +3156,42 @@ a.wikilink.missing::after {
   padding: 5px 10px; font-size: var(--fs-control);
 }
 .ai-custom input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); outline: none; }
-.ai-hint { padding: 0 var(--sp-4) var(--sp-2); margin: 0; }
+.ai-hint { padding: 0 var(--sp-4) var(--sp-2); margin: 0; line-height: 1.55; }
 .ai-frame {
   flex: 1; min-height: 0;
   border: none; border-top: 1px solid var(--border);
   width: 100%;
   background: #fff;
 }
+.ai-frame-blocked {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px; padding: var(--sp-6); text-align: center;
+  border-top: 1px solid var(--border); color: var(--text-2);
+}
+.ai-frame-blocked strong { color: var(--text); }
+.ai-frame-blocked span { max-width: 300px; font-size: var(--fs-caption); line-height: 1.6; }
+
+/* ============================================================ 关于、许可与安全边界 */
+.notice-overlay {
+  position: fixed; inset: 0; z-index: 95; display: grid; place-items: center;
+  padding: 24px; background: rgba(15, 23, 42, 0.28); backdrop-filter: blur(5px);
+}
+.notice-panel {
+  width: min(620px, 100%); max-height: min(720px, 88vh); overflow: auto;
+  background: var(--bg-raised); color: var(--text); border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-modal);
+  animation: modal-in var(--t-fast) var(--ease);
+}
+.notice-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--border);
+}
+.notice-header h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fs-title); }
+.notice-body { display: grid; gap: var(--sp-5); padding: var(--sp-5); }
+.notice-body section { display: grid; gap: 6px; }
+.notice-body h3 { margin: 0; font-size: var(--fs-body); }
+.notice-body p { margin: 0; color: var(--text-2); font-size: var(--fs-caption); line-height: 1.7; }
+.notice-link { color: var(--accent); font-size: var(--fs-caption); }
 
 /* ============================================================ 视觉打磨：树 / 编辑区 */
 /* 章节树行：可交互行需相对定位 */
@@ -3214,8 +3311,27 @@ a.wikilink.missing::after {
   /* 抬升层级，保证飞出菜单（字体菜单）稳定压在右侧卡片之上 */
   position: relative; z-index: 30;
 }
+.rail-expand {
+  width: 42px; height: 42px; flex-shrink: 0; margin: 0 0 6px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  border: 1px solid transparent; border-radius: var(--r-md);
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.rail-expand:hover { color: var(--accent); background: var(--accent-soft); }
+.rail-expand-icon { width: 30px; height: 30px; display: grid; place-items: center; flex-shrink: 0; }
+.rail-expand-icon svg { width: 16px; height: 16px; }
+.rail--expanded .rail-expand-icon svg { transform: rotate(180deg); }
+.rail-expand-label, .rail-label, .rail-section-label, .rail-group-divider span { display: none; }
+.rail-home {
+  width: 42px; height: 42px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: var(--r-md);
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.rail-home:hover { color: var(--accent); background: var(--accent-soft); }
+.rail-home > svg { width: 22px; height: 22px; }
 /* 品牌标：同时是「回到主界面」按钮 */
-.rail-logo {
+.rail-logo, .rail-home {
   width: 40px; height: 40px; border-radius: 13px;
   border: none; padding: 0; background: transparent;
   display: flex; align-items: center; justify-content: center;
@@ -3228,6 +3344,7 @@ a.wikilink.missing::after {
 .rail-logo:hover svg { filter: drop-shadow(0 6px 20px rgba(79, 70, 229, 0.65)); }
 .rail-logo:active { transform: scale(0.95); }
 .rail-sep { width: 26px; height: 1px; background: var(--border); margin: 7px 0; flex-shrink: 0; }
+.rail-group-divider { width: 42px; height: 1px; margin: 7px 0; flex-shrink: 0; background: var(--border); }
 /* 上组滚动容器：窗口变矮时只有这一组滚，下组（AI/草稿/PDF/转换/字体/主题）钉在底部。
    为什么不整条轨滚动：.rail 必须保持 overflow:visible，字体飞出菜单才能探出 66px 之外；
    一旦整条轨变成滚动容器，overflow-x 会被一并算成 auto，飞出菜单会被裁掉。 */
@@ -3252,6 +3369,29 @@ a.wikilink.missing::after {
   display: flex; align-items: center; justify-content: center;
   transition: all var(--t-fast) var(--ease);
   flex-shrink: 0;
+}
+.rail--expanded { width: 208px; align-items: stretch; padding: 12px 10px 10px; }
+.rail--expanded .rail-expand { width: 100%; justify-content: flex-start; padding: 0 8px; border-color: var(--border); background: var(--bg-raised); }
+.rail--expanded .rail-expand-label { display: inline; font-size: var(--fs-caption); font-weight: 600; }
+.rail--expanded .rail-home, .rail--expanded .rail-btn { width: 100%; justify-content: flex-start; gap: 11px; padding: 0 10px; text-align: left; }
+.rail--expanded .rail-home > svg, .rail--expanded .rail-btn > svg { width: 19px; height: 19px; flex: 0 0 19px; }
+.rail--expanded .rail-label { display: inline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); font-weight: 500; }
+.rail--expanded .rail-home { margin-bottom: 2px; }
+.rail--expanded .rail-section-label { display: block; width: 100%; padding: 8px 10px 3px; color: var(--muted); font-size: var(--fs-micro); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.rail--expanded .rail-section-label--bottom { flex-shrink: 0; }
+.rail--expanded .rail-sep, .rail--expanded .rail-group-divider { width: 100%; }
+.rail--expanded .rail-group-divider { position: relative; display: flex; align-items: center; justify-content: center; margin: 9px 0 3px; }
+.rail--expanded .rail-group-divider span { display: inline; position: absolute; padding: 0 8px; background: var(--bg-raised); color: var(--muted); font-size: var(--fs-micro); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.rail--expanded .rail-scroll { align-items: stretch; gap: 3px; }
+.rail--expanded .rail-btn.on::before { left: -11px; }
+.rail--expanded .rail-font-wrap { width: 100%; align-self: stretch; }
+.rail--expanded .rail-flyout { left: calc(100% + 4px); }
+@media (max-width: 1040px) {
+  .rail--expanded { position: absolute; inset: 0 auto 0 0; z-index: 45; box-shadow: var(--shadow-lg); }
+  .rail--expanded::after {
+    content: ''; position: fixed; top: 0; right: auto; bottom: 0; left: 208px;
+    width: max(0px, calc(100vw - 208px)); background: rgba(15, 23, 42, 0.22); z-index: -1;
+  }
 }
 .rail-btn svg { width: 20px; height: 20px; transition: transform var(--t-fast) var(--ease); }
 .rail-btn:hover {
@@ -3286,13 +3426,13 @@ a.wikilink.missing::after {
   padding: 6px; min-width: 158px;
   animation: rise-in var(--t-fast) var(--ease);
 }
-.rail-flyout div {
-  padding: 8px 12px; border-radius: var(--r-sm);
-  font-size: 13px; cursor: pointer; white-space: nowrap;
-  transition: all var(--t-fast) var(--ease);
+.rail-flyout button {
+  width: 100%; padding: 8px 12px; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-control);
+  text-align: left; white-space: nowrap; cursor: pointer;
 }
-.rail-flyout div:hover { background: var(--accent-soft); color: var(--accent); }
-.rail-flyout div.active { color: var(--accent); font-weight: 600; }
+.rail-flyout button:hover, .rail-flyout button.active { background: var(--accent-soft); color: var(--accent); }
+.rail-flyout button.active { font-weight: 600; }
 
 /* 窗口不够高时收紧一档：不收紧时整条轨要 963px，常见的 900px 视口就得滚；
    收紧后约 840px，900 / 860 都不用滚。再矮的窗口由 .rail-scroll 滚动兜底。
@@ -3302,7 +3442,7 @@ a.wikilink.missing::after {
 @media (max-height: 980px) {
   .rail { padding: 10px 0 8px; }
   .rail-scroll { gap: 3px; }
-  .rail-logo { margin-bottom: 6px; }
+  .rail-logo, .rail-home { margin-bottom: 6px; }
   .rail-btn { width: 38px; height: 38px; border-radius: 11px; }
   .rail-btn svg { width: 18px; height: 18px; }
   .rail-sep { margin: 5px 0; }
@@ -3321,18 +3461,12 @@ a.wikilink.missing::after {
 
 /* 欢迎舞台：铺满整个视口后居中 */
 .welcome-stage {
-  position: fixed; inset: 14px; z-index: 1;
+  position: absolute; inset: 14px; z-index: 1;
   display: flex; align-items: center; justify-content: center;
   overflow: auto; pointer-events: none;
   scrollbar-gutter: stable both-edges;
 }
 .welcome-stage > * { pointer-events: auto; }
-@media (max-width: 1400px) {
-  .deck.with-tree .welcome-stage {
-    position: absolute;
-    top: 14px; bottom: 14px; right: 14px; left: 276px;
-  }
-}
 
 /* 卡片：悬浮面板的通用外壳（Bento 级双层流光边框 + 磨砂质感） */
 .card {
@@ -3392,6 +3526,7 @@ a.wikilink.missing::after {
 @media (max-width: 1240px) {
   .c-tree { flex-basis: 214px; }
   .c-insp { flex-basis: 204px; }
+  .deck.with-tree .welcome-stage { left: 242px; }
   .toolbar-search span { display: none; }
   .toolbar-search { padding: 0 9px; }
   /* 工具栏降级第一级：只收起快捷键提示（Ctrl K / Ctrl S），动作控件全部保留 */
@@ -3404,6 +3539,7 @@ a.wikilink.missing::after {
 @media (max-width: 1040px) {
   .c-tree { flex-basis: 188px; }
   .c-insp { flex-basis: 180px; }
+  .deck.with-tree .welcome-stage { left: 216px; }
   /* 降级第二级：收起字数与分组竖线，把宽度让给文件名和动作本身 */
   .editor-toolbar .toolbar-divider,
   .editor-toolbar .word-count { display: none; }
@@ -3790,6 +3926,18 @@ a.wikilink.missing::after {
 @media (max-width: 900px) {
   .welcome-stage > .preview.placeholder .teach-steps { grid-template-columns: 1fr; }
 }
+@media (max-width: 420px) {
+  .hero-cta .hero-primary,
+  .hero-cta .btn { flex-shrink: 0; white-space: nowrap; }
+}
+@media (max-width: 360px) {
+  .welcome-stage > .preview.placeholder { padding-inline: 12px; }
+  .hero-cta { width: min(100%, 260px); flex-direction: column; align-items: stretch; gap: 8px; }
+  .hero-cta .hero-primary,
+  .hero-cta .btn { width: 100%; justify-content: center; padding-inline: 12px; }
+  .preview.placeholder .teach-step { flex-wrap: wrap; }
+  .preview.placeholder .teach-step kbd { flex: 0 0 auto; white-space: nowrap; }
+}
 
 /* ---- 3. 浮层头部统一：一个高度 / 一个内距 / 一个底面 ----
    .panel__head 已经定义了 52px 规格，但各面板又用 quiz-header / mistake-header
@@ -3943,7 +4091,7 @@ a.wikilink.missing::after {
   .c-tree {
     position: absolute;
     top: 14px; left: 14px; bottom: 14px;
-    width: min(248px, 78vw);
+    width: min(248px, 78vw, calc(100vw - 94px));
     z-index: 21;
     box-shadow: var(--shadow-lg);
   }

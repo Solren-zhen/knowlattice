@@ -47,10 +47,12 @@ describe('首页 hero · 文案与排版', () => {
     expect(steps[steps.length - 1].classList.contains('wide')).toBe(true);
   });
 
-  it('副标题收敛到 3 个要点', () => {
+  it('副标题以三段概括产品价值，不暴露标记语法', () => {
     const { container } = render(<Preview content={null} />);
 
     const sub = container.querySelector('.hero-sub')?.textContent ?? '';
     expect(sub.split('·').length).toBe(3);
+    expect(sub).toBe('笔记沉淀知识 · 层级梳理思路 · 双链串联全局');
+    expect(sub).not.toContain('[[');
   });
 });

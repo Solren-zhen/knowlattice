@@ -8,15 +8,16 @@
  * 为什么不并进 `core/srs.ts` 那张表：那张表的键是笔记/小节卡（`<path>#<标题>`），
  * 与题目 id 不在同一个键空间；混在一起会让「笔记复习卡片」的统计被十几万道题稀释。
  *
- * 存储：localStorage 的**独立键**（`knowlattice-qbanks` 是整份重写的且已接近
- * 每站点约 5 MB 上限，不能并进去）。**必须紧凑**，算一笔账：
+ * 存储：IndexedDB 独立记录。逐题只写入变化项，并兼容迁移旧 localStorage 数据。
+ * 紧凑编码用于控制 IndexedDB 占用与备份体积：
  *   一道题的完整 ts-fsrs Card JSON ≈ 180 字符（字段名每道题重复一遍）
- *   20,000 道答过的题：180 × 20k = 3.6 M 字符 ≈ 7.2 MB（UTF-16 计）→ 直接爆 5 MB
- *   改存数字数组后同一批量 ≈ 0.9 M 字符 ≈ 1.8 MB → 装得下
+ *   20,000 道答过的题：180 × 20k = 3.6 M 字符 ≈ 7.2 MB（UTF-16 计）
+ *   改存数字数组后同一批量 ≈ 0.9 M 字符 ≈ 1.8 MB
  * 时间戳另外存「epoch 分钟」而不是毫秒：13 位 → 8 位，两万道题再省约 100 KB。
  * FSRS 的间隔以天计，分钟精度绰绰有余。
  */
 import { createEmptyCard, fsrs, generatorParameters, Rating as FSRSRating, type Card } from 'ts-fsrs';
+import { getAllQuestionStats, migrateLegacyQuestionStats, putQuestionStat, removeQuestionStats, replaceQuestionStats, type StoredQuestionStat } from '../storage/qbank';
 
 /** 一道题的逐题记录。时间都是 epoch **毫秒**（存储层再折算成分钟）。 */
 export interface QStat {
@@ -44,7 +45,7 @@ export type BankStats = Record<string, QStat>;
 /** 题库名 → qid → 记录。题库名只存一次，不按题目重复。 */
 export type StatsMap = Record<string, BankStats>;
 
-const KEY = 'knowlattice-qstats';
+const LEGACY_KEY = 'knowlattice-qstats';
 const MIN = 60_000;
 
 const f = fsrs(generatorParameters());
@@ -100,79 +101,65 @@ function fromTuple(v: unknown): QStat | null {
   };
 }
 
-/**
- * 模块级缓存，按 localStorage 原始串比对（与 core/srs.ts 同策略）：
- * 题库列表每渲染一次就要读一遍统计，不能反复 JSON.parse 整张表；
- * 外部直接写存储（另一个标签页、测试里 clear）时下一次读会自己失效重解析。
- */
-let cacheRaw: string | null = null;
+/** 模块级运行时缓存；组件挂载时异步从 IndexedDB 刷新。 */
 let cache: StatsMap = {};
-/** 内存里有**没落盘成功**的改动。见 loadStats / save 的注释。 */
-let dirty = false;
-/** 上一次落盘是否因配额失败。UI 据此提示一次，不静默丢学习记录。 */
+let initialized = false;
 let saveFailed = false;
 
-export function loadStats(): StatsMap {
-  let rawStr: string;
+export async function initializeStats(): Promise<StatsMap> {
+  let raw: string | null = null;
+  let localStorageReadable = true;
   try {
-    rawStr = localStorage.getItem(KEY) ?? '{}';
+    raw = localStorage.getItem(LEGACY_KEY);
   } catch {
-    return cache;
+    localStorageReadable = false;
   }
-  // dirty：内存里有存不下的新记录。此时磁盘上那份是旧的，比对必然「不一致」，
-  // 若因此重解析就会把刚答完、只是没存下的记录丢掉——静默丢学习数据。
-  // 所以有未落盘改动时一律以内存为准。
-  if (dirty) return cache;
-  if (rawStr === cacheRaw) return cache;
-  const out: StatsMap = {};
-  try {
-    const raw = JSON.parse(rawStr) as Record<string, unknown>;
-    for (const [bank, questions] of Object.entries(raw)) {
-      if (!questions || typeof questions !== 'object') continue;
-      const per: BankStats = {};
-      for (const [qid, tuple] of Object.entries(questions as Record<string, unknown>)) {
-        const rec = fromTuple(tuple);
-        if (rec) per[qid] = rec;
+  const legacy: StoredQuestionStat[] = [];
+  let canMarkMigrated = localStorageReadable && raw === null;
+  if (raw !== null) {
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('Invalid legacy stats');
+      const parsed = value as Record<string, unknown>;
+      for (const [bank, questions] of Object.entries(parsed)) {
+        if (!questions || typeof questions !== 'object' || Array.isArray(questions)) continue;
+        for (const [qid, tuple] of Object.entries(questions as Record<string, unknown>)) {
+          if (fromTuple(tuple)) legacy.push({ bank, qid, tuple: tuple as number[] });
+        }
       }
-      out[bank] = per;
+      canMarkMigrated = true;
+    } catch {
+      canMarkMigrated = false;
     }
-  } catch {
-    // 整表损坏：当没做过处理，别让题库面板打不开
+  }
+  if (canMarkMigrated) {
+    await migrateLegacyQuestionStats(legacy);
+    if (raw !== null) {
+      try {
+        localStorage.removeItem(LEGACY_KEY);
+      } catch {
+        // Keep the IndexedDB copy authoritative if browser storage is unavailable.
+      }
+    }
+  }
+  const out: StatsMap = {};
+  for (const { bank, qid, tuple } of await getAllQuestionStats()) {
+    const rec = fromTuple(tuple);
+    if (rec) (out[bank] ??= {})[qid] = rec;
   }
   cache = out;
-  cacheRaw = rawStr;
+  initialized = canMarkMigrated;
   return cache;
 }
 
-function save(stats: StatsMap) {
-  cache = stats;
-  const json = serialize(stats);
-  try {
-    localStorage.setItem(KEY, json);
-    cacheRaw = json;
-    dirty = false;
-    saveFailed = false;
-  } catch {
-    // 存不下时**不能抛**：这时候用户刚答完一道题，抛出去会打断整个练习。
-    // 置 dirty 让内存里的新记录活下来（见 loadStats），并置标志让 UI 提示一次。
-    dirty = true;
-    saveFailed = true;
-  }
+export function loadStats(): StatsMap {
+  return cache;
 }
 
-/**
- * 内存里是 QStat 对象（好读好改），**落盘必须转成紧凑数组**（省配额）。
- * 这两件事必须一起改：只加 toTuple 而忘了在这里调用，就会静默退回完整对象
- * ——开发机上看不出任何异常，直到真实用户撞上 5 MB 配额。见单测里的体积回归。
- */
-function serialize(stats: StatsMap): string {
-  const out: Record<string, Record<string, number[]>> = {};
-  for (const [bank, per] of Object.entries(stats)) {
-    const packed: Record<string, number[]> = {};
-    for (const [qid, s] of Object.entries(per)) packed[qid] = toTuple(s);
-    out[bank] = packed;
-  }
-  return JSON.stringify(out);
+export function resetQbankStatsForTests(): void {
+  cache = {};
+  initialized = false;
+  saveFailed = false;
 }
 
 /** 取走「上次落盘失败」标志（读一次就清）。UI 用它提示一次，不重复打扰。 */
@@ -228,29 +215,63 @@ function fromCard(c: Card, wrong: number): QStat {
  * 不做「用时/犹豫」之类的推测——那是编造数据，宁可只喂真实信号。
  * `recall`（简答自判）与选择题共用这一条路径，因为两者拿到的都是用户自报的对错。
  */
-export function recordAnswer(bank: string, qid: string, correct: boolean, now = Date.now()): QStat {
-  const stats = loadStats();
+export async function recordAnswer(bank: string, qid: string, correct: boolean, now = Date.now()): Promise<QStat> {
+  const stats = initialized ? cache : await initializeStats();
   const prev = stats[bank]?.[qid];
   const card = prev ? toCard(prev) : createEmptyCard(now);
   const next = f.next(card, new Date(now), correct ? FSRSRating.Good : FSRSRating.Again).card;
   const rec = fromCard(next, (prev?.wrong ?? 0) + (correct ? 0 : 1));
   const per: BankStats = { ...(stats[bank] ?? {}), [qid]: rec };
-  save({ ...stats, [bank]: per });
+  cache = { ...stats, [bank]: per };
+  try {
+    await putQuestionStat({ bank, qid, tuple: toTuple(rec) });
+    saveFailed = false;
+  } catch {
+    saveFailed = true;
+  }
   return rec;
 }
 
 /** 清空某个题库的逐题记录（题库删掉时一并清，别留孤儿数据占配额） */
-export function dropBankStats(bank: string): void {
-  const stats = loadStats();
-  if (!(bank in stats)) return;
-  const next = { ...stats };
+export async function dropBankStats(bank: string, persist = true): Promise<void> {
+  if (!initialized) await initializeStats();
+  if (persist) await removeQuestionStats(bank);
+  const next = { ...cache };
   delete next[bank];
-  save(next);
+  cache = next;
+}
+
+export async function exportQuestionStats(): Promise<StatsMap> {
+  return initializeStats();
+}
+
+export async function importQuestionStats(state: unknown): Promise<void> {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return;
+  if (!initialized) await initializeStats();
+  const merged: StatsMap = { ...cache };
+  for (const [bank, questions] of Object.entries(state as Record<string, unknown>)) {
+    if (!questions || typeof questions !== 'object' || Array.isArray(questions)) continue;
+    const records: BankStats = { ...(merged[bank] ?? {}) };
+    for (const [qid, raw] of Object.entries(questions as Record<string, unknown>)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const value = raw as Partial<QStat>;
+      if ([value.due, value.stability, value.difficulty, value.elapsed, value.scheduled, value.steps, value.reps, value.lapses, value.state, value.lastReview, value.wrong].every((n) => typeof n === 'number' && Number.isFinite(n))) {
+        records[qid] = value as QStat;
+      }
+    }
+    merged[bank] = records;
+  }
+  const packed = Object.entries(merged).flatMap(([bank, questions]) =>
+    Object.entries(questions).map(([qid, stat]) => ({ bank, qid, tuple: toTuple(stat) }))
+  );
+  await replaceQuestionStats(packed);
+  cache = merged;
+  initialized = true;
 }
 
 /** 某题库的整体进度：做过几道 / 错过几道 / 今天该复习几道 */
-export function bankProgress(bank: string, qids: string[], now = Date.now()) {
-  const per = loadStats()[bank] ?? {};
+export function bankProgress(bank: string, qids: string[], stats: StatsMap = loadStats(), now = Date.now()) {
+  const per = stats[bank] ?? {};
   let seen = 0;
   let wrong = 0;
   let due = 0;

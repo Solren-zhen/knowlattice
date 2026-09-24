@@ -1,8 +1,10 @@
 /**
- * 测试环境垫片：core 各模块直接用 localStorage（srs/qbank/mistakes/stats），
- * Node 下没有该全局，这里注入一个与 Storage 接口一致的内存实现。
+ * 测试环境垫片：为 Node 注入 localStorage 与 IndexedDB 内存实现，
+ * 分别供轻量模块和题库存储测试使用。
  * 每个测试文件通过 beforeEach 清空，保证用例隔离。
  */
+
+import 'fake-indexeddb/auto';
 
 class MemoryStorage implements Storage {
   private store = new Map<string, string>();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTree } from '../vault';
+import { buildTree, safeVaultPath } from '../vault';
 
 describe('buildTree', () => {
   it('按路径层级构建目录树，目录在前文件在后', () => {
@@ -44,5 +44,17 @@ describe('buildTree', () => {
   it('空与无 .md 输入返回空树', () => {
     expect(buildTree([])).toEqual([]);
     expect(buildTree(['x.txt'])).toEqual([]);
+  });
+});
+
+describe('safeVaultPath', () => {
+  it('只允许 vault 相对路径，拒绝穿越与绝对路径', () => {
+    expect(safeVaultPath('01-生理/呼吸.md')).toBe('01-生理/呼吸.md');
+    expect(safeVaultPath('01-生理\\呼吸.md')).toBe('01-生理/呼吸.md');
+    expect(safeVaultPath('../secret.md')).toBeNull();
+    expect(safeVaultPath('a/../../secret.md')).toBeNull();
+    expect(safeVaultPath('/secret.md')).toBeNull();
+    expect(safeVaultPath('C:/secret.md')).toBeNull();
+    expect(safeVaultPath(null)).toBeNull();
   });
 });

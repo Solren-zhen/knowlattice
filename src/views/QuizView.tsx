@@ -2,7 +2,8 @@
  * 题库练习：导入 JSON 题库（文件或粘贴）→ 选库组卷 → 逐题作答 → 结果页错题回顾。
  * 答错且题目关联笔记（note 字段可解析）时自动记入错题本。
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import DialogSurface from './DialogSurface';
 import { useEsc } from './useEsc';
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
@@ -15,13 +16,13 @@ import {
   DEFAULT_RULES, chapterCounts, composeQuestions, filterPool,
   type ComposeOrder, type ComposeRules, type ComposeScope,
 } from '../core/qbankCompose';
-import { bankProgress, consumeSaveFailure, loadStats, recordAnswer } from '../core/qbankStats';
+import { bankProgress, consumeSaveFailure, initializeStats, loadStats, recordAnswer } from '../core/qbankStats';
 import { buildChapterIndex, questionNoteLabel, resolveQuestionNote } from '../core/qbankNotes';
 import { recordMistake } from '../core/mistakes';
 import { toast, confirmBox } from '../core/feedback';
 import { markStudy } from '../core/stats';
 import { bankToAnki, downloadFile } from '../core/anki';
-import { IconRestore, IconTrash, IconClose, IconHelp, IconPencil } from './icons';
+import { IconRestore, IconClose, IconHelp, IconPencil } from './icons';
 
 interface Props {
   docs: Map<string, string>;
@@ -53,11 +54,15 @@ optionNotes 逐选项批注，下标对齐 options，可写可不写（应用里
 · Excel/CSV：表头含「题干/答案」，选项列用 A/B/C/D 或 选项1..4
 · 识别不到时会把原文填入输入框，手动整理后再粘贴导入
 · 整库备份（笔记）在这里不认：请走「笔记树右上角 ⋯ → 从备份 .json 恢复」；这里只吃上面的题库格式
-· 题库存在浏览器 localStorage（每站点约 5 MB）：一次只导几份，导多了会提示存不下`;
+· 题库与逐题复习记录保存在浏览器 IndexedDB；首次打开会自动迁移旧数据`;
 
 export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Props) {
-  const [banks, setBanks] = useState<QuizBank[]>(loadBanks);
+  const [banks, setBanks] = useState<QuizBank[]>([]);
+  const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [session, setSession] = useState<Session | null>(null);
   const [idx, setIdx] = useState(0);
@@ -74,17 +79,30 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   /** 组题弹窗正在给哪个题库出题（null = 没开） */
   const [composing, setComposing] = useState<QuizBank | null>(null);
   const [rules, setRules] = useState<ComposeRules>(DEFAULT_RULES);
-  /** 逐题历史（localStorage + 模块级缓存）。作答后 recordAnswer 会换掉缓存对象，
-   *  这里重新取一次就能触发重渲染——不需要额外维护一个「踢一脚」的计数器当假依赖。 */
   const [stats, setStats] = useState(loadStats);
-  /** 配额提示只弹一次：存不下时每次作答都会失败，不能每答一题弹一遍 */
-  const quotaWarnedRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([loadBanks(), initializeStats()]).then(([loadedBanks, loadedStats]) => {
+      if (!active) return;
+      setBanks(loadedBanks);
+      if (loadedBanks.length === 0) setImportOpen(true);
+      setStats(loadedStats);
+      setLoadError(null);
+      setReady(true);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setLoadError(error instanceof Error ? error.message : String(error));
+      setReady(true);
+    });
+    return () => { active = false; };
+  }, [reloadKey]);
 
   /** 题库列表上的进度行。按 banks/stats 缓存——127 个库 × 上千题，
    *  每次渲染都重算会把题库面板拖垮。 */
   const progress = useMemo(() => {
     const m = new Map<string, ReturnType<typeof bankProgress>>();
-    for (const b of banks) m.set(b.name, bankProgress(b.name, b.questions.map((x) => x.id)));
+    for (const b of banks) m.set(b.name, bankProgress(b.name, b.questions.map((x) => x.id), stats));
     return m;
   }, [banks, stats]);
 
@@ -122,16 +140,17 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   const correctCount = results.filter((r) => r === true).length;
 
   // ---------- 导入 ----------
-  const importQuestions = (questions: QuizQuestion[], name: string) => {
-    setBanks(addBank(name, questions));
+  const importQuestions = async (questions: QuizQuestion[], name: string) => {
+    setBanks(await addBank(name, questions));
     setPasteText('');
+    setImportOpen(false);
     toast(`已导入「${name}」：${questions.length} 题`, 'ok');
   };
-  const doImport = (text: string, fallbackName: string) => {
+  const doImport = async (text: string, fallbackName: string) => {
     try {
       // 解析与报错都在 core（parseQbankJson）：这条提示是用户唯一的线索，必须可测。
       const { name, questions } = parseQbankJson(text, fallbackName);
-      importQuestions(questions, name);
+      await importQuestions(questions, name);
     } catch (err) {
       toast(`导入失败：${(err as Error).message}`, 'err', 8000);
     }
@@ -150,10 +169,11 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
       const questions = parseQuestionsFromText(value);
       if (questions.length === 0) {
         setPasteText(value.trim());
+        setImportOpen(true);
         toast('未能从 Word 中自动识别出题目。文档全文已填入下方输入框，请按「题目/选项/答案」格式整理后导入。', 'info', 6500);
         return;
       }
-      importQuestions(questions, file.name.replace(/\.docx?$/i, ''));
+      await importQuestions(questions, file.name.replace(/\.docx?$/i, ''));
     } catch (err) {
       toast(`Word 导入失败：${(err as Error).message}（仅支持 .docx，旧版 .doc 请先转存为 .docx）`, 'err');
     }
@@ -167,7 +187,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
       const questions = rowsToQuestions(rows);
-      importQuestions(questions, file.name.replace(/\.(xlsx?|csv)$/i, ''));
+      await importQuestions(questions, file.name.replace(/\.(xlsx?|csv)$/i, ''));
     } catch (err) {
       toast(`Excel 导入失败：${(err as Error).message}（表头需含「题干/答案」，选项列可用 A/B/C/D 或 选项1..4）`, 'err');
     }
@@ -186,16 +206,15 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   };
 
   /** 答错且关联笔记存在 → 记入错题本；同时对每道题记一次逐题历史（错题加权与 FSRS 排程的数据源） */
-  const judge = (correct: boolean) => {
+  const judge = async (correct: boolean) => {
     if (!q) return;
     markStudy(); // 打卡
     setResults((prev) => prev.map((r, i) => (i === idx ? correct : r)));
-    recordAnswer(session!.bankName, q.id, correct);
+    await recordAnswer(session!.bankName, q.id, correct);
     setStats(loadStats());
-    // 配额满时记录只在内存里活着，本轮结束就没了——必须说一声，不能静默丢学习记录
-    if (consumeSaveFailure() && !quotaWarnedRef.current) {
-      quotaWarnedRef.current = true;
-      toast('逐题记录存不下了：浏览器存储已满，本轮的作答历史不会被保留。可先删掉几个不用的题库。', 'err', 9000);
+    // 持久化失败时记录只在内存里活着，本轮结束就没了——必须告知用户
+    if (consumeSaveFailure()) {
+      toast('逐题记录保存失败：请检查浏览器存储空间和权限。', 'err', 9000);
     }
     if (!correct) {
       const path = notePathOf(q);
@@ -221,11 +240,11 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
 
   /** 存批注：空文本即删除。写完要把面板里的题库列表和本轮题目一起刷新，
    *  否则同一题再进来读到的还是旧副本。 */
-  const commitNote = (i: number) => {
+  const commitNote = async (i: number) => {
     setEditing(null);
     if (!q || !session) return;
     if ((q.optionNotes?.[i] ?? '') === draft.trim()) return;
-    const banks = setOptionNote(session.bankName, q.id, i, draft);
+    const banks = await setOptionNote(session.bankName, q.id, i, draft);
     setBanks(banks);
     const saved = banks.find((b) => b.name === session.bankName)?.questions.find((x) => x.id === q.id);
     setSession((s) => (s
@@ -234,12 +253,25 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   };
 
   // ---------- 渲染 ----------
+  if (!ready || loadError) {
+    return (
+      <div className="panel-backdrop quiz-overlay">
+        <DialogSurface className="panel quiz-panel" label={loadError ? '题库加载失败' : '题库正在加载'}>
+          <div className="panel__body quiz-body">
+            <p role="status">{loadError ?? '\u6b63\u5728\u52a0\u8f7d\u9898\u5e93...'}</p>
+            {loadError && <button className="btn-small" onClick={() => setReloadKey((key) => key + 1)}>{'\u91cd\u8bd5'}</button>}
+          </div>
+        </DialogSurface>
+      </div>
+    );
+  }
+
   if (session && q) {
     const answered = results[idx] !== undefined;
     const notePath = notePathOf(q);
     return (
       <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
-        <div className="panel quiz-panel" onClick={(e) => e.stopPropagation()}>
+        <DialogSurface className="panel quiz-panel" label={`${session.bankName}练习，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">{session.bankName} · 第 {idx + 1} / {session.questions.length} 题</span>
             <span className="muted">已对 {correctCount}</span>
@@ -265,7 +297,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
                         disabled={answered}
                         onClick={() => {
                           setPicked(i);
-                          judge(i === q.answer);
+                          void judge(i === q.answer);
                         }}
                       >
                         <b>{letter}</b> {opt}
@@ -331,8 +363,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
             )}
             {q.type === 'recall' && revealed && !answered && (
               <div className="quiz-actions">
-                <button className="btn-small" onClick={() => judge(true)}>我答对了</button>
-                <button className="btn-small danger" onClick={() => judge(false)}>我答错了</button>
+                <button className="btn-small" onClick={() => void judge(true)}>我答对了</button>
+                <button className="btn-small danger" onClick={() => void judge(false)}>我答错了</button>
               </div>
             )}
           </div>
@@ -351,7 +383,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
               )}
             </div>
           )}
-        </div>
+        </DialogSurface>
       </div>
     );
   }
@@ -364,7 +396,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
     const wrongFiled = wrong.filter((w) => notePathOf(w)).length;
     return (
       <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
-        <div className="panel quiz-panel" onClick={(e) => e.stopPropagation()}>
+        <DialogSurface className="panel quiz-panel" label={`练习成绩：${session.bankName}`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">练习成绩 · {session.bankName}</span>
             <button className="btn-icon" onClick={requestClose} aria-label="关闭"><IconClose /></button>
@@ -395,14 +427,14 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
               </div>
             )}
             <div className="quiz-actions center">
-              <button className="btn-primary" onClick={() => {
-                const b = loadBanks().find((x) => x.name === session.bankName);
+              <button className="btn-primary" onClick={async () => {
+                const b = (await loadBanks()).find((x) => x.name === session.bankName);
                 if (b) start(b, session.rules); // 沿用同一套组题规则，不偷偷换回「全部」
               }}>再练一轮</button>
               <button className="btn-small" onClick={() => setSession(null)}>返回题库列表</button>
             </div>
           </div>
-        </div>
+        </DialogSurface>
       </div>
     );
   }
@@ -422,7 +454,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
       }));
     return (
       <div className="panel-backdrop quiz-overlay" onClick={() => setComposing(null)}>
-        <div className="panel quiz-panel" onClick={(e) => e.stopPropagation()}>
+        <DialogSurface className="panel quiz-panel" label={`自动组题：${b.name}`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">自动组题 · {b.name}</span>
             <button className="btn-icon" onClick={() => setComposing(null)} aria-label="关闭"><IconClose /></button>
@@ -486,7 +518,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
               <button className="btn-small" onClick={() => setRules(DEFAULT_RULES)}>恢复默认</button>
             </div>
           </div>
-        </div>
+        </DialogSurface>
       </div>
     );
   }
@@ -494,21 +526,22 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   // ---------- 题库列表 ----------
   return (
     <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
-      <div className="panel quiz-panel" onClick={(e) => e.stopPropagation()}>
+      <DialogSurface className="panel quiz-panel" label="题库练习" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title">题库练习</span>
-          <button className="btn-icon" onClick={() => setShowHelp(!showHelp)} aria-label="格式说明" title="题库 JSON 格式说明"><IconHelp /></button>
+          <button className="btn-primary quiz-import-toggle" aria-expanded={importOpen} aria-controls="quiz-import-options" onClick={() => setImportOpen((open) => !open)}>
+            {importOpen ? '收起导入' : '导入题库'}
+          </button>
+          <button className="btn-icon" onClick={() => setShowHelp(!showHelp)} aria-label="格式说明" aria-expanded={showHelp} aria-controls="quiz-format-help" title="题库 JSON 格式说明"><IconHelp /></button>
           <button className="btn-icon" onClick={requestClose} aria-label="关闭"><IconClose /></button>
         </div>
 
-        {showHelp && (
-          <div className="quiz-help">
+        <div className="quiz-help" id="quiz-format-help" hidden={!showHelp}>
             <p className="muted">导入格式（保存为 .json 文件导入，或直接粘贴）：</p>
             <pre>{HELP_TEXT}</pre>
-          </div>
-        )}
+        </div>
 
-        <div className="quiz-import">
+        <div className="quiz-import" id="quiz-import-options" hidden={!importOpen}>
           <button className="btn-small" onClick={() => fileRef.current?.click()}>
             <IconRestore /> 题库文件 (.json)
           </button>
@@ -567,8 +600,9 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
         <div className="quiz-banks">
           {banks.length === 0 && (
             <div className="quiz-empty">
-              <p>还没有题库</p>
-              <p className="muted">导入一份 JSON 题库开始练习；答错的题会自动收录进错题本</p>
+              <h2>还没有题库</h2>
+              <p className="muted">导入 JSON、Word 或 Excel 题目开始练习；答错的题会自动收录进错题本</p>
+              <button className="btn-primary" onClick={() => setImportOpen(true)}>导入第一份题库</button>
             </div>
           )}
           {banks.map((b) => {
@@ -589,29 +623,25 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
                   </div>
                 </div>
                 <button className="btn-small" onClick={() => { setRules(DEFAULT_RULES); setComposing(b); }}>组题</button>
-                <button className="btn-small" title="不组题，整库洗牌后全部做完" onClick={() => start(b, null)}>全部</button>
-                <button
-                  className="btn-small"
-                  title="导出本题库为 Anki 导入文件"
-                  onClick={() => downloadFile(`${b.name}-anki.txt`, bankToAnki(b))}
-                >
-                  导 Anki
-                </button>
-                <button
-                  className="btn-icon"
-                  aria-label={`删除题库 ${b.name}`}
-                  onClick={() => {
-                    void confirmBox({ title: `删除题库「${b.name}」？`, danger: true, okText: '删除' })
-                      .then((ok) => { if (ok) setBanks(removeBank(b.name)); });
-                  }}
-                >
-                  <IconTrash />
-                </button>
+                <details className="bank-more">
+                  <summary aria-label={`更多操作：${b.name}`}>更多</summary>
+                  <div className="bank-more-menu">
+                    <button className="btn-small" title="不组题，整库洗牌后全部做完" onClick={() => start(b, null)}>整库练习</button>
+                    <button className="btn-small" title="导出本题库为 Anki 导入文件" onClick={() => downloadFile(`${b.name}-anki.txt`, bankToAnki(b))}>导出 Anki</button>
+                    <button
+                      className="btn-small danger"
+                      onClick={() => {
+                        void confirmBox({ title: `删除题库「${b.name}」？`, danger: true, okText: '删除' })
+                          .then(async (ok) => { if (ok) setBanks(await removeBank(b.name)); });
+                      }}
+                    >删除题库</button>
+                  </div>
+                </details>
               </div>
             );
           })}
         </div>
-      </div>
+      </DialogSurface>
     </div>
   );
 }
