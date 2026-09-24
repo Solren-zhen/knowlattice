@@ -3407,6 +3407,14 @@ a.wikilink.missing::after {
   background: var(--accent-soft); color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--border-accent), 0 0 16px -2px var(--accent-soft);
 }
+.rail-btn--graph:hover,
+.rail-btn--graph.on {
+  color: var(--cyan-text);
+  background: color-mix(in srgb, var(--cyan-text) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cyan-text) 38%, transparent),
+    0 0 18px -4px color-mix(in srgb, var(--cyan-text) 55%, transparent);
+}
+.rail-btn--graph.on::before { background: var(--cyan-text); box-shadow: 0 0 12px var(--cyan-text); }
 .rail-btn.on::before {
   content: ""; position: absolute; left: -12px; top: 50%;
   transform: translateY(-50%);
@@ -3607,6 +3615,20 @@ a.wikilink.missing::after {
   color: var(--muted); font-size: 14px; margin: 4px 0 0; max-width: 460px; line-height: 1.7;
   letter-spacing: -0.01em;
 }
+.preview.placeholder .hero-proof {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 7px 10px; margin-top: 8px; color: var(--muted);
+  font-size: 11.5px; font-weight: 550;
+}
+.preview.placeholder .hero-proof span {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-raised) 72%, transparent);
+  box-shadow: var(--shadow-xs);
+}
+.preview.placeholder .hero-proof svg { width: 13px; height: 13px; color: var(--accent); }
+.preview.placeholder .hero-proof span:nth-child(2) svg { color: var(--cyan-text); }
+.preview.placeholder .hero-proof span:nth-child(3) svg { color: #a855f7; }
 .hero-cta { display: flex; gap: 14px; margin-top: 14px; }
 .hero-cta .hero-primary {
   width: auto; padding: 11px 26px; font-size: 14px; display: inline-flex; align-items: center; gap: 8px;
@@ -3945,6 +3967,7 @@ a.wikilink.missing::after {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md), var(--glow-accent);
 }
+.preview.placeholder .teach-step span { font-weight: 520; }
 /* 修键标签等宽：[[ / == / Tab / 回车 宽度一致，两列才对得上 */
 .preview.placeholder .teach-step kbd {
   min-width: 40px; padding: 3px 8px; text-align: center;
@@ -3964,6 +3987,8 @@ a.wikilink.missing::after {
   .hero-cta .btn { width: 100%; justify-content: center; padding-inline: 12px; }
   .preview.placeholder .teach-step { flex-wrap: wrap; }
   .preview.placeholder .teach-step kbd { flex: 0 0 auto; white-space: nowrap; }
+  .preview.placeholder .hero-proof { gap: 5px; }
+  .preview.placeholder .hero-proof span { padding-inline: 7px; font-size: 11px; }
 }
 
 /* ---- 3. 浮层头部统一：一个高度 / 一个内距 / 一个底面 ----
