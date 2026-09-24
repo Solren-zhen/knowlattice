@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { renderMarkdown } from '../core/markdown';
 import { FORMAT_KEYS } from '../core/formatKeys';
-import { IconSearch } from './icons';
+import { IconFile, IconLink, IconSave, IconSearch } from './icons';
 
 /** markdown-it 实例已移至 core/markdown.ts 懒加载（首屏入口包不含它） */
 
@@ -126,6 +126,11 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
         <div className="hero-badge">晶格 · KnowLattice</div>
         <h1 className="hero-title">你的知识库，从这里开始</h1>
         <p className="hero-sub">笔记沉淀知识 · 层级梳理思路 · 双链串联全局</p>
+        <div className="hero-proof" aria-label="KnowLattice 特性">
+          <span><IconSave /> 本地优先</span>
+          <span><IconFile /> Markdown 存储</span>
+          <span><IconLink /> 全库互联</span>
+        </div>
         <div className="hero-cta">
           <button className="btn-primary hero-primary" onClick={onSearch}>
             <IconSearch /> 快速搜索 <kbd>Ctrl K</kbd>
