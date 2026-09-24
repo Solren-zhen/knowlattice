@@ -1,6 +1,6 @@
 /**
  * 题库练习（三期）：JSON 题库导入 → 随机组卷 → 答错自动进错题本。
- * localStorage 轻量存储（与错题本同策略），不引后端。
+ * IndexedDB 存储（与笔记共用浏览器本地优先策略），首次访问迁移旧 localStorage 题库。
  *
  * 题库格式（顶层数组或 { name, questions }）：
  * [
@@ -18,7 +18,8 @@
  * optionNotes 由应用在作答后写入，随题库一起存进备份，不必手写。
  */
 
-import { dropBankStats } from './qbankStats';
+import { getAllBanks, migrateLegacyBanks as migrateBanksToDb, putBank, putBanks, removeBankAndStats } from '../storage/qbank';
+import { dropBankStats, initializeStats } from './qbankStats';
 
 export interface QuizQuestion {
   id: string;
@@ -44,38 +45,44 @@ export interface QuizBank {
   questions: QuizQuestion[];
 }
 
-const KEY = 'knowlattice-qbanks';
+const LEGACY_KEY = 'knowlattice-qbanks';
 
-export function loadBanks(): QuizBank[] {
+async function migrateLegacyBanks(): Promise<void> {
+  let raw: string | null = null;
   try {
-    return JSON.parse(localStorage.getItem(KEY) ?? '[]') as QuizBank[];
+    raw = localStorage.getItem(LEGACY_KEY);
   } catch {
-    return [];
+    return;
+  }
+  if (raw === null) return;
+  let banks: QuizBank[];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.every((bank) =>
+      Boolean(bank && typeof bank.name === 'string' && Array.isArray(bank.questions))
+    )) return;
+    banks = parsed as QuizBank[];
+  } catch {
+    return;
+  }
+  await migrateBanksToDb(banks);
+  try {
+    localStorage.removeItem(LEGACY_KEY);
+  } catch {
+    // The migrated IndexedDB copy remains authoritative if browser storage is unavailable.
   }
 }
 
-function persist(banks: QuizBank[]) {
-  const json = JSON.stringify(banks);
-  try {
-    localStorage.setItem(KEY, json);
-  } catch {
-    // 题库是「整份重写」的，localStorage 每站点约 5 MB（按 UTF-16 计）：
-    // 装不下时浏览器抛的是英文 QuotaExceededError，对使用者毫无帮助，
-    // 这里必须自己说清「为什么」和「怎么办」。
-    const mb = ((json.length * 2) / 1024 / 1024).toFixed(1);
-    throw new Error(
-      `题库存不下：浏览器给每个站点约 5 MB 存储，这次要写 ${mb} MB。` +
-        '请先在题库列表里删掉几个不用的（可先「导出题库」备份），' +
-        '或改用笔记形式（笔记树右上角 ⋯ →「从备份 .json 恢复」）——笔记存在 IndexedDB，容量大得多。'
-    );
-  }
+export async function loadBanks(): Promise<QuizBank[]> {
+  await migrateLegacyBanks();
+  return (await getAllBanks()) as QuizBank[];
 }
 
 /** 同名题库覆盖导入；返回更新后的题库列表。
  *  重新导入同名题库时按「题干 + 选项」把旧题的选项批注接回新题——批注是用户自己写的，
  *  不能因为拿到一份修订版题库就静默丢掉。 */
-export function addBank(name: string, questions: QuizQuestion[]): QuizBank[] {
-  const all = loadBanks();
+export async function addBank(name: string, questions: QuizQuestion[]): Promise<QuizBank[]> {
+  const all = await loadBanks();
   const prev = all.find((b) => b.name === name);
   const banks = all.filter((b) => b.name !== name);
   const carried = prev ? noteIndex(prev.questions) : null;
@@ -86,7 +93,7 @@ export function addBank(name: string, questions: QuizQuestion[]): QuizBank[] {
       })
     : questions;
   banks.unshift({ name, importedAt: Date.now(), questions: merged });
-  persist(banks);
+  await putBank(banks[0]);
   return banks;
 }
 
@@ -106,55 +113,52 @@ function noteIndex(questions: QuizQuestion[]): Map<string, string[]> {
 
 /** 写某题某个选项的批注（去掉首尾空白后为空即删除该批注）。返回更新后的题库列表。
  *  题库名 / 题号 / 选项下标任一不成立时原样返回，调用方无需先校验。 */
-export function setOptionNote(
+export async function setOptionNote(
   bankName: string,
   questionId: string,
   optionIndex: number,
   text: string
-): QuizBank[] {
-  const banks = loadBanks();
+): Promise<QuizBank[]> {
+  const banks = await loadBanks();
   const q = banks.find((b) => b.name === bankName)?.questions.find((x) => x.id === questionId);
-  if (!q || q.type !== 'choice' || optionIndex < 0 || optionIndex >= q.options.length) return banks;
+  const bank = banks.find((b) => b.name === bankName);
+  if (!q || !bank || q.type !== 'choice' || optionIndex < 0 || optionIndex >= q.options.length) return banks;
   const notes = q.options.map((_, i) => q.optionNotes?.[i] ?? '');
   notes[optionIndex] = text.trim();
   q.optionNotes = notes.some(Boolean) ? notes : undefined;
-  persist(banks);
+  await putBank(bank);
   return banks;
 }
 
-export function removeBank(name: string): QuizBank[] {
-  const banks = loadBanks().filter((b) => b.name !== name);
-  persist(banks);
-  // 逐题作答历史是独立的一份存储（knowlattice-qstats），不随题库走。
-  // 不在这里清掉，它就成了孤儿：那份存储没有淘汰机制，攒到 localStorage
-  // 约 5 MB 上限后写入静默失败，表现是「刷题记录不再增长」。
-  dropBankStats(name);
+export async function removeBank(name: string): Promise<QuizBank[]> {
+  const banks = (await loadBanks()).filter((b) => b.name !== name);
+  await initializeStats();
+  await removeBankAndStats(name);
+  await dropBankStats(name, false);
   return banks;
 }
 
 /** 导出全部题库（随备份文件保存） */
-export function exportQbanks(): QuizBank[] {
+export async function exportQbanks(): Promise<QuizBank[]> {
   return loadBanks();
 }
 
 /** 从备份恢复题库（同名覆盖、其余保留）；返回恢复的题库数 */
-export function importQbanks(state: unknown): number {
+export async function importQbanks(state: unknown): Promise<number> {
   if (!Array.isArray(state)) return 0;
-  const existing = loadBanks();
-  const merged = new Map(existing.map((b) => [b.name, b]));
-  let n = 0;
+  await loadBanks();
+  const imported = new Map<string, QuizBank>();
   for (const raw of state) {
     const b = raw as Partial<QuizBank>;
     if (!b || typeof b.name !== 'string' || !Array.isArray(b.questions)) continue;
-    merged.set(b.name, {
+    imported.set(b.name, {
       name: b.name,
       importedAt: typeof b.importedAt === 'number' ? b.importedAt : Date.now(),
       questions: b.questions as QuizQuestion[],
     });
-    n++;
   }
-  persist([...merged.values()]);
-  return n;
+  await putBanks([...imported.values()]);
+  return imported.size;
 }
 
 // ---------- 导入解析（宽松：兼容中英文字段名） ----------

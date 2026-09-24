@@ -34,6 +34,7 @@ import {
 import { heatmap, streak as studyStreak, studyDays } from '../core/stats';
 import TodoFocus from './TodoFocus';
 import TodoStats from './TodoStats';
+import DialogSurface from './DialogSurface';
 import {
   addDays, addSubtask, BUCKET_LABELS, bulkComplete, bulkRemove, bulkUpdate, bumpPomo, clearCompleted, completeTodo,
   dayKey, editTodo, groupByNote, groupTodos, inSmartList, loadTodos, makeTodo, matchesQuery, moveTodo,
@@ -501,7 +502,7 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
 
   return (
     <div className="panel-backdrop mistake-overlay" onClick={onClose}>
-      <div className="panel mistake-panel todo-panel" onClick={(e) => e.stopPropagation()}>
+      <DialogSurface className="panel mistake-panel todo-panel" label="工作台" onClick={(e) => e.stopPropagation()}>
         <header className="panel__head">
           <span className="panel__title">
             <IconTimer /> 工作台
@@ -1007,7 +1008,7 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
             study={study}
           />
         )}
-      </div>
+      </DialogSurface>
     </div>
   );
 }

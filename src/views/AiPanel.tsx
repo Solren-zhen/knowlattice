@@ -18,12 +18,21 @@ const PRESETS = [
 
 const KEY = 'knowlattice-ai-src';
 
+function normalizeHttpsUrl(value: string): string | null {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 interface Props {
   onClose: () => void;
 }
 
 export default function AiPanel({ onClose }: Props) {
-  const [src, setSrc] = useState<string>(() => localStorage.getItem(KEY) ?? PRESETS[0].url);
+  const [src, setSrc] = useState<string>(() => normalizeHttpsUrl(localStorage.getItem(KEY) ?? '') ?? PRESETS[0].url);
   const [custom, setCustom] = useState('');
   // 内嵌页首屏是白屏：用统一载入语汇补上「正在加载」的反馈，换站点时重置
   const [frameLoading, setFrameLoading] = useState(true);
@@ -36,7 +45,10 @@ export default function AiPanel({ onClose }: Props) {
     setSrc(url);
     localStorage.setItem(KEY, url);
   };
-  const openExternal = () => window.open(src, '_blank', 'noopener');
+  const selectedPreset = PRESETS.find((p) => p.url === src);
+  const canEmbed = selectedPreset?.embed ?? true;
+  const openExternal = () => window.open(src, '_blank', 'noopener,noreferrer');
+  const customUrl = normalizeHttpsUrl(custom);
 
   return (
     <div className="ai-panel">
@@ -61,32 +73,42 @@ export default function AiPanel({ onClose }: Props) {
       </div>
       <div className="ai-custom">
         <input
-          placeholder="或粘贴其他 AI 网页地址…"
+          placeholder="或粘贴其他 HTTPS AI 地址…"
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && /^https?:\/\//.test(custom.trim())) pick(custom.trim());
+            if (e.key === 'Enter' && customUrl) pick(customUrl);
           }}
         />
         <button
           className="btn-small"
-          disabled={!/^https?:\/\//.test(custom.trim())}
-          onClick={() => custom.trim() && pick(custom.trim())}
+          disabled={!customUrl}
+          onClick={() => customUrl && pick(customUrl)}
         >
           打开
         </button>
       </div>
-      <p className="ai-hint muted">站点若显示空白说明其禁止内嵌，点「新窗口打开」并排使用即可</p>
-      <div className="ai-frame-wrap">
-        {frameLoading && <Loading label="正在载入内嵌页面…" />}
-        <iframe
-          key={src}
-          className="ai-frame"
-          src={src}
-          title="AI 问答"
-          onLoad={() => setFrameLoading(false)}
-        />
-      </div>
+      <p className="ai-hint muted">只允许 HTTPS。内嵌页面中的内容会直接发送给所选第三方平台，请勿输入姓名、病历、未公开资料或受版权限制的题库原文。</p>
+      {canEmbed ? (
+        <div className="ai-frame-wrap">
+          {frameLoading && <Loading label="正在载入内嵌页面…" />}
+          <iframe
+            key={src}
+            className="ai-frame"
+            src={src}
+            title="AI 问答"
+            referrerPolicy="no-referrer"
+            sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-scripts"
+            onLoad={() => setFrameLoading(false)}
+          />
+        </div>
+      ) : (
+        <div className="ai-frame-blocked">
+          <strong>该站点不支持安全内嵌</strong>
+          <span>请在新窗口打开，应用不会读取第三方页面内容。</span>
+          <button className="btn-primary" onClick={openExternal}>在新窗口打开</button>
+        </div>
+      )}
     </div>
   );
 }
