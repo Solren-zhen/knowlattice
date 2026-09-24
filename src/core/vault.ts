@@ -137,6 +137,13 @@ function dataUrlToBlob(dataUrl: string): Blob | null {
 /** frontmatter 解析走 parser.ts 模块级缓存（与 React 渲染无关）：content 引用未变即命中 */
 const getMeta = parseFrontmatterCached;
 
+/** 只反映会影响名称解析和 PDF 目标列表的元数据；正文普通改动不应触发全库索引重建。 */
+function linkMetadataSignature(path: string, content: string | undefined): string {
+  if (!path.endsWith('.md')) return '';
+  const { title, meta } = getMeta(path, content ?? '');
+  return `${title}\u0000${meta.aliases.join('\u0000')}\u0000${meta.chapter ?? ''}`;
+}
+
 /** 首次使用引导笔记：空库自动创建（只建一次，删除后不再重生） */
 const ONBOARD_PATH = '00-三分钟上手.md';
 const ONBOARD_FLAG = 'knowlattice-onboarded';
@@ -271,6 +278,9 @@ const normCreated = (s: string) => s.replace(/^created: .*$/m, 'created:');
 
 export function useVault() {
   const [docs, setDocs] = useState<Map<string, string>>(new Map());
+  const docsRef = useRef(docs);
+  useEffect(() => { docsRef.current = docs; }, [docs]);
+  const [structureDocs, setStructureDocs] = useState<Map<string, string>>(new Map());
   /** 二进制附件：path → Blob（与笔记分库，避免保存时整库拷贝大图片） */
   const [attachments, setAttachments] = useState<Map<string, Blob>>(new Map());
   const [currentPath, setCurrentPath] = useState<string | null>(null);
@@ -323,6 +333,7 @@ export function useVault() {
       if (cancelled) return;
       setLinkIndex(rebuildLinkIndex(fileMap));
       setDocs(fileMap);
+      setStructureDocs(fileMap);
       setAttachments(attachmentMap);
       setLoaded(true);
     })().catch((e) => {
@@ -351,9 +362,17 @@ export function useVault() {
   const save = useCallback(async (path: string, content: string) => {
     const safePath = safeVaultPath(path);
     if (!safePath) throw new Error('文件路径不安全');
+    const previous = docsRef.current.get(safePath);
+    const structureChanged = !docsRef.current.has(safePath)
+      || linkMetadataSignature(safePath, previous) !== linkMetadataSignature(safePath, content);
     await adapter.write(safePath, content);
-    setDocs((prev) => new Map(prev).set(safePath, content));
+    const next = new Map(docsRef.current).set(safePath, content);
+    docsRef.current = next;
+    setDocs(next);
     updateLinksForPath(linkIndex, safePath, content);
+    if (structureChanged) {
+      setStructureDocs(next);
+    }
     void pushSnapshot(safePath, content);
   }, [linkIndex]);
 
@@ -362,11 +381,11 @@ export function useVault() {
     const safePath = safeVaultPath(path);
     if (!safePath) throw new Error('文件路径不安全');
     await adapter.remove(safePath);
-    setDocs((prev) => {
-      const next = new Map(prev);
-      next.delete(safePath);
-      return next;
-    });
+    const next = new Map(docsRef.current);
+    next.delete(safePath);
+    docsRef.current = next;
+    setDocs(next);
+    if (safePath.endsWith('.md')) setStructureDocs(next);
     updateLinksForPath(linkIndex, safePath, '');
     setCurrentPath((cur) => (cur === safePath ? null : cur));
   }, [linkIndex]);
@@ -386,11 +405,11 @@ export function useVault() {
     const del = new Set(entries
       .filter((entry) => entry.safe && !failedSet.has(entry.original))
       .map((entry) => entry.original));
-    setDocs((prev) => {
-      const next = new Map(prev);
-      for (const p of del) next.delete(p);
-      return next;
-    });
+    const next = new Map(docsRef.current);
+    for (const p of del) next.delete(p);
+    docsRef.current = next;
+    setDocs(next);
+    if ([...del].some((p) => p.endsWith('.md'))) setStructureDocs(next);
     for (const p of del) updateLinksForPath(linkIndex, p, '');
     setCurrentPath((cur) => (cur && del.has(cur) ? null : cur));
     return failed;
@@ -497,20 +516,22 @@ export function useVault() {
     // 只把真正写成功的并入内存：写失败的如果也进内存，当前会话看着一切正常、还弹
     // 「已恢复 N 篇」，刷新后才永久缺失——这是最难事后归因的一类数据丢失。
     const okNotes = notes.filter((f) => !failedSet.has(f.path));
-    setDocs((prev) => {
-      const next = new Map(prev);
-      for (const f of okNotes) next.set(f.path, f.content);
-      for (const f of legacyAttachments) {
-        if (keptAsFile.has(f.path)) next.set(f.path, f.content);
-      }
-      return next;
-    });
+    const next = new Map(docsRef.current);
+    for (const f of okNotes) next.set(f.path, f.content);
+    for (const f of legacyAttachments) {
+      if (keptAsFile.has(f.path)) next.set(f.path, f.content);
+    }
+    docsRef.current = next;
+    setDocs(next);
     setAttachments((prev) => {
       const next = new Map(prev);
       for (const [path, blob] of restoredAttachments) next.set(path, blob);
       return next;
     });
     for (const f of okNotes) updateLinksForPath(linkIndex, f.path, f.content);
+    if (okNotes.length > 0) {
+      setStructureDocs(next);
+    }
     return { ok: okNotes.length, failed: failedSet.size + attachFailed + invalidFiles };
   }, [linkIndex]);
 
@@ -526,12 +547,14 @@ export function useVault() {
     const failedPaths = await writeMany(valid);
     const failedSet = new Set(failedPaths);
     const okFiles = valid.filter((f) => !failedSet.has(f.path));
-    setDocs((prev) => {
-      const next = new Map(prev);
-      for (const f of okFiles) next.set(f.path, f.content);
-      return next;
-    });
+    const next = new Map(docsRef.current);
+    for (const f of okFiles) next.set(f.path, f.content);
+    docsRef.current = next;
+    setDocs(next);
     for (const f of okFiles) updateLinksForPath(linkIndex, f.path, f.content);
+    if (okFiles.length > 0) {
+      setStructureDocs(next);
+    }
     return { ok: okFiles.length, failed: failedPaths.length + invalidFiles };
   }, [linkIndex]);
 
@@ -584,7 +607,7 @@ export function useVault() {
    *  这一步的开销几乎全在遍历本身（5227 篇约 23ms），签名省不掉，保持原样。 */
   const nameIndex = useMemo(() => {
     const map = new Map<string, string>();
-    for (const [path, content] of docs) {
+    for (const [path, content] of structureDocs) {
       if (!path.endsWith('.md')) continue;
       const base = path.replace(/\.md$/, '');
       const fileName = base.split('/').pop()!;
@@ -596,7 +619,7 @@ export function useVault() {
       }
     }
     return map;
-  }, [docs]);
+  }, [structureDocs]);
 
   /** 名称 -> 路径 解析：文件名 / 一级标题 / alias 都能命中（不区分大小写） */
   const resolveLink = useCallback(
@@ -665,7 +688,7 @@ export function useVault() {
    *  照常重排。签名里用 \u0000 分隔（文件名、标题、alias 都不会含它）。 */
   const linkNameSig = useMemo(() => {
     const names = new Set<string>();
-    for (const [path, content] of docs) {
+    for (const [path, content] of structureDocs) {
       if (!path.endsWith('.md')) continue;
       names.add(path.replace(/\.md$/, '').split('/').pop()!);
       const { title, meta } = getMeta(path, content);
@@ -673,7 +696,7 @@ export function useVault() {
       meta.aliases.forEach((a) => names.add(a));
     }
     return [...names].join('\u0000');
-  }, [docs]);
+  }, [structureDocs]);
   const allLinkNames = useMemo(
     () => (linkNameSig ? linkNameSig.split('\u0000').sort((a, b) => a.localeCompare(b, 'zh')) : []),
     [linkNameSig]
@@ -696,6 +719,7 @@ export function useVault() {
     loadError,
     retryLoad,
     docs,
+    structureDocs,
     tree,
     notePaths,
     linkIndex,

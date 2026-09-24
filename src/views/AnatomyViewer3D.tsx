@@ -210,7 +210,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     const renderer = new THREE.WebGLRenderer({
       antialias: true, alpha: true, powerPreference: 'high-performance',
     });
-    const fullPixelRatio = Math.min(window.devicePixelRatio, 2);
+    const fullPixelRatio = Math.min(window.devicePixelRatio, 1.25);
     renderer.setPixelRatio(fullPixelRatio);
     renderer.setClearColor(0x000000, 0);
     // 色彩与色调映射：ACES + sRGB 输出，避免高光死白、暗部发灰
@@ -254,7 +254,17 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
 
     // 按需渲染：场景没变就不画，空闲时不再持续占用 GPU
     let needsRender = true;
-    const invalidate = () => { needsRender = true; };
+    let raf = 0;
+    let frameScheduled = false;
+    const scheduleFrame = () => {
+      if (frameScheduled) return;
+      frameScheduled = true;
+      raf = requestAnimationFrame(loop);
+    };
+    const invalidate = () => {
+      needsRender = true;
+      scheduleFrame();
+    };
 
     const pickMeshes: THREE.Mesh[] = [];
     const rebuildPickers = () => {
@@ -377,9 +387,8 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     // 阻尼未停时 controls.update() 会持续派发 change，从而持续渲染到相机静止
     controls.addEventListener('change', invalidate);
 
-    // 交互期间的自适应渲染质量：只在「确实掉帧」时才降分辨率，好机器上永远保持全分辨率。
-    // （原做法是一拖拽就降到 1x，Retina 上会明显发虚，即使机器完全跑得动。）
-    const canDegrade = fullPixelRatio > 1.25;
+    // 交互期间的自适应渲染质量：只在「确实掉帧」时才降分辨率，避免画面无故发虚。
+    const canDegrade = fullPixelRatio > 1.05;
     let degraded = false;
     let interacting = false;
     let lastRenderTs = 0;
@@ -396,11 +405,13 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       interacting = true;
       lastRenderTs = 0;
       frameSamples.length = 0;
+      invalidate();
     };
     const onControlsEnd = () => {
       interacting = false;
       frameSamples.length = 0;
       applyQuality(false); // 松手立刻恢复清晰
+      invalidate();
     };
     controls.addEventListener('start', onControlsStart);
     controls.addEventListener('end', onControlsEnd);
@@ -416,10 +427,9 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     });
     ro.observe(host);
 
-    // 渲染循环：每帧只推进阻尼，只有 needsRender 时才真正绘制
-    let raf = 0;
+    // 渲染循环：只有场景变化或阻尼/自动旋转仍在推进时才预约下一帧。
     const loop = () => {
-      raf = requestAnimationFrame(loop);
+      frameScheduled = false;
       controls.update();
       // 自动旋转期间相机一直在动，按需渲染要持续出帧
       if (controls.autoRotate) needsRender = true;
@@ -440,8 +450,9 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
         }
         renderer.render(scene, camera);
       }
+      if (controls.autoRotate || needsRender) scheduleFrame();
     };
-    loop();
+    invalidate();
 
     // 标签页切回前台时补一帧：按需渲染下没有常驻循环，否则可能留下空白画布
     const onVisible = () => { if (!document.hidden) invalidate(); };
@@ -550,6 +561,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
 
     return () => {
       cancelAnimationFrame(raf);
+      frameScheduled = false;
       if (hoverRaf) cancelAnimationFrame(hoverRaf);
       ro.disconnect();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
