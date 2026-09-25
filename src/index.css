@@ -3715,25 +3715,29 @@ a.wikilink.missing::after {
   box-shadow: var(--shadow-xs), var(--glass-shine);
 }
 .hero-cta .hero-graph {
-  background: linear-gradient(180deg, #0891b2 0%, #0e7490 100%);
-  color: #fff;
-  border-color: transparent;
+  /* 次级 CTA：同色系淡靛底 + 靛字，与实底主按钮构成主/次层级。
+     此前是深青色实心胶囊——色相跳出全应用的靛紫语言，在极光底上像别的系统的按钮。
+     （9-25 合并曾把 9-24 另一条工作线的青色版本带回来，这里按已确认的方向重新应用） */
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent) 6%, transparent));
+  color: var(--accent);
+  border: 1px solid var(--border-accent);
   font-weight: 650;
-  box-shadow: 0 4px 18px -3px rgba(14, 116, 144, 0.38), var(--glass-shine);
+  box-shadow: var(--shadow-xs), var(--glass-shine);
 }
 .hero-cta .hero-graph:hover {
-  background: linear-gradient(180deg, #0e7490 0%, #155e75 100%);
-  color: #fff;
+  /* 悬停反转成实底：从「描边淡底」升到「主色填充」，动作邀请明确 */
+  background: var(--grad-primary);
+  color: var(--accent-ink);
   border-color: transparent;
-  box-shadow: 0 6px 22px -3px rgba(14, 116, 144, 0.48), var(--glass-shine);
+  box-shadow: 0 4px 20px -2px rgba(79, 70, 229, 0.45), var(--glow-accent);
 }
 [data-theme='dark'] .hero-cta .hero-graph {
-  background: linear-gradient(180deg, #22d3ee 0%, #0891b2 100%);
-  color: #083344;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent) 9%, transparent));
+  color: var(--accent);
 }
 [data-theme='dark'] .hero-cta .hero-graph:hover {
-  background: linear-gradient(180deg, #67e8f9 0%, #06b6d4 100%);
-  color: #083344;
+  background: linear-gradient(180deg, #6366f1 0%, var(--accent) 100%);
+  color: var(--accent-ink);
 }
 .preview.placeholder .teach-steps { margin: 28px auto 0; }
 
