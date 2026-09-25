@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { renderMarkdown } from '../core/markdown';
 import { FORMAT_KEYS } from '../core/formatKeys';
-import { IconSearch } from './icons';
+import { IconFile, IconLink, IconSave, IconSearch } from './icons';
 
 /** markdown-it 实例已移至 core/markdown.ts 懒加载（首屏入口包不含它） */
 
@@ -126,17 +126,22 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
         <div className="hero-badge">晶格 · KnowLattice</div>
         <h1 className="hero-title">你的知识库，从这里开始</h1>
         <p className="hero-sub">笔记沉淀知识 · 层级梳理思路 · 双链串联全局</p>
+        <div className="hero-proof" aria-label="KnowLattice 特性">
+          <span><IconSave /> 本地优先</span>
+          <span><IconFile /> Markdown 存储</span>
+          <span><IconLink /> 全库互联</span>
+        </div>
         <div className="hero-cta">
           <button className="btn-primary hero-primary" onClick={onSearch}>
             <IconSearch /> 快速搜索 <kbd>Ctrl K</kbd>
           </button>
-          <button className="btn" onClick={onGraph}>知识图谱</button>
+          <button className="btn hero-graph" onClick={onGraph}>知识图谱</button>
         </div>
         <div className="teach-steps">
           <div className="teach-step"><kbd>回车</kbd><span>续写下一条</span></div>
           <div className="teach-step"><kbd>Tab</kbd><span>缩进成子要点</span></div>
           <div className="teach-step"><kbd>[[</kbd><span>链接到其他笔记</span></div>
-          <div className="teach-step"><kbd>{FORMAT_HINT}</kbd><span>加粗 / 高亮 / 斜体 / 双链</span></div>
+          <div className="teach-step wide format-hint"><kbd>{FORMAT_HINT}</kbd><span>加粗 / 高亮 / 斜体 / 双链</span></div>
           {/* 第 5 条跨两列：5 个格子在 2 列网格里必然剩一个孤儿格，索性让它整行 */}
           <div className="teach-step wide"><kbd>右键</kbd><span>打开 / 删除整篇笔记</span></div>
         </div>
