@@ -46,6 +46,30 @@ const applyWikiLink = (v: EditorView) => {
   if (from === to) startCompletion(v);
 };
 
+/** 实时预览中的通路图是一个跨行替换部件；点击它时选中对应源码块，便于直接删除或修改。 */
+function selectPathwayBlock(view: EditorView, element: HTMLElement): boolean {
+  const block = element.closest('.lp-pathway');
+  if (!block) return false;
+  const pos = view.posAtDOM(block, 0);
+  if (pos == null) return false;
+  const start = view.state.doc.lineAt(pos);
+  if (!/^\s*(```+|~~~+)\s*pathway\b/i.test(start.text)) return false;
+  const fence = /^(\s*)(```+|~~~+)/.exec(start.text);
+  if (!fence) return false;
+  const ch = fence[2][0];
+  const len = fence[2].length;
+  let end = start.number;
+  while (end < view.state.doc.lines) {
+    const line = view.state.doc.line(end + 1);
+    end += 1;
+    if (new RegExp(`^\\s*${ch}{${len},}\\s*$`).test(line.text)) break;
+  }
+  const endPos = view.state.doc.line(end).to;
+  view.dispatch({ selection: { anchor: start.from, head: endPos }, scrollIntoView: true });
+  view.focus();
+  return true;
+}
+
 /**
  * 四个格式命令：名称 + 键位（来自 core/mdFormat.ts）+ 动作。
  * 快捷键、右键菜单都由这张表生成，界面提示也从同一处取键名——改键不会再漏改提示。
@@ -107,6 +131,8 @@ interface Props {
   onAttach?: (filename: string, blob: Blob) => Promise<string>;
   /** 「草稿」按钮：把选中文本交给智能草稿 */
   onDraft?: (text: string) => void;
+  /** 注册需要在当前光标处执行的通路插入操作 */
+  onPathwayReady?: (insert: ((markdown: string) => void) | null) => void;
   /** vault 相对路径 → 文件内容，用于实时预览内联渲染图片 */
   readFile?: (path: string) => string | undefined;
   /**
@@ -115,9 +141,15 @@ interface Props {
    * 用户每敲一个字都会被拽回第一处命中。nonce 只在「新的一次搜索打开」时递增。
    */
   highlight?: { query: string; nonce: number } | null;
+  /** 当前笔记的标题行号（本页目录的「所在小节」判定源；来自 Workspace 的 parseOutline） */
+  headingLines?: number[];
+  /** 光标所在小节的标题行号变化时回调（在编辑器内部去重，跨节才通知） */
+  onActiveHeading?: (line: number | null) => void;
+  /** 注册「跳转到指定行」（本页目录点击 → 滚动 + 光标定位）；卸载时回调 null */
+  onJumpReady?: (jump: ((line: number) => void) | null) => void;
 }
 
-export default function Editor({ value, onChange, linkNames = [], onOpenLink, onAttach, onDraft, readFile, highlight }: Props) {
+export default function Editor({ value, onChange, linkNames = [], onOpenLink, onAttach, onDraft, onPathwayReady, readFile, highlight, headingLines = [], onActiveHeading, onJumpReady }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -145,6 +177,12 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   const menuFocusRef = useRef(false);
   /** 程序化同步内容时置 true：dispatch 是同步的，可拦住 updateListener 的回声 onChange */
   const applyingRef = useRef(false);
+  const pathwayReadyRef = useRef(onPathwayReady);
+  /** 本页目录：标题行号 / 所在小节回调 / 上次通知的行号（跨节才通知，避免每键重渲染） */
+  const headingLinesRef = useRef(headingLines);
+  const activeHeadingRef = useRef(onActiveHeading);
+  const lastActiveHeadingRef = useRef<number | null>(null);
+  const jumpReadyRef = useRef(onJumpReady);
   onChangeRef.current = onChange;
   if (namesRef.current !== linkNames || lowerNamesRef.current === null) {
     namesRef.current = linkNames;
@@ -155,6 +193,11 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   readFileRef.current = readFile;
   menuAtRef.current = setMenuAt;
   tableOpenRef.current = tableOpen;
+  pathwayReadyRef.current = onPathwayReady;
+  headingLinesRef.current = headingLines;
+  activeHeadingRef.current = onActiveHeading;
+  jumpReadyRef.current = onJumpReady;
+
 
   // 图片 → Blob 直接入库（不转 base64，避免内存膨胀）→ 插入 markdown 引用
   const insertImage = async (file: File) => {
@@ -269,6 +312,11 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
                 const name = wikiEl.getAttribute('data-lp-target');
                 if (name) { e.preventDefault(); fn(name); return true; }
               }
+              // 通路图是跨行替换部件：点图后选中整个 ```pathway 块，Delete/Backspace 可直接删除。
+              if (selectPathwayBlock(view, target)) {
+                e.preventDefault();
+                return true;
+              }
               // 源码模式兜底：用 posAtCoords 识别光标点中的 [[x]] / [x](url)
               if (!fn) return false;
               const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
@@ -340,12 +388,56 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               const text = s.empty ? '' : u.state.sliceDoc(s.from, s.to);
               setSelText((prev) => (prev === text ? prev : text));
             }
+            // 本页目录：光标跨小节才通知（行号比对在编辑器内做掉，不每键触发重渲染）
+            if ((u.docChanged || u.selectionSet) && (headingLinesRef.current.length > 0 || lastActiveHeadingRef.current !== null)) {
+              const cursorLine = u.state.doc.lineAt(u.state.selection.main.head).number;
+              const lines = headingLinesRef.current;
+              let active: number | null = null;
+              for (let i = lines.length - 1; i >= 0; i--) {
+                if (lines[i] <= cursorLine) { active = lines[i]; break; }
+              }
+              if (active !== lastActiveHeadingRef.current) {
+                lastActiveHeadingRef.current = active;
+                activeHeadingRef.current?.(active);
+              }
+            }
           }),
         ],
       }),
     });
     viewRef.current = view;
-    return () => view.destroy();
+    pathwayReadyRef.current?.((markdown) => {
+      const selection = view.state.selection.main;
+      const before = view.state.sliceDoc(0, selection.from);
+      const after = view.state.sliceDoc(selection.to);
+      const prefix = !before || before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+      const suffix = !after ? '\n' : after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n';
+      const insert = `${prefix}${markdown}${suffix}`;
+      const anchor = selection.from + insert.length;
+      view.dispatch({
+        changes: { from: selection.from, to: selection.to, insert },
+        selection: { anchor },
+      });
+      view.focus();
+    });
+    // 本页目录的跳转入口：滚动让目标行贴近顶部（留出工具栏余量）并把光标放上行首——
+    // 光标就位后 highlightActiveLine 会点亮该行，livePreview 的「活动行」也随之一致
+    jumpReadyRef.current?.((line) => {
+      const v = viewRef.current;
+      if (!v) return;
+      const target = v.state.doc.line(Math.min(Math.max(1, line), v.state.doc.lines));
+      v.dispatch({
+        selection: { anchor: target.from },
+        effects: EditorView.scrollIntoView(target.from, { y: 'start', yMargin: 76 }),
+      });
+      v.focus();
+    });
+    return () => {
+      pathwayReadyRef.current?.(null);
+      jumpReadyRef.current?.(null);
+      viewRef.current = null;
+      view.destroy();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
