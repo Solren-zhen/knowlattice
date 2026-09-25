@@ -10,7 +10,7 @@
  * - 批量删除走一次状态更新（removeMany），避免逐篇触发全树与全索引重建。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import type { TreeNode } from '../core/vault';
+import type { ImportResult, TreeNode } from '../core/vault';
 import { NOTE_TYPE_LABELS, type NoteType } from '../core/parser';
 import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore, IconTrash } from './icons';
 import { toast, confirmBox } from '../core/feedback';
@@ -24,9 +24,10 @@ interface Props {
   onCreate: (dir: string, title: string, type?: NoteType) => void;
   onExport: () => Promise<void>;
   onExportFolder: () => Promise<number>;
-  onImport: (text: string) => Promise<{ ok: number; failed: number }>;
+  onImport: (text: string) => Promise<ImportResult>;
   /** 导入 md 文件夹（webkitdirectory 选择目录，相对路径入库） */
-  onImportMd: (files: Array<{ path: string; content: string }>) => Promise<{ ok: number; failed: number }>;
+  onImportMd: (files: Array<{ path: string; content: string }>) => Promise<ImportResult>;
+  onRepair?: () => Promise<ImportResult>;
   /** 批量删除选中的笔记 */
   onRemove: (paths: string[]) => void;
 }
@@ -35,6 +36,10 @@ interface Props {
 const ROW_H = 26;
 /** 视口上下各多渲染的行数 */
 const OVERSCAN = 8;
+
+const repairKindLabel: Record<string, string> = {
+  'escaped-table-pipe': '表格管道符转义',
+};
 
 interface FlatRow {
   node: TreeNode;
@@ -123,7 +128,7 @@ const Row = memo(function Row({
   );
 });
 
-export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExport, onExportFolder, onImport, onImportMd, onRemove }: Props) {
+export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExport, onExportFolder, onImport, onImportMd, onRepair, onRemove }: Props) {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
   /** 新建笔记的目标目录：点击目录行时设为该目录，可点提示取消 */
@@ -135,6 +140,8 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
   const [selected, setSelected] = useState<Set<string>>(new Set());
   /** 备份 / 导出 / 导入 / 批量删除 收纳菜单（低频数据操作） */
   const [moreOpen, setMoreOpen] = useState(false);
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairReport, setRepairReport] = useState<ImportResult | null>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
 
@@ -303,7 +310,8 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
     try {
       const r = await onImportMd(list);
       if (r.failed) toast(`已导入 ${r.ok} 篇，${r.failed} 篇写入失败（存储空间可能不足）`, 'err');
-      else toast(`已导入 ${r.ok} 篇笔记（md 文件夹）`, 'ok');
+      else toast(`已导入 ${r.ok} 篇笔记（md 文件夹）${r.repaired ? `，修正 ${r.repaired} 处格式` : ''}`, 'ok');
+      setRepairReport(r);
     } catch (err) {
       toast(`导入失败：${(err as Error).message}`, 'err');
     }
@@ -367,6 +375,22 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
                 <div onClick={() => { jsonRef.current?.click(); setMoreOpen(false); }} {...clickable()}>
                   <IconRestore /> 从备份 .json 恢复
                 </div>
+                {onRepair && <div onClick={() => {
+                  if (repairBusy || !onRepair) return;
+                  setMoreOpen(false);
+                  setRepairBusy(true);
+                  void onRepair()
+                    .then((r) => {
+                      setRepairReport(r);
+                      if (r.failed) toast(`批量修复完成：${r.failed} 篇写入失败`, 'err');
+                      else if (r.repaired) toast(`批量修复完成：${r.repaired} 处格式已修正`, 'ok', 4200);
+                      else toast('批量修复完成：未发现需要修正的格式', 'info');
+                    })
+                    .catch((err: unknown) => toast(`修复失败：${(err as Error).message}`, 'err'))
+                    .finally(() => setRepairBusy(false));
+                }} {...clickable(repairBusy ? '正在扫描' : '扫描并修复 Markdown 格式')}>
+                  {repairBusy ? '正在扫描 Markdown…' : '扫描并修复 Markdown 格式'}
+                </div>}
                 <div onClick={() => { folderRef.current?.click(); setMoreOpen(false); }} {...clickable()}>
                   <IconFolderIn /> 导入 md 文件夹
                 </div>
@@ -391,8 +415,9 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
                   if (r.failed) {
                     toast(`已恢复 ${r.ok} 篇，${r.failed} 篇写入失败——这几篇没有进库，请确认存储空间后重新导入`, 'err');
                   } else {
-                    toast(`已恢复 ${r.ok} 篇笔记（备份里的题库 / 复习进度也已一并导入）`, 'ok');
+                    toast(`已恢复 ${r.ok} 篇笔记${r.repaired ? `，修正 ${r.repaired} 处格式` : ''}（备份里的题库 / 复习进度也已一并导入）`, 'ok');
                   }
+                  setRepairReport(r);
                 } catch (err) {
                   toast((err as Error).message, 'err');
                 }
@@ -408,6 +433,16 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
             onChange={(e) => void onFolder(e)}
             {...({ webkitdirectory: '' } as Record<string, string>)}
           />
+          {repairReport && (repairReport.repairedFiles?.length ?? 0) > 0 && (
+            <details className="markdown-repair-report">
+              <summary>查看本次修正明细（{repairReport.repairedFiles?.length ?? 0} 篇）</summary>
+              <ul>
+                {(repairReport.repairedFiles ?? []).map((file) => (
+                  <li key={file.path}>{file.path}：{file.changes.map((change) => `${repairKindLabel[change.kind] ?? change.kind} ×${change.count}`).join('、')}</li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       </div>
       {creating && (

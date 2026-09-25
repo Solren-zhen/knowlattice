@@ -95,6 +95,43 @@ describe('renderPathwaySvg', () => {
     expect(svg).toContain('跨行');
   });
 
+  it('一个节点的多个产物并排成子分支，母节点留在上方中央', () => {
+    const svg = renderPathwaySvg('丙酮酸 -> 乳酸\n丙酮酸 -> 乙酰CoA');
+    const at = (key: string) => {
+      const m = new RegExp(`data-pw-key="${key}" data-pw-x="([^"]+)" data-pw-y="([^"]+)"`).exec(svg);
+      return { x: Number(m?.[1]), y: Number(m?.[2]) };
+    };
+    const parent = at('丙酮酸');
+    const left = at('乳酸');
+    const right = at('乙酰CoA');
+    expect(parent.y).toBeLessThan(left.y);
+    expect(left.y).toBe(right.y);
+    expect(left.x).toBeLessThan(parent.x);
+    expect(right.x).toBeGreaterThan(parent.x);
+  });
+
+  it('默认按流向分层：产物排在来源下方', () => {
+    const svg = renderPathwaySvg('起点 -> 中间\n中间 -> 产物');
+    const read = (key: string) => Number(new RegExp(`data-pw-key="${key}" data-pw-x="[^"]+" data-pw-y="([^"]+)"`).exec(svg)?.[1]);
+    expect(read('起点')).toBeLessThan(read('中间'));
+    expect(read('中间')).toBeLessThan(read('产物'));
+  });
+
+  it('同一对节点的两条边分列两侧，标签不再叠在同一点', () => {
+    const svg = renderPathwaySvg('A -> B : 己糖激酶\nB -> A : 反馈抑制');
+    const labels = [...svg.matchAll(/class="pw-enzyme pw-edge-label" x="([^"]+)" y="([^"]+)"/g)]
+      .map((m) => `${m[1]},${m[2]}`);
+    expect(labels).toHaveLength(2);
+    expect(new Set(labels).size).toBe(2);
+  });
+
+  it('箭头线使用可见样式，且同一节点的多条边分别生成', () => {
+    const svg = renderPathwaySvg('A -> B : 第一条\nA -> C : 第二条\nB -> D');
+    expect(svg).toContain('class="pw-edge"');
+    expect(svg).toContain('marker-end=');
+    expect((svg.match(/class="pw-edge"/g) ?? []).length).toBe(3);
+  });
+
   it('长旁注在泳道宽度内折行，不越界', () => {
     const long = '这是一条很长的旁注说明文字应当在泳道内自动折行显示而不是溢出到相邻泳道里';
     const svg = renderPathwaySvg(`A -> B\n> ${long}`);
@@ -115,6 +152,38 @@ describe('renderPathwaySvg', () => {
 
   it('泳道标题带 --pw-gc（供 CSS 按主题混合到可读对比度）', () => {
     expect(renderPathwaySvg(SRC)).toContain('--pw-gc:#d64545');
+  });
+
+  // ---------- 手动定位（@ 节点 | x | y，通路工作区拖拽/微调的落点） ----------
+
+  it('手动定位的节点钉在指定坐标，其余节点照常按流向分层', () => {
+    const svg = renderPathwaySvg('A -> B\n@ C | 300 | 200');
+    const at = (key: string) => {
+      const m = new RegExp(`data-pw-key="${key}" data-pw-x="([^"]+)" data-pw-y="([^"]+)"`).exec(svg);
+      return { x: Number(m?.[1]), y: Number(m?.[2]) };
+    };
+    expect(at('C')).toEqual({ x: 300, y: 200 });
+    expect(at('A').y).toBeLessThan(at('B').y);
+  });
+
+  it('手动与自动节点混排时连线照常生成（两端各自取位置）', () => {
+    const svg = renderPathwaySvg('A -> C\n@ C | 260 | 180');
+    expect((svg.match(/class="pw-edge"/g) ?? []).length).toBe(1);
+    expect(svg).toContain('data-pw-key="C" data-pw-x="260"');
+  });
+
+  it('负坐标/越界坐标夹到可见区，viewBox 不会把节点裁掉', () => {
+    const svg = renderPathwaySvg('A -> B\n@ C | -50 | -50');
+    const y = Number(new RegExp('data-pw-key="C" data-pw-x="[^"]+" data-pw-y="([^"]+)"').exec(svg)?.[1]);
+    expect(y).toBeGreaterThanOrEqual(60);
+  });
+
+  it('去掉 @ 坐标后回到自动分层位置（撤销拖拽的渲染侧表现）', () => {
+    const pinned = renderPathwaySvg('A -> B\nC -> B\n@ C | 300 | 300');
+    const unpinned = renderPathwaySvg('A -> B\nC -> B');
+    const y = (s: string, key: string) => Number(new RegExp(`data-pw-key="${key}" data-pw-x="[^"]+" data-pw-y="([^"]+)"`).exec(s)?.[1]);
+    expect(y(pinned, 'C')).toBe(300);
+    expect(y(unpinned, 'C')).toBeLessThan(300); // 回到来源层
   });
 });
 

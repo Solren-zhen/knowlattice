@@ -11,6 +11,7 @@
  * - `## 名称 | 颜色 | 旁注`：一条泳道/分组，颜色可省；同一节点在别的分组被引用即跨泳道连线
  * - `A -> B : 酶名` 正向；`A <-> B : 酶名` 可逆（也可用 → / ⇌）
  * - `[[目标]]` 或 `[[目标|显示名]]`：节点可点击跳转到对应笔记
+ * - `@ 节点`：声明没有连线的节点（适合在编辑器中先搭图再补关系）
  * - `>` 开头：该分组的旁注，排在泳道底部
  *
  * 所有文本都经 XML 转义后拼进 SVG，不引入用户 HTML。
@@ -18,8 +19,9 @@
 
 export interface PwLink { target: string; label: string }
 export interface PwGroup { id: string; name: string; color: string; note?: string }
-export interface PwNode { key: string; label: string; group: string; link?: PwLink }
-export interface PwEdge { from: string; to: string; label?: string; reversible: boolean; group: string }
+export interface PwNode { key: string; label: string; group: string; link?: PwLink; x?: number; y?: number }
+export type PwRelation = 'convert' | 'promote' | 'inhibit' | 'reversible';
+export interface PwEdge { from: string; to: string; label?: string; reversible: boolean; relation: PwRelation; group: string }
 export interface PwNote { group: string; text: string }
 export interface PwSpec {
   title?: string;
@@ -29,6 +31,8 @@ export interface PwSpec {
   notes: PwNote[];
 }
 export interface PwParseResult { spec: PwSpec; errors: string[] }
+export interface PwPoint { x: number; y: number }
+export interface PwNodeSize { width: number; height: number }
 
 export const PW_LANGS = ['pathway', 'biochem'];
 
@@ -58,7 +62,7 @@ function parseName(raw: string): { label: string; link?: PwLink } {
   return { label, link: { target, label } };
 }
 
-interface RawEdge { left: string; right: string; reversible: boolean; label?: string }
+interface RawEdge { left: string; right: string; reversible: boolean; relation: PwRelation; label?: string }
 
 function splitEdge(line: string): RawEdge | null {
   let op = '';
@@ -86,7 +90,11 @@ function splitEdge(line: string): RawEdge | null {
     label = m[2].trim() || undefined;
   }
   if (!rest) return null;
-  return { left, right: rest, reversible: op === '<->', label };
+  const rawLabel = label ?? '';
+  const relationMatch = /^(促进|抑制|转化|可逆)(?:\s*[·:]\s*([\s\S]*))?$/.exec(rawLabel.trim());
+  const relation: PwRelation = op === '<->' ? 'reversible' : relationMatch?.[1] === '促进' ? 'promote' : relationMatch?.[1] === '抑制' ? 'inhibit' : 'convert';
+  label = relationMatch ? (relationMatch[2]?.trim() || undefined) : label;
+  return { left, right: rest, reversible: op === '<->', relation, label };
 }
 
 /** 解析围栏块源码；结构错误不抛异常，收集到 errors 里由渲染层决定如何提示 */
@@ -103,7 +111,7 @@ export function parsePathway(src: string): PwParseResult {
     return cur;
   };
 
-  const addNode = (raw: string, group: PwGroup): PwNode => {
+  const addNode = (raw: string, group: PwGroup, position?: { x: number; y: number }): PwNode => {
     const { label, link } = parseName(raw);
     let node = nodeMap.get(label);
     if (!node) {
@@ -113,6 +121,7 @@ export function parsePathway(src: string): PwParseResult {
     } else if (link && !node.link) {
       node.link = link;
     }
+    if (position) Object.assign(node, position);
     return node;
   };
 
@@ -149,6 +158,17 @@ export function parsePathway(src: string): PwParseResult {
       spec.notes.push({ group: group.id, text: raw.replace(/^>\s?/, '').trim() });
       continue;
     }
+    if (/^@\s+/.test(raw)) {
+      const group = ensureGroup();
+      const declaration = raw.replace(/^@\s+/, '').trim();
+      const match = /^(.*?)\s*\|\s*(-?\d+(?:\.\d+)?)\s*\|\s*(-?\d+(?:\.\d+)?)$/.exec(declaration);
+      const name = (match?.[1] ?? declaration).trim();
+      const x = match ? Number(match[2]) : NaN;
+      const y = match ? Number(match[3]) : NaN;
+      if (name) addNode(name, group, Number.isFinite(x) && Number.isFinite(y) ? { x, y } : undefined);
+      else errors.push(`第 ${n + 1} 行：节点声明不能为空`);
+      continue;
+    }
 
     const edge = splitEdge(raw);
     if (!edge) {
@@ -163,6 +183,7 @@ export function parsePathway(src: string): PwParseResult {
       to: to.key,
       label: edge.label,
       reversible: edge.reversible,
+      relation: edge.relation,
       group: group.id,
     });
   }
@@ -211,6 +232,72 @@ function contentId(s: string): string {
   return `pw${(a >>> 0).toString(36)}${b.toString(36)}`;
 }
 
+/** Route an edge between node borders so the arrow tip stays attached while either node moves.
+ *  `bend` offsets parallel edges to opposite sides of the chord so labels do not stack. */
+export function routePathwayEdge(from: PwPoint, to: PwPoint, fromSize: PwNodeSize, toSize: PwNodeSize, bend = 0) {
+  let dx = to.x - from.x;
+  let dy = to.y - from.y;
+  const samePoint = Math.hypot(dx, dy) < 1;
+  if (samePoint) { dx = 1; dy = 0; }
+  const length = Math.hypot(dx, dy);
+  const ux = dx / length;
+  const uy = dy / length;
+  const px = -uy;
+  const py = ux;
+  const borderDistance = (size: PwNodeSize) => Math.min(
+    Math.abs(ux) < 0.0001 ? Infinity : (size.width / 2 + 2) / Math.abs(ux),
+    Math.abs(uy) < 0.0001 ? Infinity : (size.height / 2 + 2) / Math.abs(uy),
+  );
+  const startDistance = borderDistance(fromSize);
+  const endDistance = borderDistance(toSize);
+  const start = { x: from.x + ux * startDistance, y: from.y + uy * startDistance };
+  const end = { x: to.x - ux * endDistance, y: to.y - uy * endDistance };
+
+  if (samePoint) {
+    const right = from.x + fromSize.width / 2 + 2;
+    const top = from.y - fromSize.height / 2 - 2;
+    const d = `M${right},${from.y} C${right + 48},${from.y - 4} ${from.x + 28},${top - 48} ${from.x},${top}`;
+    return { d, labelX: right + 23, labelY: top - 20 };
+  }
+
+  const gap = Math.hypot(end.x - start.x, end.y - start.y);
+  const handle = Math.max(18, Math.min(110, gap * 0.38));
+  const offset = bend * Math.min(36, Math.max(14, gap * 0.18));
+  const c1 = { x: start.x + ux * handle + px * offset, y: start.y + uy * handle + py * offset };
+  const c2 = { x: end.x - ux * handle + px * offset, y: end.y - uy * handle + py * offset };
+  const d = `M${start.x},${start.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${end.x},${end.y}`;
+  const labelX = (start.x + 3 * c1.x + 3 * c2.x + end.x) / 8;
+  const labelY = (start.y + 3 * c1.y + 3 * c2.y + end.y) / 8 - 8;
+  return { d, labelX, labelY };
+}
+
+/** Recalculate all edge paths from their node positions; used during direct-manipulation drags. */
+export function updatePathwaySvgEdges(svg: SVGSVGElement) {
+  const nodes = new Map<string, { point: PwPoint; size: PwNodeSize }>();
+  svg.querySelectorAll<SVGGElement>('.pw-node[data-pw-key]').forEach((node) => {
+    const key = node.dataset.pwKey;
+    const x = Number(node.dataset.pwX);
+    const y = Number(node.dataset.pwY);
+    const width = Number(node.dataset.pwW);
+    const height = Number(node.dataset.pwH);
+    if (key && [x, y, width, height].every(Number.isFinite)) nodes.set(key, { point: { x, y }, size: { width, height } });
+  });
+  svg.querySelectorAll<SVGGElement>('.pw-edge-group').forEach((edge) => {
+    const from = nodes.get(edge.dataset.pwFrom ?? '');
+    const to = nodes.get(edge.dataset.pwTo ?? '');
+    if (!from || !to) return;
+    const bend = Number(edge.dataset.pwBend);
+    const route = routePathwayEdge(from.point, to.point, from.size, to.size, Number.isFinite(bend) ? bend : 0);
+    const path = edge.querySelector<SVGPathElement>('.pw-edge');
+    if (path) path.setAttribute('d', route.d);
+    const label = edge.querySelector<SVGTextElement>('.pw-edge-label');
+    if (label) {
+      label.setAttribute('x', String(route.labelX));
+      label.setAttribute('y', String(route.labelY));
+    }
+  });
+}
+
 function errorBlock(messages: string[]): string {
   const items = messages.slice(0, 6).map((m) => `<li>${esc(m)}</li>`).join('');
   return `<div class="pw-wrap pw-error"><b>通路图未渲染</b><ul>${items}</ul></div>`;
@@ -219,6 +306,8 @@ function errorBlock(messages: string[]): string {
 /**
  * 按源码缓存渲染结果：预览面板每次重渲染（几乎每个按键）都会走到 fence 规则，
  * 缓存让未改动的通路块直接复用上一次的 SVG 字符串，不必重建。
+ * 满了逐出最旧一项（FIFO）而不是整表清空：清空会把笔记里其他未改动通路块的
+ * 缓存一起干掉，它们下次重建（滚动/部件重建）就得全量重算布局。
  */
 const svgCache = new Map<string, string>();
 const SVG_CACHE_MAX = 64;
@@ -228,7 +317,10 @@ export function renderPathwaySvg(src: string): string {
   const cached = svgCache.get(src);
   if (cached !== undefined) return cached;
   const out = buildPathwaySvg(src);
-  if (svgCache.size >= SVG_CACHE_MAX) svgCache.clear();
+  if (svgCache.size >= SVG_CACHE_MAX) {
+    const oldest = svgCache.keys().next().value;
+    if (oldest !== undefined) svgCache.delete(oldest);
+  }
   svgCache.set(src, out);
   return out;
 }
@@ -269,17 +361,87 @@ function renderSpec(spec: PwSpec, id: string): string {
   );
   const maxNoteLines = Math.max(0, ...wrappedNotes.map((l) => l.length));
   const noteH = maxNoteLines * 18;
-  const width = PAD * 2 + cols.length * COL_W;
-  const height = FIRST_Y + (maxRows - 1) * ROW + NH / 2 + (noteH ? noteH + 14 : 0) + 26;
+  let width = PAD * 2 + cols.length * COL_W;
+  let height = FIRST_Y + (maxRows - 1) * ROW + NH / 2 + (noteH ? noteH + 14 : 0) + 26;
 
   interface Pos { x: number; y: number; w: number; h: number; color: string }
   const pos = new Map<string, Pos>();
+  // 未手动定位时按流向分层：源在上、产物在下，跨步边不再穿过同泳道中间节点。
+  const rank = new Map<string, number>();
+  const incoming = new Map<string, string[]>();
+  for (const e of spec.edges) {
+    if (e.from === e.to) continue;
+    incoming.set(e.to, [...(incoming.get(e.to) ?? []), e.from]);
+  }
+  const visiting = new Set<string>();
+  const rankOf = (key: string): number => {
+    const known = rank.get(key);
+    if (known !== undefined) return known;
+    if (visiting.has(key)) return 0;
+    visiting.add(key);
+    const parents = incoming.get(key) ?? [];
+    const value = parents.length ? Math.max(...parents.map(rankOf)) + 1 : 0;
+    visiting.delete(key);
+    rank.set(key, value);
+    return value;
+  };
+  for (const n of spec.nodes) rankOf(n.key);
+  const children = new Map<string, string[]>();
+  for (const e of spec.edges) {
+    if (e.from === e.to) continue;
+    children.set(e.from, [...(children.get(e.from) ?? []), e.to]);
+  }
   cols.forEach((c, gi) => {
-    const x = PAD + gi * COL_W + COL_W / 2;
-    c.nodes.forEach((n, ri) => {
-      pos.set(n.key, { x, y: FIRST_Y + ri * ROW, w: textWidth(n.label, 14) + 30, h: NH, color: c.g.color });
-    });
+    const center = PAD + gi * COL_W + COL_W / 2;
+    const members = new Set(c.nodes.map((n) => n.key));
+    // 手动定位的节点（@ 节点 | x | y，来自通路工作区的拖拽/微调）：跳过自动布局，
+    // 直接钉在指定坐标（负值夹到可见区，避免 viewBox 从 0 起把节点裁掉）。
+    // 其余节点照常按流向分层；两类节点可以混排，连线两端位置各自取自 pos。
+    const manual = new Map<string, { x: number; y: number }>();
+    for (const n of c.nodes) {
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
+      const fixed = { x: Math.max(60, n.x!), y: Math.max(60, n.y!) };
+      manual.set(n.key, fixed);
+      pos.set(n.key, { x: fixed.x, y: fixed.y, w: textWidth(n.label, 14) + 30, h: NH, color: c.g.color });
+    }
+    const auto = c.nodes.filter((n) => !manual.has(n.key));
+    const sibling = new Map<string, number>();
+    const seen = new Set<string>();
+    for (const n of auto) {
+      const kids = (children.get(n.key) ?? []).filter((key) => members.has(key) && !seen.has(key) && !manual.has(key));
+      if (kids.length < 2) continue;
+      kids.forEach((key, index) => {
+        sibling.set(key, index - (kids.length - 1) / 2);
+        seen.add(key);
+      });
+    }
+    const buckets = new Map<number, PwNode[]>();
+    for (const n of auto) {
+      const r = rank.get(n.key) ?? 0;
+      buckets.set(r, [...(buckets.get(r) ?? []), n]);
+    }
+    let row = 0;
+    for (const r of [...buckets.keys()].sort((a, b) => a - b)) {
+      const rowNodes = buckets.get(r) ?? [];
+      const branches = rowNodes.filter((n) => sibling.has(n.key));
+      const trunks = rowNodes.filter((n) => !sibling.has(n.key));
+      for (const n of trunks) {
+        pos.set(n.key, { x: center, y: FIRST_Y + row * ROW, w: textWidth(n.label, 14) + 30, h: NH, color: c.g.color });
+        row += 1;
+      }
+      if (branches.length) {
+        const span = Math.min(88, (COL_W - 36) / Math.max(1, branches.length - 1));
+        for (const n of branches) {
+          const slot = sibling.get(n.key) ?? 0;
+          pos.set(n.key, { x: center + slot * span, y: FIRST_Y + row * ROW, w: textWidth(n.label, 14) + 30, h: NH, color: c.g.color });
+        }
+        row += 1;
+      }
+    }
   });
+  const noteY = Math.max(FIRST_Y + (maxRows - 1) * ROW + NH / 2 + 26, ...[...pos.values()].map((p) => p.y + p.h / 2 + 26));
+  width = Math.max(width, ...[...pos.values()].map((p) => p.x + p.w / 2 + 36));
+  height = Math.max(height, noteY + noteH + 20);
 
   const parts: string[] = [];
   parts.push(
@@ -294,8 +456,10 @@ function renderSpec(spec: PwSpec, id: string): string {
   );
   groups.forEach((g, gi) => {
     parts.push(
-      `<marker id="${id}-a${gi}" markerWidth="9" markerHeight="8" refX="7.5" refY="3" orient="auto-start-reverse">` +
-        `<path d="M0,0 L7.5,3 L0,6 z" fill="${g.color}"/></marker>`,
+      `<marker id="${id}-a${gi}" markerWidth="12" markerHeight="12" refX="10" refY="6" markerUnits="userSpaceOnUse" orient="auto-start-reverse">` +
+        `<path d="M0,0 L10,6 L0,12 z" fill="${g.color}" stroke="${g.color}" stroke-width="0.8"/></marker>`,
+      `<marker id="${id}-i${gi}" markerWidth="12" markerHeight="12" refX="10" refY="6" markerUnits="userSpaceOnUse" orient="auto">` +
+        `<path d="M10,0 L10,12" stroke="${g.color}" stroke-width="2.4"/></marker>`,
     );
   });
   parts.push('</defs>');
@@ -321,67 +485,48 @@ function renderSpec(spec: PwSpec, id: string): string {
   });
 
   const edgeGroupIdx = new Map(groups.map((g, gi) => [g.id, gi]));
-
   const lines: string[] = [];
-  const edgeLabels: string[] = [];
   const markerOf = (gid: string) => `url(#${id}-a${edgeGroupIdx.get(gid) ?? 0})`;
+  const inhibitMarkerOf = (gid: string) => `url(#${id}-i${edgeGroupIdx.get(gid) ?? 0})`;
+  const pairCount = new Map<string, number>();
+  const pairIndex = new Map<string, number>();
+  for (const e of spec.edges) {
+    const key = [e.from, e.to].sort().join('\0');
+    pairCount.set(key, (pairCount.get(key) ?? 0) + 1);
+  }
   for (const e of spec.edges) {
     const a = pos.get(e.from);
     const b = pos.get(e.to);
     if (!a || !b) continue;
     const color = (groups[edgeGroupIdx.get(e.group) ?? 0] ?? groups[0]).color;
-    const markerEnd = markerOf(e.group);
-    const markerStart = e.reversible ? `marker-start="${markerEnd}"` : '';
-
-    if (Math.abs(a.x - b.x) < 1) {
-      const down = b.y > a.y;
-      const sy = a.y + (down ? a.h / 2 : -a.h / 2);
-      const ty = b.y + (down ? -b.h / 2 : b.h / 2);
-      const gi = edgeGroupIdx.get(e.group) ?? 0;
-      const laneRight = PAD + gi * COL_W + COL_W - 8;
-      const cross = spec.nodes
-        .map((n) => pos.get(n.key))
-        .filter((p): p is Pos => !!p && Math.abs(p.x - a.x) < 1 && p.y > Math.min(a.y, b.y) && p.y < Math.max(a.y, b.y));
-      if (Math.abs(b.y - a.y) > ROW * 1.5 && cross.length > 0) {
-        const half = Math.max(...cross.map((p) => p.w / 2));
-        const bowX = Math.min(a.x + half + 14, laneRight - 8);
-        lines.push(
-          `<path d="M${a.x},${sy} C${bowX},${sy} ${bowX},${ty} ${b.x},${ty}" stroke="${color}" ${markerStart} marker-end="${markerEnd}"/>`,
-        );
-        if (e.label) {
-          edgeLabels.push(
-            `<text class="pw-enzyme pw-edge-label" x="${bowX + 4}" y="${(sy + ty) / 2 + 4}" text-anchor="start">${esc(e.label)}</text>`,
-          );
-        }
-      } else {
-        lines.push(`<path d="M${a.x},${sy} L${b.x},${ty}" stroke="${color}" ${markerStart} marker-end="${markerEnd}"/>`);
-        if (e.label) {
-          edgeLabels.push(
-            `<text class="pw-enzyme pw-edge-label" x="${a.x + 12}" y="${(sy + ty) / 2 + 4}" text-anchor="start">${esc(e.label)}</text>`,
-          );
-        }
-      }
-    } else {
-      const sign = b.x > a.x ? 1 : -1;
-      const sx = a.x + sign * (a.w / 2 + 2);
-      const tx = b.x - sign * (b.w / 2 + 2);
-      const c1 = sx + sign * Math.max(46, Math.abs(tx - sx) * 0.45);
-      const c2 = tx - sign * Math.max(46, Math.abs(tx - sx) * 0.45);
-      lines.push(
-        `<path d="M${sx},${a.y} C${c1},${a.y} ${c2},${b.y} ${tx},${b.y}" stroke="${color}" ${markerStart} marker-end="${markerEnd}"/>`,
-      );
-      if (e.label) {
-        edgeLabels.push(
-          `<text class="pw-enzyme pw-edge-label" x="${(sx + tx) / 2}" y="${(a.y + b.y) / 2 - 8}" text-anchor="middle">${esc(e.label)}</text>`,
-        );
-      }
-    }
+    const markerEnd = e.relation === 'inhibit' ? inhibitMarkerOf(e.group) : markerOf(e.group);
+    const markerStart = e.reversible ? `marker-start="${markerOf(e.group)}"` : '';
+    const pairKey = [e.from, e.to].sort().join('\0');
+    const total = pairCount.get(pairKey) ?? 1;
+    const index = pairIndex.get(pairKey) ?? 0;
+    pairIndex.set(pairKey, index + 1);
+    // 反向边的法线也反向，所以按字典序统一朝向，避免两条边弯到同一侧。
+    const facing = e.from <= e.to ? 1 : -1;
+    const bend = (total < 2 ? 0 : index - (total - 1) / 2) * facing;
+    const route = routePathwayEdge(
+      { x: a.x, y: a.y },
+      { x: b.x, y: b.y },
+      { width: a.w, height: a.h },
+      { width: b.w, height: b.h },
+      bend,
+    );
+    const edgeLabel = e.label
+      ? `<text class="pw-enzyme pw-edge-label" x="${route.labelX}" y="${route.labelY}" text-anchor="middle">${esc(e.label)}</text>`
+      : '';
+    lines.push(
+      `<g class="pw-edge-group" data-pw-from="${esc(e.from)}" data-pw-to="${esc(e.to)}" data-pw-bend="${bend}">` +
+        `<path d="${route.d}" class="pw-edge" data-pw-relation="${e.relation}" stroke="${color}" ${markerStart} marker-end="${markerEnd}"/>` +
+        edgeLabel +
+      `</g>`,
+    );
   }
   if (lines.length) {
-    parts.push(`<g class="pw-lines" filter="url(#${id}-rough)">${lines.join('')}</g>`);
-  }
-  if (edgeLabels.length) {
-    parts.push(`<g class="pw-edgelabels">${edgeLabels.join('')}</g>`);
+    parts.push(`<g class="pw-lines">${lines.join('')}</g>`);
   }
 
   const nodeEls: string[] = [];
@@ -394,7 +539,8 @@ function renderSpec(spec: PwSpec, id: string): string {
       `<g filter="url(#${id}-rough)"><rect class="pw-node-box" x="${x}" y="${y}" width="${p.w}" height="${p.h}" rx="9" ry="9" ` +
       `fill="${p.color}" fill-opacity="0.10" stroke="${p.color}" stroke-width="1.6"/></g>`;
     const label = `<text class="pw-label" x="${p.x}" y="${p.y + 5}" text-anchor="middle">${esc(n.label)}</text>`;
-    const inner = `<g class="pw-node">${box}${label}</g>`;
+    const localBox = `<g transform="translate(${-p.x} ${-p.y})">${box}${label}</g>`;
+    const inner = `<g class="pw-node" data-pw-key="${esc(n.key)}" data-pw-x="${p.x}" data-pw-y="${p.y}" data-pw-w="${p.w}" data-pw-h="${p.h}" transform="translate(${p.x} ${p.y})">${localBox}</g>`;
     nodeEls.push(
       n.link
         ? `<a class="pw-link lp-wiki" href="javascript:void(0)" data-lp-target="${esc(n.link.target)}" ` +
@@ -405,7 +551,6 @@ function renderSpec(spec: PwSpec, id: string): string {
   parts.push(`<g class="pw-nodes">${nodeEls.join('')}</g>`);
 
   const laneX = (gi: number) => PAD + gi * COL_W + 8 + 12;
-  const noteY = FIRST_Y + (maxRows - 1) * ROW + NH / 2 + 26;
   wrappedNotes.forEach((lines, gi) => {
     let yy = noteY;
     lines.forEach((line, li) => {

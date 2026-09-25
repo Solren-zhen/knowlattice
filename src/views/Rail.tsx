@@ -8,7 +8,7 @@ import {
   type Font, type Theme,
 } from '../core/theme';
 import {
-  IconLogo, IconTree, IconChevron, IconSearch, IconHistory, IconBody, IconBrain, IconGraph, IconCards,
+  IconLogo, IconTree, IconPathway, IconChevron, IconSearch, IconHistory, IconBody, IconBrain, IconGraph, IconCards,
   IconTarget, IconQuiz, IconTodo, IconTag, IconChart, IconAi, IconWand, IconBook,
   IconConvert, IconSun, IconMoon, IconInfo,
 } from './icons';
@@ -17,6 +17,7 @@ interface Props {
   activeItem: string | null;
   treeOpen: boolean;
   onToggleTree: () => void;
+  onPathway?: () => void;
   onHome: () => void;
   onSearch: () => void;
   onHistory: () => void;
@@ -117,6 +118,10 @@ export default function Rail(p: Props) {
           <IconLogo /><span className="rail-label">知识首页</span>
         </button>
         <div className="rail-section-label" aria-hidden={!expanded}>工作区</div>
+        <button className={`rail-btn${p.activeItem === 'pathway' ? ' on' : ''}`} aria-current={p.activeItem === 'pathway' ? 'page' : undefined} data-tip="医学通路：拖动节点绘制并复用通路图" aria-label="医学通路" onClick={() => p.onPathway?.()}>
+          <IconPathway />
+          <span className="rail-label">医学通路</span>
+        </button>
         <button
           className={`rail-btn ${p.treeOpen ? 'on' : ''}`}
           data-tip="目录：折叠 / 展开章节树"

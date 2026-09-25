@@ -24,6 +24,16 @@ describe('renderMarkdown', () => {
     expect(await renderMarkdown('**加粗**')).toBe('<p><strong>加粗</strong></p>\n');
     expect(await renderMarkdown('**加粗**')).toBe('<p><strong>加粗</strong></p>\n');
   });
+
+  it('渲染 ==高亮== 为 mark', async () => {
+    expect(await renderMarkdown('==双侧全切==')).toBe('<p><mark>双侧全切</mark></p>\n');
+  });
+
+  it('表格单元格里的高亮也能渲染', async () => {
+    const html = await renderMarkdown('| 范围 | 指征 |\n| --- | --- |\n| ==患侧叶全切+峡部== | 肿瘤≤1cm |');
+    expect(html).toContain('<table>');
+    expect(html).toContain('<mark>患侧叶全切+峡部</mark>');
+  });
 });
 
 describe('数学公式（KaTeX）', () => {
