@@ -16,7 +16,7 @@
  *   4. 每张卡带上本小节里的属性键，供正面做回忆提示。
  *   5. 整篇只有标题、没有任何正文时退回整篇卡——别让笔记从队列里消失。
  */
-import { parseFrontmatter } from './parser';
+import { parseFrontmatterCached } from './parser';
 
 export interface ReviewCard {
   /** 调度键：`<path>`（整篇卡）或 `<path>#<小节标题>`（小节卡） */
@@ -62,8 +62,26 @@ function wholeNoteCard(path: string, noteTitle: string, body: string): ReviewCar
   return { key: path, path, noteTitle, heading: '', body: body.trim(), hints: cardHints(body) };
 }
 
+/**
+ * 切卡结果缓存（path 单键 + 内容比对，与 parser.parseFrontmatterCached 同一套纪律）：
+ * 复习面板、学习统计、工作台的复习状态三处都会对同一篇笔记切卡，重复调用的成本
+ * （解析 + 分节 + 逐行键扫描）不必付三次。不设上限——键是路径，容量天然等于
+ * 库里的笔记数，与 parseFrontmatterCached 的全库缓存同一量级；内容变了自动重算。
+ * 缓存返回共享的卡片对象——调用方约定不改写卡片（applyCardEdits 是纯函数，
+ * 会用展开运算生成新对象）。
+ */
+const splitCache = new Map<string, { raw: string; cards: ReviewCard[] }>();
+
 export function splitNoteIntoCards(path: string, raw: string): ReviewCard[] {
-  const { body, title } = parseFrontmatter(raw);
+  const hit = splitCache.get(path);
+  if (hit && hit.raw === raw) return hit.cards;
+  const cards = splitNoteIntoCardsUncached(path, raw);
+  splitCache.set(path, { raw, cards });
+  return cards;
+}
+
+function splitNoteIntoCardsUncached(path: string, raw: string): ReviewCard[] {
+  const { body, title } = parseFrontmatterCached(path, raw);
   const noteTitle = title || path.replace(/\.md$/, '').split('/').pop() || path;
   const lines = body.split('\n');
   // H1 是笔记标题（正面已经以「出自」显示），不参与切卡：

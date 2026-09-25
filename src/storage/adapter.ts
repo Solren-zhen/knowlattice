@@ -26,6 +26,11 @@ export interface StorageAdapter {
   exists(path: string): Promise<boolean>;
   write(path: string, content: string): Promise<void>;
   remove(path: string): Promise<void>;
+  /** 批量写入（可选优化）：适配器可实现为「一批一个事务」合批提交（IndexedDB 下
+   *  比「一文件一事务」快一个数量级）。未实现时调用方自动退回逐条 write。 */
+  writeMany?(entries: Array<{ path: string; content: string }>): Promise<void>;
+  /** 批量删除（可选优化）：同 writeMany，未实现时退回逐条 remove。 */
+  removeMany?(paths: string[]): Promise<void>;
   /** 一次读出全部二进制附件 {path → Blob}。Blob 是惰性句柄，不会把全部字节读进内存。 */
   readAllAttachments(): Promise<Map<string, Blob>>;
   writeAttachment(path: string, blob: Blob): Promise<void>;

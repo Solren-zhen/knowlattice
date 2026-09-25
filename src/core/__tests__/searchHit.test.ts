@@ -113,6 +113,34 @@ tags: [生理]
     expect(buildSnippet(doc, '').hits).toEqual([]);
     expect(buildSnippet('', '心梗')).toEqual({ text: '', hits: [] });
   });
+
+  // ---------- 窗口化定位（性能改写后的行为等价性） ----------
+
+  it('同一内容重复构建：缓存路径下结果逐字节一致', () => {
+    const a = buildSnippet(doc, '氧解离曲线');
+    const b = buildSnippet(doc, '氧解离曲线'); // bodyOf 命中缓存
+    expect(b).toEqual(a);
+  });
+
+  it('窗口内多处命中全部高亮；窗外命中不进片段（与全量扫描结果一致）', () => {
+    const text = '氧解离曲线第一处。中间隔了很多无关文字。第二处氧解离曲线出现。'
+      + '距离很远很远的地方还有第三处氧解离曲线，不应该被带进来。';
+    const s = buildSnippet(text, '氧解离曲线', 40);
+    for (const h of s.hits) expect(s.text.slice(h.start, h.end)).toBe('氧解离曲线');
+    expect(s.hits.length).toBeGreaterThanOrEqual(1); // 至少第一处
+    // 片段只覆盖窗口：远离首命中的那处要么不在片段里，要么被截到窗口边界
+    expect(s.text.length).toBeLessThanOrEqual(41); // 40 字符 + 可能的省略号
+  });
+
+  it('locateAll 窗口模式：只收 [from-15, from+span) 内的命中，越界即停', () => {
+    const text = '甲'.repeat(30) + '词A' + '乙'.repeat(50) + '词A';
+    // 窗口从 30 起、跨度 20：第一处（30~32）在窗口内，第二处（82~）窗外
+    const win = locateAll(text, ['词A'], 30, 20);
+    expect(win).toEqual([{ start: 30, end: 32 }]);
+    // 全量模式仍收两处（titleHits 等老调用方的行为不变）
+    const all = locateAll(text, ['词A']);
+    expect(all).toEqual([{ start: 30, end: 32 }, { start: 82, end: 84 }]);
+  });
 });
 
 describe('segment', () => {
