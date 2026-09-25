@@ -148,7 +148,7 @@ export default function Rail(p: Props) {
           <IconBrain />
           <span className="rail-label">脑图谱</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'graph' ? ' on' : ''}`} aria-current={p.activeItem === 'graph' ? 'page' : undefined} data-tip="知识图谱：全库双链网络图" aria-label="知识图谱" onClick={p.onGraph}>
+        <button className={`rail-btn rail-btn--graph${p.activeItem === 'graph' ? ' on' : ''}`} aria-current={p.activeItem === 'graph' ? 'page' : undefined} data-tip="知识图谱：全库双链网络图" aria-label="知识图谱" onClick={p.onGraph}>
           <IconGraph />
           <span className="rail-label">知识图谱</span>
         </button>
