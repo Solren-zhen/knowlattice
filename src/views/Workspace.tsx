@@ -6,8 +6,10 @@ import { useVault } from '../core/vault';
 import { noteTemplate, parseFrontmatterCached, type NoteType } from '../core/parser';
 import { appendExcerpt } from '../core/noteGen';
 import { noteStatus } from '../core/srs';
+import { parseOutline } from '../core/outline';
+import OutlinePanel from './OutlinePanel';
 import { buildCards } from '../core/srsCards';
-import { loadMistakes } from '../core/mistakes';
+import { getMistake } from '../core/mistakes';
 import {
   loadAnatomyManifest,
   loadZhDict,
@@ -46,6 +48,7 @@ import TodoView from './TodoView';
 import TagBrowser from './TagBrowser';
 import Dashboard from './Dashboard';
 import SafetyNotice from './SafetyNotice';
+import MedicalPathwayBuilder from './MedicalPathwayBuilder';
 import {
   IconSave, IconTrash, IconChevron, IconBack, IconFwd, IconSearch,
   IconFolder, IconLink, IconClose,
@@ -88,6 +91,8 @@ export default function Workspace() {
   const [draftText, setDraftText] = useState('');
   const [pdfOpen, setPdfOpen] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
+  const [pathwayOpen, setPathwayOpen] = useState(false);
+  const pathwayInsertRef = useRef<((markdown: string) => void) | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   /** 目录卡片显隐（导航轨「目录」按钮切换，窄屏可收起给正文让位） */
@@ -108,6 +113,10 @@ export default function Workspace() {
   const [saveRetryTick, setSaveRetryTick] = useState(0);
   /** 笔记导航历史（后退/前进） */
   const [nav, setNav] = useState<{ stack: string[]; idx: number }>({ stack: [], idx: -1 });
+  /** 本页目录：随草稿实时解析（打字即更新）；activeHeading = 光标所在小节的标题行号 */
+  const [activeHeading, setActiveHeading] = useState<number | null>(null);
+  /** 编辑器注册的「跳转到行」实现（本页目录点击用），模式同 pathwayInsertRef */
+  const outlineJumpRef = useRef<((line: number) => void) | null>(null);
 
   // 稳定引用：让 saveCurrent / openNoteCore 等 useCallback 不随渲染链失效，
   // 也避免下游（如 GraphView）因回调身份变化而整个重建
@@ -334,11 +343,13 @@ export default function Workspace() {
     setDraftOpen(true);
   }, []);
 
-  /** 回到主界面（欢迎页）：先把未保存改动落盘，再清空当前笔记 */
+  /** 回到主界面（欢迎页）：先把未保存改动落盘，再清空当前笔记。
+   *  医学通路工作区会整屏替换三栏布局，必须一并退出，否则点了按钮界面纹丝不动。 */
   const goHome = useCallback(() => {
     flushDraft();
     setDraft(null);
     setDirty(false);
+    setPathwayOpen(false);
     vault.setCurrentPath(null);
   }, [flushDraft, vault]);
 
@@ -492,6 +503,9 @@ export default function Workspace() {
     () => (activePath ? noteStatus(buildCards([activePath], vault.docs), activePath) : null),
     [activePath, vault.docs]
   );
+  // 本页目录：读草稿（未保存内容）而不是 docs——打字时目录即时跟上。
+  // 无标题的笔记返回空数组，大纲区整个不渲染。
+  const outline = useMemo(() => parseOutline(draft ?? ''), [draft]);
 
   if (!vault.loaded) {
     return <div className="loading">加载知识库…</div>;
@@ -515,7 +529,8 @@ export default function Workspace() {
   }
 
   const activeCard = activeStatus?.card ?? null;
-  const activeMistake = activePath ? loadMistakes()[activePath] : null;
+  // 单条直查（loadMistakes 的整表浅拷贝是给 setState 用的，这里在渲染体内、每键一次，走 O(1) 读取）
+  const activeMistake = activePath ? getMistake(activePath) : null;
   const activeExam = activePath
     ? parseFrontmatterCached(activePath, vault.docs.get(activePath) ?? '').meta.exam
         : null;
@@ -525,7 +540,8 @@ export default function Workspace() {
         ? '到期待复习'
         : `${activeCard.reps} 次 · 下次 ${new Date(activeCard.due).toLocaleDateString('zh-CN')}`) + activeSections
     : null;
-  const activeRailItem = searchOpen ? 'search'
+  const activeRailItem = pathwayOpen ? 'pathway'
+    : searchOpen ? 'search'
     : pdfOpen ? 'pdf'
       : anatomyOpen ? 'anatomy'
         : brainOpen ? 'brain'
@@ -548,7 +564,8 @@ export default function Workspace() {
       <Rail
         activeItem={activeRailItem}
         treeOpen={treeOpen}
-        onToggleTree={() => setTreeOpen((v) => !v)}
+        onToggleTree={() => { setPathwayOpen(false); setTreeOpen((v) => !v); }}
+        onPathway={() => setPathwayOpen((v) => !v)}
         onHome={goHome}
         onSearch={() => setSearchOpen(true)}
         onHistory={() => setHistoryOpen(true)}
@@ -568,7 +585,18 @@ export default function Workspace() {
         onNotice={() => setNoticeOpen(true)}
       />
 
-      {/* 悬浮工作台：目录 / 编辑 / 关联 三张卡片漂在背景之上 */}
+      {pathwayOpen ? (
+        <div className="pathway-workspace-host">
+          <MedicalPathwayBuilder
+            onClose={() => setPathwayOpen(false)}
+            onInsert={(markdown) => {
+              if (!vault.currentPath) { toast('请先打开一篇笔记，再插入通路图', 'info'); return false; }
+              if (pathwayInsertRef.current) { pathwayInsertRef.current(markdown); return true; }
+              toast('编辑器还在加载，请稍后再插入', 'info'); return false;
+            }}
+          />
+        </div>
+      ) : (
       <div className={`deck${treeOpen ? ' with-tree' : ''}`}>
         {/* 目录卡片常驻（未打开笔记时也要能选笔记），由导航轨的「目录」按钮折叠 */}
         {treeOpen && (
@@ -591,6 +619,7 @@ export default function Workspace() {
               onExportFolder={() => vault.exportMdFolder()}
               onImport={(t) => vault.importBackup(t)}
               onImportMd={(files) => vault.importMdFiles(files)}
+              onRepair={() => vault.repairExistingMarkdown()}
               onRemove={(paths) => {
                 if (vault.currentPath && paths.includes(vault.currentPath)) {
                   setDraft(null);
@@ -690,6 +719,10 @@ export default function Workspace() {
                   onOpenLink={handleOpenLink}
                   onAttach={(name, blob) => vault.saveAttachment(name, blob)}
                   onDraft={(text) => { setDraftText(text); setDraftOpen(true); }}
+                  onPathwayReady={(insert) => { pathwayInsertRef.current = insert; }}
+                  headingLines={outline.map((o) => o.line)}
+                  onActiveHeading={setActiveHeading}
+                  onJumpReady={(jump) => { outlineJumpRef.current = jump; }}
                   readFile={readFile}
                   highlight={highlight}
                 />
@@ -709,6 +742,13 @@ export default function Workspace() {
                   </button>
                 </div>
                 <div className="card-body">
+                  {outline.length > 0 && (
+                    <OutlinePanel
+                      outline={outline}
+                      activeLine={activeHeading}
+                      onJump={(line) => outlineJumpRef.current?.(line)}
+                    />
+                  )}
                   <div className="learning-panel">
                     <div className="lp-status">
                       {!activeCard && <div className="lp-status-row"><b>复习</b><span className="muted">未学习</span></div>}
@@ -750,6 +790,7 @@ export default function Workspace() {
           </div>
         )}
       </div>
+      )}
       {searchOpen && (
         <Suspense fallback={null}>
           <QuickSearch

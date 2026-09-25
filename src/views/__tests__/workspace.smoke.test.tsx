@@ -166,4 +166,37 @@ describe('Workspace 布局冒烟', () => {
     await waitFor(() => expect(screen.getByText('你的知识库，从这里开始')).toBeTruthy());
     cleanup();
   }, 20000);
+
+  it('医学通路页：点「回到主界面」「目录」和通路按钮本身都能退出工作区', async () => {
+    const { container } = render(<Workspace />);
+    await waitFor(() => expect(screen.getByText('你的知识库，从这里开始')).toBeTruthy());
+
+    // 进入医学通路工作区（整屏替换三栏布局）
+    fireEvent.click(screen.getByLabelText('医学通路'));
+    await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeTruthy());
+    expect(container.querySelector('.deck')).toBeNull();
+
+    // 回归守卫：历史 bug——点「回到主界面」只清了当前笔记，通路工作区纹丝不动
+    fireEvent.click(screen.getByLabelText('回到主界面'));
+    await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeNull());
+    expect(container.querySelector('.deck')).toBeTruthy();
+    expect(screen.getByText('你的知识库，从这里开始')).toBeTruthy();
+
+    // 再进一次：点「目录」（切换开关）也应退出工作区；treeOpen 翻为 false 时目录卡片消失
+    const treeWasOpen = container.querySelector('.deck')?.classList.contains('with-tree') ?? false;
+    fireEvent.click(screen.getByLabelText('医学通路'));
+    await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('目录'));
+    await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeNull());
+    expect(container.querySelector('.deck')).toBeTruthy();
+    // 切换后目录状态取反（切换开关语义），但三栏布局必须回来
+    expect(container.querySelector('.card.c-tree') ? true : false).toBe(!treeWasOpen);
+
+    // 再进一次：通路按钮本身是开关，再点一次即关闭
+    fireEvent.click(screen.getByLabelText('医学通路'));
+    await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeTruthy());
+    fireEvent.click(screen.getByLabelText('医学通路'));
+    await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeNull());
+    cleanup();
+  }, 20000);
 });
