@@ -83,3 +83,25 @@ describe('pickInline 去重叠', () => {
     expect(picked('![[图.png]] 与 **粗**', false)).toEqual(['embed', 'bold']);
   });
 });
+
+describe('scanInline 结果缓存（透明性）', () => {
+  // 命中缓存的返回值与首算结果逐字段一致；缓存条目按行文本隔离，不互相污染
+  it('重复调用同一行返回等价结果', () => {
+    const t = '**粗** 与 [[双链]] 与 `代码` 与 ==高亮==';
+    const a = scanInline(t);
+    const b = scanInline(t); // 走缓存
+    expect(b).toEqual(a);
+    expect(b.map((h) => [h.kind, h.from, h.to])).toEqual(a.map((h) => [h.kind, h.from, h.to]));
+  });
+
+  it('不同行文本各自独立缓存，内容变化不受旧条目影响', () => {
+    scanInline('**旧行**');
+    const fresh = scanInline('[[新行]]');
+    expect(fresh.map((h) => h.kind)).toEqual(['wiki']);
+  });
+
+  it('无行内标记的行（快速路径 INLINE_HINT）返回空且与全规则结果一致', () => {
+    expect(scanInline('普通中文正文一行，无任何标记')).toEqual([]);
+    expect(scanInline('family AMI 词边界')).toEqual([]); // 无 [ * ` = ! 字符的行
+  });
+});

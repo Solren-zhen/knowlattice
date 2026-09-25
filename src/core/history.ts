@@ -6,7 +6,7 @@
  * 纯函数部分（pruneByPath / pruneGlobal）可单测，IndexedDB 仅在浏览器中可用。
  */
 
-import { openDB } from 'idb';
+import { openDB, type IDBPDatabase } from 'idb';
 
 export interface Snapshot {
   path: string;
@@ -22,16 +22,26 @@ export const KEEP_PER_PATH = 10;
 /** 全库快照总量上限（超过后从最旧开始清理） */
 export const GLOBAL_CAP = 600;
 
-async function db() {
-  return openDB(DB_NAME, 1, {
-    upgrade(d) {
-      if (!d.objectStoreNames.contains(STORE)) {
-        const store = d.createObjectStore(STORE, { keyPath: ['path', 'at'] });
-        store.createIndex('path', 'path');
-        store.createIndex('at', 'at');
-      }
-    },
-  });
+/** 连接缓存：openDB 每次都会发起一次 indexedDB.open，原来每次保存/列快照
+ *  都开新连接（旧连接等 GC）。模块级单例即可——fake-indexeddb 与 jsdom 下同样成立。 */
+let dbPromise: Promise<IDBPDatabase> | null = null;
+function db() {
+  if (!dbPromise) {
+    dbPromise = openDB(DB_NAME, 1, {
+      upgrade(d) {
+        if (!d.objectStoreNames.contains(STORE)) {
+          const store = d.createObjectStore(STORE, { keyPath: ['path', 'at'] });
+          store.createIndex('path', 'path');
+          store.createIndex('at', 'at');
+        }
+      },
+    }).catch((e) => {
+      // 打开失败不缓存失败态：下次调用重试，而不是永远返回同一个 rejection
+      dbPromise = null;
+      throw e;
+    });
+  }
+  return dbPromise;
 }
 
 /* ---------- 纯函数：保留策略 ---------- */
@@ -56,22 +66,62 @@ export function pruneGlobal(recs: Snapshot[], cap = GLOBAL_CAP): Array<[string, 
 
 /* ---------- IndexedDB 操作（浏览器中调用） ---------- */
 
-/** 保存成功后调用：内容与最新快照相同则跳过；fire-and-forget，不阻塞保存 */
+/**
+ * 该篇最新一条快照：path 索引 + 倒序游标的第一条（主键 [path, at] 同 path 内按
+ * at 升序，倒序即最新）。只物化 1 条记录——原来 getAll(path) 把该篇全部快照的
+ * 完整正文都读出来，只为看最新那一条。
+ */
+async function latestSnapshot(d: IDBPDatabase, path: string): Promise<Snapshot | undefined> {
+  const cursor = await d.transaction(STORE, 'readonly').store.index('path').openCursor(path, 'prev');
+  return cursor?.value as Snapshot | undefined;
+}
+
+/** 删指定的快照主键（单事务批量提交，替代原来逐条 await 的串行事务） */
+async function deleteKeys(d: IDBPDatabase, keys: Array<[string, number]>): Promise<void> {
+  if (!keys.length) return;
+  const tx = d.transaction(STORE, 'readwrite');
+  for (const key of keys) void tx.store.delete(key);
+  await tx.done.catch(() => { /* 单条失败静默，与旧行为一致 */ });
+}
+
+/**
+ * 保存成功后调用：内容与最新快照相同则跳过；fire-and-forget，不阻塞保存。
+ *
+ * 清理策略与旧版等价（单篇保留最近 keep 条 / 全库超上限删最旧），但判定全部
+ * 改为 O(1) 的 count：只有真正超限（真正要删东西）时才走游标收集待删键——
+ * 键游标（openKeyCursor）不物化记录正文。旧版在「该篇不足 keep 条」这一常态
+ * 分支里 getAll 整个快照库（最多 600 条完整正文）到主线程，只为算出「没超上限」。
+ */
 export async function pushSnapshot(path: string, content: string): Promise<void> {
   try {
     const d = await db();
-    const idx = d.transaction(STORE, 'readonly').store.index('path');
-    const recs = (await idx.getAll(path)) as Snapshot[];
-    const latest = recs.sort((a, b) => b.at - a.at)[0];
-    if (latest && latest.content === content) return;
+    const latest = await latestSnapshot(d, path);
+    if (latest && latest.content === content) return; // 同内容不重复推
     const rec: Snapshot = { path, at: Date.now(), content };
     await d.put(STORE, rec);
-    // 保留策略：单篇超额 + 全库超额
-    const stale = pruneByPath([...recs, rec]);
-    for (const at of stale) await d.delete(STORE, [path, at]).catch(() => {});
-    if (stale.length === 0) {
-      const all = (await d.getAll(STORE)) as Snapshot[];
-      for (const [p, at] of pruneGlobal(all)) await d.delete(STORE, [p, at]).catch(() => {});
+
+    // 单篇超额：该篇快照数 > keep 时，删最旧的差额条（path 索引正序键游标）
+    const perPath = await d.transaction(STORE, 'readonly').store.index('path').count(path);
+    if (perPath > KEEP_PER_PATH) {
+      const doomed: Array<[string, number]> = [];
+      let cursor = await d.transaction(STORE, 'readonly').store.index('path').openKeyCursor(path);
+      while (cursor && doomed.length < perPath - KEEP_PER_PATH) {
+        doomed.push(cursor.primaryKey as [string, number]);
+        cursor = await cursor.continue();
+      }
+      await deleteKeys(d, doomed);
+    }
+
+    // 全库超额：总数 > cap 时，按 at 索引正序（最旧在前）删差额条
+    const total = await d.count(STORE);
+    if (total > GLOBAL_CAP) {
+      const doomed: Array<[string, number]> = [];
+      let cursor = await d.transaction(STORE, 'readonly').store.index('at').openKeyCursor();
+      while (cursor && doomed.length < total - GLOBAL_CAP) {
+        doomed.push(cursor.primaryKey as [string, number]);
+        cursor = await cursor.continue();
+      }
+      await deleteKeys(d, doomed);
     }
   } catch {
     /* 快照失败不影响主流程 */
@@ -93,9 +143,14 @@ export async function listSnapshots(path: string): Promise<Snapshot[]> {
 export async function listSnapshotPaths(): Promise<Map<string, number>> {
   try {
     const d = await db();
-    const all = (await d.getAll(STORE)) as Snapshot[];
     const counts = new Map<string, number>();
-    for (const r of all) counts.set(r.path, (counts.get(r.path) ?? 0) + 1);
+    // 键游标只取索引键（路径），不物化记录正文——旧版 getAll 全库只为数个数
+    let cursor = await d.transaction(STORE, 'readonly').store.index('path').openKeyCursor();
+    while (cursor) {
+      const p = cursor.key as string;
+      counts.set(p, (counts.get(p) ?? 0) + 1);
+      cursor = await cursor.continue();
+    }
     return counts;
   } catch {
     return new Map();

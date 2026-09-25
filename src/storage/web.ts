@@ -11,6 +11,8 @@ import type { StorageAdapter, VaultFileMeta } from './adapter';
 const DB_NAME = 'knowlattice';
 const DB_VERSION = 2;
 
+const textEncoder = new TextEncoder();
+
 interface FileRecord {
   path: string;
   content: string;
@@ -76,14 +78,35 @@ export class WebAdapter implements StorageAdapter {
       path,
       content,
       mtime: Date.now(),
-      size: new TextEncoder().encode(content).length,
+      size: textEncoder.encode(content).length,
     };
     await db.put('files', rec);
+  }
+
+  /** 一批一个事务：导入/恢复几千篇时，原来每篇一个独立事务（每次都走完整的
+   *  事务提交协议），这是「导入转圈」时间的主要成分。事务失败整体抛出，
+   *  由调用方退回逐条重写以精确定位失败文件。 */
+  async writeMany(entries: Array<{ path: string; content: string }>): Promise<void> {
+    const db = await this.getDB();
+    const tx = db.transaction('files', 'readwrite');
+    const now = Date.now();
+    for (const e of entries) {
+      void tx.store.put({ path: e.path, content: e.content, mtime: now, size: textEncoder.encode(e.content).length });
+    }
+    await tx.done;
   }
 
   async remove(path: string): Promise<void> {
     const db = await this.getDB();
     await db.delete('files', path);
+  }
+
+  /** 一批一个事务删除（同 writeMany 的合批理由） */
+  async removeMany(paths: string[]): Promise<void> {
+    const db = await this.getDB();
+    const tx = db.transaction('files', 'readwrite');
+    for (const p of paths) void tx.store.delete(p);
+    await tx.done;
   }
 
   /** 一次读出全部附件 {path → Blob}。Blob 是惰性句柄，不会把全部字节读进内存。 */

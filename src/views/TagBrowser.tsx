@@ -4,7 +4,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useEsc, escThenClose } from './useEsc';
-import { parseFrontmatter } from '../core/parser';
+import { parseFrontmatterCached } from '../core/parser';
 import { IconTag, IconClose } from './icons';
 import { clickable } from './a11y';
 
@@ -25,7 +25,7 @@ export default function TagBrowser({ docs, onOpenPath, onClose }: Props) {
     const m = new Map<string, Set<string>>();
     for (const [path, content] of docs) {
       if (!path.endsWith('.md')) continue;
-      const { meta } = parseFrontmatter(content);
+      const { meta } = parseFrontmatterCached(path, content);
       for (const t of meta.tags) {
         if (!t) continue;
         if (!m.has(t)) m.set(t, new Set());
@@ -93,7 +93,7 @@ export default function TagBrowser({ docs, onOpenPath, onClose }: Props) {
             <>
               <h4 className="tag-note-list-title">#{sel} · {selNotes.length} 篇</h4>
               {selNotes.map((p) => {
-                const { title } = parseFrontmatter(docs.get(p) ?? '');
+                const { title } = parseFrontmatterCached(p, docs.get(p) ?? '');
                 const label = title || p.replace(/\.md$/, '').split('/').pop() || p;
                 return (
                   <div key={p} className="mistake-item tag-note-item" onClick={() => openNote(p)} {...clickable(`打开笔记：${label}`)}>

@@ -47,7 +47,8 @@ function merge(hits: Hit[]): Hit[] {
  * 纯 ASCII 词按**词边界**匹配：否则缩写 "AMI" 会在 "family" 里命中；
  * 含 CJK 的词直接子串匹配——中文没有词边界可依，且子串命中正是要的效果。
  */
-export function locateAll(text: string, terms: string[]): Hit[] {
+export function locateAll(text: string, terms: string[], from = -1, span = 0): Hit[] {
+  const windowed = from >= 0 && span > 0;
   const hits: Hit[] = [];
   for (const raw of terms) {
     const t = raw.trim();
@@ -56,17 +57,39 @@ export function locateAll(text: string, terms: string[]): Hit[] {
       ? new RegExp(`\\b${escapeRe(t)}\\b`, 'gi')
       : new RegExp(escapeRe(t), 'g');
     let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      if (m[0].length === 0) break; // 零宽匹配防死循环
-      hits.push({ start: m.index, end: m.index + m[0].length });
+    if (windowed) {
+      // 窗口化：从窗口前 15 字符起扫（片段起点会回拉到首个命中之前），越过窗口尾即收。
+      // 摘要只展示 60 字符，长文命中几百处时，后面的全文扫描全是白扫。
+      re.lastIndex = Math.max(0, from - 15);
+      while ((m = re.exec(text)) !== null) {
+        if (m.index + m[0].length > from + span) break;
+        if (m[0].length === 0) { re.lastIndex++; continue; } // 零宽匹配防死循环
+        hits.push({ start: m.index, end: m.index + m[0].length });
+      }
+    } else {
+      while ((m = re.exec(text)) !== null) {
+        if (m[0].length === 0) break; // 零宽匹配防死循环
+        hits.push({ start: m.index, end: m.index + m[0].length });
+      }
     }
   }
   return merge(hits);
 }
 
+/** 正文缓存（键 = 笔记内容字符串，内容不变直接复用）：搜索框每键对 20 条结果
+ *  各跑一次 bodyOf（CRLF 归一 + frontmatter 剥离），查询期间笔记不变，纯浪费。
+ *  有界，与 parser.parseFrontmatterCached 同一套纪律。 */
+const BODY_CACHE_MAX = 64;
+const bodyCache = new Map<string, string>();
+
 /** 去 YAML frontmatter，并把换行统一成 \n —— 偏移量在这之后才计算 */
 function bodyOf(content: string): string {
-  return content.replace(/\r\n?/g, '\n').replace(/^---[\s\S]*?---\n?/, '');
+  const hit = bodyCache.get(content);
+  if (hit !== undefined) return hit;
+  const out = content.replace(/\r\n?/g, '\n').replace(/^---[\s\S]*?---\n?/, '');
+  if (bodyCache.size >= BODY_CACHE_MAX) bodyCache.clear();
+  bodyCache.set(content, out);
+  return out;
 }
 
 /** 换行压成空格：**逐字符替换、长度不变**，所以偏移量照旧可用 */
@@ -82,13 +105,25 @@ export function buildSnippet(content: string, query: string, len = 60): Snippet 
   const head = (): Snippet => ({ text: flatten(body.slice(0, len)), hits: [] });
   if (!terms.length) return head();
 
-  const all = locateAll(body, terms);
-  if (!all.length) return head();
+  // 第一处命中（定位片段用）：每词只扫到第一处就停，取最早——原来全量收集
+  // 所有词条在全文的全部命中，只为用 all[0] 定位
+  let first = -1;
+  for (const raw of terms) {
+    const t = raw.trim();
+    if (!t) continue;
+    const re = isAscii(t)
+      ? new RegExp(`\\b${escapeRe(t)}\\b`, 'i')
+      : new RegExp(escapeRe(t), 'i');
+    const m = re.exec(body);
+    if (m && (first < 0 || m.index < first)) first = m.index;
+  }
+  if (first < 0) return head();
 
-  const start = Math.max(0, all[0].start - 15);
+  const start = Math.max(0, first - 15);
   const raw = body.slice(start, start + len);
   const pad = start > 0 ? 1 : 0; // 前置省略号占一个字符
   const end = pad + raw.length;
+  const all = locateAll(body, terms, start, raw.length); // 只收窗口内（含前 15 字符回拉区）的命中
   const hits: Hit[] = [];
   for (const h of all) {
     const s = h.start - start + pad;

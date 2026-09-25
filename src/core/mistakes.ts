@@ -4,7 +4,7 @@
  * - chapterHeat 按章节聚合 → 薄弱点热力图
  * - 记录可手动清除；删掉笔记不影响已有记录，点击直达时由上层容错
  */
-import { parseFrontmatter } from './parser';
+import { parseFrontmatterCached } from './parser';
 
 export interface MistakeRecord {
   path: string;
@@ -29,6 +29,16 @@ let cache: MistakeMap | null = null;
  * 用户以为按钮坏了。浅拷贝不重新 JSON.parse，成本可忽略。
  */
 export function loadMistakes(): MistakeMap {
+  return { ...ensureCache() };
+}
+
+/** 单条查询：渲染体内用（编辑器每键渲染一次），不做整表浅拷贝 */
+export function getMistake(path: string): MistakeRecord | null {
+  return ensureCache()[path] ?? null;
+}
+
+/** 惰性建缓存：JSON.parse 只做一次，之后 loadMistakes/getMistake 都走内存 */
+function ensureCache(): MistakeMap {
   if (!cache) {
     try {
       cache = JSON.parse(localStorage.getItem(KEY) ?? '{}') as MistakeMap;
@@ -36,7 +46,7 @@ export function loadMistakes(): MistakeMap {
       cache = {};
     }
   }
-  return { ...cache };
+  return cache;
 }
 
 function save(mistakes: MistakeMap) {
@@ -49,7 +59,7 @@ function save(mistakes: MistakeMap) {
  * 返回更新后的完整错题表（调用方可直接 setState）。
  */
 export function recordMistake(path: string, content: string): MistakeMap {
-  const { title, meta } = parseFrontmatter(content);
+  const { title, meta } = parseFrontmatterCached(path, content);
   const mistakes = loadMistakes();
   const prev = mistakes[path];
   mistakes[path] = {
