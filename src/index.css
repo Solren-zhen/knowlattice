@@ -3487,6 +3487,14 @@ a.wikilink.missing::after {
   background: var(--accent-soft); color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--border-accent), 0 0 16px -2px var(--accent-soft);
 }
+.rail-btn--graph:hover,
+.rail-btn--graph.on {
+  color: var(--cyan-text);
+  background: color-mix(in srgb, var(--cyan-text) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cyan-text) 38%, transparent),
+    0 0 18px -4px color-mix(in srgb, var(--cyan-text) 55%, transparent);
+}
+.rail-btn--graph.on::before { background: var(--cyan-text); box-shadow: 0 0 12px var(--cyan-text); }
 .rail-btn.on::before {
   content: ""; position: absolute; left: -12px; top: 50%;
   transform: translateY(-50%);
@@ -3707,28 +3715,25 @@ a.wikilink.missing::after {
   box-shadow: var(--shadow-xs), var(--glass-shine);
 }
 .hero-cta .hero-graph {
-  /* 次级 CTA：同色系淡靛底 + 靛字，与实底主按钮构成主/次层级。
-     此前是深青色实心胶囊——色相跳出全应用的靛紫语言，在极光底上像别的系统的按钮 */
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent) 6%, transparent));
-  color: var(--accent);
-  border: 1px solid var(--border-accent);
+  background: linear-gradient(180deg, #0891b2 0%, #0e7490 100%);
+  color: #fff;
+  border-color: transparent;
   font-weight: 650;
-  box-shadow: var(--shadow-xs), var(--glass-shine);
+  box-shadow: 0 4px 18px -3px rgba(14, 116, 144, 0.38), var(--glass-shine);
 }
 .hero-cta .hero-graph:hover {
-  /* 悬停反转成实底：从「描边淡底」升到「主色填充」，动作邀请明确 */
-  background: var(--grad-primary);
-  color: var(--accent-ink);
+  background: linear-gradient(180deg, #0e7490 0%, #155e75 100%);
+  color: #fff;
   border-color: transparent;
-  box-shadow: 0 4px 20px -2px rgba(79, 70, 229, 0.45), var(--glow-accent);
+  box-shadow: 0 6px 22px -3px rgba(14, 116, 144, 0.48), var(--glass-shine);
 }
 [data-theme='dark'] .hero-cta .hero-graph {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent) 9%, transparent));
-  color: var(--accent);
+  background: linear-gradient(180deg, #22d3ee 0%, #0891b2 100%);
+  color: #083344;
 }
 [data-theme='dark'] .hero-cta .hero-graph:hover {
-  background: linear-gradient(180deg, #6366f1 0%, var(--accent) 100%);
-  color: var(--accent-ink);
+  background: linear-gradient(180deg, #67e8f9 0%, #06b6d4 100%);
+  color: #083344;
 }
 .preview.placeholder .teach-steps { margin: 28px auto 0; }
 
