@@ -41,6 +41,17 @@ export const IconTree = ({ size = 15 }: P) => (
   </svg>
 );
 
+/** 医学通路：节点与连接箭头，作为通路绘图工具的导航入口图标 */
+export const IconPathway = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <path d="M6.4 8.6 11 12M13.2 12l4.4-3.4M11 14.2l-2.8 4" strokeWidth={1.5} opacity="0.62" />
+    <circle cx="5.1" cy="7.6" r="2.5" {...wash} />
+    <circle cx="12" cy="13.1" r="2.5" {...wash} />
+    <circle cx="18.9" cy="7.6" r="2.5" {...wash} />
+    <path d="m16.9 5.9 2.1 1.7-2.1 1.7" strokeWidth={1.55} />
+  </svg>
+);
+
 /** 搜索：放大镜（不填色，镜片留白才干净） */
 export const IconSearch = ({ size = 15 }: P) => (
   <svg {...base(size)}>

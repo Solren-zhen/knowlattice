@@ -24,12 +24,26 @@ import { exportCardEdits, importCardEdits } from './cardEdits';
 import { exportDays, importDays } from './stats';
 import { exportPomodoros, importPomodoros } from './pomodoro';
 import { pushSnapshot } from './history';
+import { repairMarkdown, type MarkdownRepairChange } from './markdownRepair';
+import { exportPathwayTemplates, importPathwayTemplates } from './pathwayTemplates';
 
 export interface TreeNode {
   name: string;
   path: string;
   type: 'dir' | 'file';
   children?: TreeNode[];
+}
+
+export interface MarkdownRepairFile {
+  path: string;
+  changes: MarkdownRepairChange[];
+}
+
+export interface ImportResult {
+  ok: number;
+  failed: number;
+  repaired?: number;
+  repairedFiles?: MarkdownRepairFile[];
 }
 
 /** 只接受 vault 内的 POSIX 相对路径；导入备份与未来的 Tauri 文件适配器共用。 */
@@ -81,12 +95,21 @@ const adapter: StorageAdapter = new WebAdapter();
 /** IndexedDB 并发写入分批大小 */
 const WRITE_BATCH = 100;
 
-/** 批量并行写入（IndexedDB 支持并发事务，但浏览器对并发事务数有限制，分批避免打爆）。
- *  返回**写失败的路径**：调用方据此报真实成功数，不能把「解析出的条数」当成「写成功的条数」。 */
+/** 批量写入：优先走适配器的合批事务（一批一个 IndexedDB 事务，快一个数量级），
+ *  事务整体失败时退回逐条写以精确定位失败文件；返回**写失败的路径**：
+ *  调用方据此报真实成功数，不能把「解析出的条数」当成「写成功的条数」。 */
 async function writeMany(entries: Array<{ path: string; content: string }>): Promise<string[]> {
   const failed: string[] = [];
   for (let i = 0; i < entries.length; i += WRITE_BATCH) {
     const chunk = entries.slice(i, i + WRITE_BATCH);
+    if (adapter.writeMany) {
+      try {
+        await adapter.writeMany(chunk);
+        continue; // 本批全部成功
+      } catch (e) {
+        console.error('批量写入事务失败，退回逐条重写：', e);
+      }
+    }
     const results = await Promise.allSettled(chunk.map((f) => adapter.write(f.path, f.content)));
     results.forEach((r, j) => {
       if (r.status === 'rejected') {
@@ -98,11 +121,19 @@ async function writeMany(entries: Array<{ path: string; content: string }>): Pro
   return failed;
 }
 
-/** 批量并行删除：与 writeMany 同理，分批限流；返回删失败的路径 */
+/** 批量删除：优先合批事务，失败退回逐条；返回删失败的路径 */
 async function removeManyFiles(paths: string[]): Promise<string[]> {
   const failed: string[] = [];
   for (let i = 0; i < paths.length; i += WRITE_BATCH) {
     const chunk = paths.slice(i, i + WRITE_BATCH);
+    if (adapter.removeMany) {
+      try {
+        await adapter.removeMany(chunk);
+        continue;
+      } catch (e) {
+        console.error('批量删除事务失败，退回逐条重删：', e);
+      }
+    }
     const results = await Promise.allSettled(chunk.map((p) => adapter.remove(p)));
     results.forEach((r, j) => {
       if (r.status === 'rejected') {
@@ -136,6 +167,25 @@ function dataUrlToBlob(dataUrl: string): Blob | null {
 
 /** frontmatter 解析走 parser.ts 模块级缓存（与 React 渲染无关）：content 引用未变即命中 */
 const getMeta = parseFrontmatterCached;
+
+function repairEntries(entries: Array<{ path: string; content: string }>) {
+  const repairedEntries: Array<{ path: string; content: string }> = [];
+  const repairedFiles: MarkdownRepairFile[] = [];
+  for (const entry of entries) {
+    if (!entry.path.toLowerCase().endsWith('.md')) {
+      repairedEntries.push(entry);
+      continue;
+    }
+    const result = repairMarkdown(entry.content);
+    repairedEntries.push({ path: entry.path, content: result.content });
+    if (result.changed) repairedFiles.push({ path: entry.path, changes: result.changes });
+  }
+  return { entries: repairedEntries, repairedFiles };
+}
+
+function repairCount(files: MarkdownRepairFile[]): number {
+  return files.reduce((sum, file) => sum + file.changes.reduce((n, c) => n + c.count, 0), 0);
+}
 
 /** 只反映会影响名称解析和 PDF 目标列表的元数据；正文普通改动不应触发全库索引重建。 */
 function linkMetadataSignature(path: string, content: string | undefined): string {
@@ -242,32 +292,49 @@ created: ${new Date().toISOString().slice(0, 10)}
 - **PDF / Word 对照**: 左侧原文（可选中文字层、缩放、搜索），划选重点 → 「粘贴到右」生成原文摘录；可以连续追加到同一篇笔记，摘录历史里能看到每条是否已入库
 - **智能草稿**: 粘贴教材段落，或导入 PDF 讲义，一键拆成原子笔记骨架（识别 定义 / 来源 / 机制 / 作用 / 分类 / 鉴别 等语义），人工审核后再入库
 
-## 五、背下来：间隔复习
+## 五、用工具画医学通路图
+
+- 在编辑器工具栏点击 **通路**，填写节点、箭头方向和酶/条件，右侧会实时预览；确认后点「插入笔记」
+- 下面是一张用这个工具绘制的糖代谢示例。节点和箭头仍是 Markdown，插入后可以继续修改：
+
+\`\`\`pathway
+# 糖代谢通路示例
+## 糖代谢总览 | #d64545 | 细胞质与线粒体
+葡萄糖 -> 6-磷酸葡萄糖 : 己糖激酶
+6-磷酸葡萄糖 -> 果糖-1,6-二磷酸 : PFK-1
+果糖-1,6-二磷酸 -> 丙酮酸 : 糖酵解阶段
+丙酮酸 -> 乳酸 : 乳酸脱氢酶（缺氧）
+丙酮酸 -> 乙酰CoA : 丙酮酸脱氢酶
+乙酰CoA -> 柠檬酸 : 柠檬酸合酶
+柠檬酸 -> CO₂ + ATP : 三羧酸循环（概览）
+\`\`\`
+
+## 六、背下来：间隔复习
 
 - 原子笔记自动生成复习卡：正面 = 标题 + 属性键，背面 = 内容
 - 左侧卡片图标进入复习队列，FSRS 遗忘曲线安排每天该背的卡
 - 答「忘了」会自动收进**错题本**，薄弱章节在热力图上一眼可见
 
-## 六、考出来：题库与错题
+## 七、考出来：题库与错题
 
 - 「题库练习」支持导入 JSON / Word / Excel 题库（字段格式见面板内说明），随机组卷作答
 - 答错且题目标注了关联笔记 → 自动进错题本，结果页一点直达笔记
 - 复习数据可导出为 Anki 文件（.txt / .apkg），带去手机继续背
 
-## 七、看见知识的形状
+## 八、看见知识的形状
 
 - **知识图谱**: 全库双链网络图，节点大小 = 连接度，颜色 = 一级章节，点节点直达笔记
 - **3D 解剖图谱**: 12 系统 × 3478 结构，点结构 ↔ 笔记双向打通
 - **脑图谱**: MNI152 模板 MRI + Harvard-Oxford 117 个脑区的中英文对照，点脑区定位到 MNI 坐标
 
-## 八、数据是你自己的
+## 九、数据是你自己的
 
 - 全部数据存在本机浏览器（IndexedDB），不联网、不上传
 - 目录卡片右上角 **⋯** → \`备份到 .json\` / \`从备份 .json 恢复\`（含复习进度、题库、错题）
 - **⋯** → \`导出 md 文件夹 (.zip)\`: 真实的 Markdown 目录结构 + 图片附件，Obsidian、记事本都能直接打开，数据永不锁定
 - 换设备或清理浏览器数据前，记得先备份
 
-## 九、这篇笔记怎么处理
+## 十、这篇笔记怎么处理
 
 看完可以直接删掉（顶部工具栏的垃圾桶图标）——删掉之后不会再自动生成。
 想留作速查表也行，第三节的快捷键表是最常回来看的部分。
@@ -439,6 +506,7 @@ export function useVault() {
       cardEdits: exportCardEdits(),
       // v5 起补上番茄专注记录：工作台的「今日/累计/趋势」全靠它，丢了就等于白专注
       pomodoros: exportPomodoros(),
+      pathwayTemplates: await exportPathwayTemplates(),
     };
     const blob = new Blob([JSON.stringify(payload)], {
       type: 'application/json',
@@ -453,7 +521,7 @@ export function useVault() {
 
   /** 从备份 .json 恢复（合并模式：同名路径覆盖，其余保留）；笔记/复习进度/题库/错题一并恢复。
    *  旧版备份里的 dataURL 附件会自动转回 Blob 附件库；恢复后直接并入内存缓存，不再全库重读存储。 */
-  const importBackup = useCallback(async (text: string): Promise<{ ok: number; failed: number }> => {
+  const importBackup = useCallback(async (text: string): Promise<ImportResult> => {
     const data = JSON.parse(text) as {
       app?: string;
       version?: number;
@@ -466,6 +534,7 @@ export function useVault() {
       days?: unknown;
       cardEdits?: unknown;
       pomodoros?: unknown;
+      pathwayTemplates?: unknown;
     };
     // 兼容旧版以 medvault 命名的备份：两版文件结构一致，只有 app 字段不同
     if ((data.app !== 'knowlattice' && data.app !== 'medvault') || !Array.isArray(data.files)) {
@@ -479,9 +548,10 @@ export function useVault() {
       valid.push({ path, content: f.content });
     }
     const notes = valid.filter((f) => !f.path.startsWith('_attachments/'));
+    const repaired = repairEntries(notes);
     const legacyAttachments = valid.filter((f) => f.path.startsWith('_attachments/'));
 
-    const failedNotes = await writeMany(notes);
+    const failedNotes = await writeMany(repaired.entries);
     const failedSet = new Set(failedNotes);
     const restoredAttachments = new Map<string, Blob>();
     /** 转不成 Blob、只能按原文当笔记文件存回去的旧附件 */
@@ -511,11 +581,13 @@ export function useVault() {
     if (data.days) importDays(data.days);
     if (data.cardEdits) importCardEdits(data.cardEdits);
     if (data.pomodoros) importPomodoros(data.pomodoros);
+    if (data.pathwayTemplates) await importPathwayTemplates(data.pathwayTemplates);
 
     // 并入内存缓存 + 增量更新链接索引
     // 只把真正写成功的并入内存：写失败的如果也进内存，当前会话看着一切正常、还弹
     // 「已恢复 N 篇」，刷新后才永久缺失——这是最难事后归因的一类数据丢失。
-    const okNotes = notes.filter((f) => !failedSet.has(f.path));
+    const okNotes = repaired.entries.filter((f) => !failedSet.has(f.path));
+    const repairedFiles = repaired.repairedFiles.filter((f) => !failedSet.has(f.path));
     const next = new Map(docsRef.current);
     for (const f of okNotes) next.set(f.path, f.content);
     for (const f of legacyAttachments) {
@@ -532,11 +604,16 @@ export function useVault() {
     if (okNotes.length > 0) {
       setStructureDocs(next);
     }
-    return { ok: okNotes.length, failed: failedSet.size + attachFailed + invalidFiles };
+    return {
+      ok: okNotes.length,
+      failed: failedSet.size + attachFailed + invalidFiles,
+      repaired: repairCount(repairedFiles),
+      repairedFiles,
+    };
   }, [linkIndex]);
 
   /** 导入 md 文件夹（相对路径入库，保留目录结构）；返回真实成功/失败篇数 */
-  const importMdFiles = useCallback(async (files: Array<{ path: string; content: string }>): Promise<{ ok: number; failed: number }> => {
+  const importMdFiles = useCallback(async (files: Array<{ path: string; content: string }>): Promise<ImportResult> => {
     const valid: Array<{ path: string; content: string }> = [];
     let invalidFiles = 0;
     for (const f of files) {
@@ -544,9 +621,11 @@ export function useVault() {
       if (!p || !p.toLowerCase().endsWith('.md') || typeof f.content !== 'string') { invalidFiles++; continue; }
       valid.push({ path: p, content: f.content });
     }
-    const failedPaths = await writeMany(valid);
+    const repaired = repairEntries(valid);
+    const failedPaths = await writeMany(repaired.entries);
     const failedSet = new Set(failedPaths);
-    const okFiles = valid.filter((f) => !failedSet.has(f.path));
+    const okFiles = repaired.entries.filter((f) => !failedSet.has(f.path));
+    const repairedFiles = repaired.repairedFiles.filter((f) => !failedSet.has(f.path));
     const next = new Map(docsRef.current);
     for (const f of okFiles) next.set(f.path, f.content);
     docsRef.current = next;
@@ -555,7 +634,42 @@ export function useVault() {
     if (okFiles.length > 0) {
       setStructureDocs(next);
     }
-    return { ok: okFiles.length, failed: failedPaths.length + invalidFiles };
+    return {
+      ok: okFiles.length,
+      failed: failedPaths.length + invalidFiles,
+      repaired: repairCount(repairedFiles),
+      repairedFiles,
+    };
+  }, [linkIndex]);
+
+  /** 主动扫描并修复已有 Markdown，只写入实际发生变化的文件。 */
+  const repairExistingMarkdown = useCallback(async (): Promise<ImportResult> => {
+    const source = [...docsRef.current.entries()]
+      .filter(([path]) => path.toLowerCase().endsWith('.md'))
+      .map(([path, content]) => ({ path, content }));
+    const repaired = repairEntries(source);
+    const changed = repaired.entries.filter((entry) =>
+      repaired.repairedFiles.some((file) => file.path === entry.path)
+    );
+    const failedPaths = await writeMany(changed);
+    const failedSet = new Set(failedPaths);
+    const okFiles = changed.filter((entry) => !failedSet.has(entry.path));
+    const repairedFiles = repaired.repairedFiles.filter((file) => !failedSet.has(file.path));
+    if (okFiles.length === 0) {
+      return { ok: 0, failed: failedPaths.length, repaired: 0, repairedFiles: [] };
+    }
+    const next = new Map(docsRef.current);
+    for (const file of okFiles) next.set(file.path, file.content);
+    docsRef.current = next;
+    setDocs(next);
+    setStructureDocs(next);
+    for (const file of okFiles) updateLinksForPath(linkIndex, file.path, file.content);
+    return {
+      ok: okFiles.length,
+      failed: failedPaths.length,
+      repaired: repairCount(repairedFiles),
+      repairedFiles,
+    };
   }, [linkIndex]);
 
   /** 保存图片附件（Blob 存入独立 attachments store），返回 vault 相对路径；写失败抛出 */
@@ -739,6 +853,7 @@ export function useVault() {
     exportMdFolder,
     importBackup,
     importMdFiles,
+    repairExistingMarkdown,
     adapter,
   };
 }

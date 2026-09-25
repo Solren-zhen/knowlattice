@@ -10,6 +10,7 @@
  */
 
 import { isPathwayLang, renderPathwaySvg } from './pathway';
+import type { StateInline } from 'markdown-it';
 
 type MdInstance = InstanceType<(typeof import('markdown-it'))['default']>;
 
@@ -32,6 +33,27 @@ export function hasMathSyntax(src: string): boolean {
 async function build(withMath: boolean): Promise<MdInstance> {
   const m = await import('markdown-it');
   const md = new m.default({ html: false, linkify: true, breaks: true });
+  md.inline.ruler.before('emphasis', 'mark', (state: StateInline, silent: boolean) => {
+    const start = state.pos;
+    if (state.src.charCodeAt(start) !== 0x3d || state.src.charCodeAt(start + 1) !== 0x3d) return false;
+    if (start > 0 && state.src.charCodeAt(start - 1) === 0x3d) return false;
+    let end = start + 2;
+    while (end < state.posMax) {
+      if (state.src.charCodeAt(end) === 0x0a) return false;
+      if (state.src.charCodeAt(end) === 0x3d && state.src.charCodeAt(end + 1) === 0x3d) break;
+      end += 1;
+    }
+    if (end >= state.posMax || end === start + 2 || state.src.charCodeAt(end + 2) === 0x3d) return false;
+    if (silent) return true;
+    const open = state.push('mark_open', 'mark', 1);
+    open.markup = '==';
+    const text = state.push('text', '', 0);
+    text.content = state.src.slice(start + 2, end);
+    const close = state.push('mark_close', 'mark', -1);
+    close.markup = '==';
+    state.pos = end + 2;
+    return true;
+  });
   if (withMath) {
     const [pluginMod] = await Promise.all([
       import('@vscode/markdown-it-katex'),

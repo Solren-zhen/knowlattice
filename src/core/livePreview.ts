@@ -101,22 +101,47 @@ const ATOMIC: ReadonlySet<InlineKind> = new Set<InlineKind>(['embed', 'img', 'wi
  * 星号）」的内容式，并在开闭处用 `(?<!\*)` / `(?!\*)` 卡住边界：三星号整段交给 tri，
  * `**a*b**` 交给 bold，两边都不再漏标记符。
  */
+/**
+ * 行内扫描规则（模块级共享）：正则字面量每次求值都会新建 RegExp 对象，
+ * 原来定义在函数体内意味着每扫一行分配 9 个正则——叠加「每次按键全文档重扫」
+ * 是可观的 GC 压力。matchAll 内部克隆正则、不动共享实例的 lastIndex，共享安全。
+ */
+const INLINE_RULES: ReadonlyArray<readonly [RegExp, number, InlineKind]> = [
+  [/!\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]/g, 0, 'embed'],
+  [/!\[([^\]]*)\]\(([^)]+)\)/g, 1, 'img'],
+  [/(?<!!)\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]/g, 2, 'wiki'],
+  [/(?<!!)\[([^\]\n]+?)\]\(([^)]+)\)/g, 3, 'link'],
+  [/(?<!\*)\*\*\*(?!\*)((?:[^*\n]|\*(?!\*\*))+?)\*\*\*(?!\*)/g, 4, 'tri'],
+  [/(?<!\*)\*\*(?!\*)((?:[^*\n]|\*(?!\*))+?)\*\*(?!\*)/g, 5, 'bold'],
+  [/`([^`\n]+)`/g, 6, 'code'],
+  [/==([^=\n]+)==/g, 7, 'highlight'],
+  [/(?<!\*)\*(?!\*)(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/g, 8, 'italic'],
+];
+
+/** 行内标记的起始字符：一行里没有这些字符就不可能命中任何行内语法。
+ *  纯正文/列表/引用行（绝大多数）一次测试就跳过 9 个正则。 */
+const INLINE_HINT = /[*`=![]/;
+
+/** 扫描结果缓存（键 = 行文本，纯函数于文本所以跨构建复用安全）：
+ *  重建装饰时未改动的行（以及全文重复的短行、表格单元格）全部命中，
+ *  只有本次编辑的那一两行真正跑正则。有界，满了整表重建。 */
+const SCAN_CACHE_MAX = 2048;
+const scanCache = new Map<string, InlineHit[]>();
+
 export function scanInline(lineText: string): InlineHit[] {
-  const rules: Array<[RegExp, number, InlineKind]> = [
-    [/!\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]/g, 0, 'embed'],
-    [/!\[([^\]]*)\]\(([^)]+)\)/g, 1, 'img'],
-    [/(?<!!)\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]/g, 2, 'wiki'],
-    [/(?<!!)\[([^\]\n]+?)\]\(([^)]+)\)/g, 3, 'link'],
-    [/(?<!\*)\*\*\*(?!\*)((?:[^*\n]|\*(?!\*\*))+?)\*\*\*(?!\*)/g, 4, 'tri'],
-    [/(?<!\*)\*\*(?!\*)((?:[^*\n]|\*(?!\*))+?)\*\*(?!\*)/g, 5, 'bold'],
-    [/`([^`\n]+)`/g, 6, 'code'],
-    [/==([^=\n]+)==/g, 7, 'highlight'],
-    [/(?<!\*)\*(?!\*)(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/g, 8, 'italic'],
-  ];
+  const hit = scanCache.get(lineText);
+  if (hit) return hit;
+  const out = scanInlineUncached(lineText);
+  if (scanCache.size >= SCAN_CACHE_MAX) scanCache.clear();
+  scanCache.set(lineText, out);
+  return out;
+}
+
+function scanInlineUncached(lineText: string): InlineHit[] {
+  if (!INLINE_HINT.test(lineText)) return [];
   const hits: InlineHit[] = [];
-  for (const [re, prio, kind] of rules) {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(lineText))) {
+  for (const [re, prio, kind] of INLINE_RULES) {
+    for (const m of lineText.matchAll(re)) {
       hits.push({ from: m.index, to: m.index + m[0].length, prio, kind, a: m[1] ?? '', b: m[2] ?? '' });
     }
   }
@@ -145,6 +170,33 @@ export function pickInline(hits: InlineHit[], editable = false): InlineHit[] {
   return taken;
 }
 
+const FORMAT_KINDS: ReadonlySet<InlineKind> = new Set(['tri', 'bold', 'highlight', 'italic', 'code']);
+
+/** Render editable inline emphasis inside table cells without interpreting HTML. */
+function appendInlineText(parent: HTMLElement, text: string): void {
+  const hits = pickInline(scanInline(text), false)
+    .filter((hit) => FORMAT_KINDS.has(hit.kind))
+    .sort((a, b) => a.from - b.from);
+  let cursor = 0;
+  for (const hit of hits) {
+    if (hit.from < cursor) continue;
+    if (hit.from > cursor) parent.appendChild(document.createTextNode(text.slice(cursor, hit.from)));
+    if (hit.kind === 'code') {
+      const code = document.createElement('code');
+      code.className = 'lp-code';
+      code.textContent = hit.a;
+      parent.appendChild(code);
+    } else {
+      const span = document.createElement('span');
+      span.className = hit.kind === 'tri' ? 'lp-bold lp-italic' : hit.kind === 'bold' ? 'lp-bold' : hit.kind === 'highlight' ? 'lp-highlight' : 'lp-italic';
+      appendInlineText(span, hit.a);
+      parent.appendChild(span);
+    }
+    cursor = hit.to;
+  }
+  if (cursor < text.length) parent.appendChild(document.createTextNode(text.slice(cursor)));
+}
+
 /** 表格块：整块替换为真实 <table>（跨多行，须为块级部件 + block 装饰） */
 class TableWidget extends WidgetType {
   private rows: string[];
@@ -168,7 +220,7 @@ class TableWidget extends WidgetType {
     header.forEach((h, i) => {
       const th = document.createElement('th');
       th.style.textAlign = align[i] ?? 'left';
-      th.textContent = h;
+      appendInlineText(th, h);
       htr.appendChild(th);
     });
     thead.appendChild(htr);
@@ -179,7 +231,7 @@ class TableWidget extends WidgetType {
       split(r).forEach((c, i) => {
         const td = document.createElement('td');
         td.style.textAlign = align[i] ?? 'left';
-        td.textContent = c;
+        appendInlineText(td, c);
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
@@ -296,6 +348,8 @@ class PathwayWidget extends WidgetType {
   toDOM() {
     const wrap = document.createElement('div');
     wrap.className = 'lp-pathway';
+    wrap.setAttribute('aria-label', '医学通路图，点击后可选中并删除或编辑源码');
+    wrap.setAttribute('role', 'img');
     wrap.innerHTML = renderPathwaySvg(this.text);
     return wrap;
   }
@@ -303,6 +357,20 @@ class PathwayWidget extends WidgetType {
 
 const isTableRow = (t: string) => /^\s*\|.*\|\s*$/.test(t);/** 分隔行：形如 | --- | :---: | ---: |，须含至少一个连字符 */
 const isTableSep = (t: string) => /^\s*\|[\s:|-]+\|\s*$/.test(t) && /-/.test(t);
+
+// ---------- 块级行判定正则（模块级：buildSet 每行每键都会跑，避免逐行新建） ----------
+
+const ACTIVE_HEAD_RE = /^(\s*)(#{1,4})\s+/;        // 光标行标题
+const LIST_RE = /^(\s*)([-*]|\d+\.)\s+/;           // 列表标记
+const KEY_RE = /^([^:：\s][^:：]{0,13}?)\s*[:：]/;  // 列表项「属性:」键
+const PLAIN_KEY_RE = /^([^:：\-*#> ][^:：]{0,13}?)\s*[:：]/; // 段落里的属性键
+const FENCE_RE = /^(\s*)(```+|~~~+)\s*([^\s`]*)/;  // 围栏代码块开头
+const FENCE_CLOSE_RE = /^\s*(`+|~+)\s*$/;          // 同类字符的闭合围栏行
+const HR_RE = /^(-{3,}|\*{3,})$/;
+const HEAD_RE = /^(#{1,4})\s+/;
+const QUOTE_RE = /^>\s?/;
+const EMBED_LINE_RE = /^\s*!\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]\s*$/;
+const IMG_LINE_RE = /^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/;
 
 // ---------- 开关 ----------
 
@@ -386,13 +454,22 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
     // 光标行：结构源码照旧显示（#、-、表格便于编辑），但行内标记仍然渲染——
     // 标记符只是被吃掉的零宽字符、内容照旧可编辑，所以 ** 在任何行都不会露出来。
     if (ln === activeLine) {
-      const lm = /^(\s*)(?:[-*]|\d+\.)\s+/.exec(t);
+      const hm = ACTIVE_HEAD_RE.exec(t);
+      if (hm) {
+        const contentStart = line.from + hm[0].length;
+        pushReplace(line.from + hm[1].length, contentStart, new HtmlWidget('', ''));
+        pushMark(contentStart, line.to, `lp-h${hm[2].length}`);
+        inlineMarks(t.slice(hm[0].length), contentStart, true);
+        ordered = null;
+        continue;
+      }
+      const lm = LIST_RE.exec(t);
       const base = lm ? lm[0].length : 0;
-      const km = /^([^:：\s][^:：]{0,13}?)\s*[:：]/.exec(t.slice(base));
+      const km = KEY_RE.exec(t.slice(base));
       if (km && !km[1].includes('[') && !km[1].includes(']')) {
         pushMark(line.from + base, line.from + base + km[0].length, 'lp-key');
       } else if (!lm) {
-        const pk = /^([^:：\-*#> ][^:：]{0,13}?)\s*[:：]/.exec(t);
+        const pk = PLAIN_KEY_RE.exec(t);
         if (pk) pushMark(line.from, line.from + pk[0].length, 'lp-key');
       }
       inlineMarks(t.slice(base), line.from + base, true);
@@ -401,7 +478,7 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
     }
 
     // ---------- 围栏代码块：``` / ~~~ → 整块 <pre>；```pathway → 通路图（block 部件） ----------
-    const fenceM = /^(\s*)(```+|~~~+)\s*([^\s`]*)/.exec(t);
+    const fenceM = FENCE_RE.exec(t);
     if (fenceM) {
       const ch = fenceM[2][0];
       const len = fenceM[2].length;
@@ -412,7 +489,9 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
         const nt = doc.line(end + 1).text;
         end += 1;
         // 闭合围栏行：纳入替换范围后结束（否则会被当成新的开围栏吞掉后文）
-        if (new RegExp(`^\\s*${ch}{${len},}\\s*$`).test(nt)) break;
+        // 同类字符、长度不小于开围栏（原来是按 ch/len 动态 new RegExp，每块一次分配）
+        const close = FENCE_CLOSE_RE.test(nt) ? nt.trim() : '';
+        if (close.length >= len && close[0] === ch) break;
         codeLines.push(nt);
       }
       // 光标落在代码块内时不渲染（显示源码，可编辑）
@@ -444,13 +523,13 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
     }
 
     // 分割线 --- / ***
-    if (/^(-{3,}|\*{3,})$/.test(t.trim())) {
+    if (HR_RE.test(t.trim())) {
       pushReplace(line.from, line.to, new HrWidget());
       ordered = null;
       continue;
     }
     // 标题 # ~ ####
-    const hm = /^(#{1,4})\s+/.exec(t);
+    const hm = HEAD_RE.exec(t);
     if (hm) {
       pushReplace(line.from, line.from + hm[0].length, new HtmlWidget('', ''));
       pushMark(line.from + hm[0].length, line.to, `lp-h${hm[1].length}`);
@@ -459,7 +538,7 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
     }
     // 引用 >
     if (t.startsWith('>')) {
-      const contentStart = line.from + /^>\s?/.exec(t)![0].length;
+      const contentStart = line.from + QUOTE_RE.exec(t)![0].length;
       pushReplace(line.from, contentStart, new HtmlWidget('▍', 'lp-quote-mark'));
       ranges.push(Decoration.line({ class: 'lp-quote-line' }).range(line.from));
       pushMark(contentStart, line.to, 'lp-quote-text');
@@ -468,7 +547,7 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
       continue;
     }
     // 列表 - / * / 1.（保留缩进；有序自动编号）
-    const lm = /^(\s*)([-*]|\d+\.)\s+/.exec(t);
+    const lm = LIST_RE.exec(t);
     if (lm) {
       const indent = lm[1].length;
       const isOrdered = /^\d/.test(lm[2]);
@@ -484,15 +563,15 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
       pushReplace(line.from + lm[1].length, line.from + lm[1].length + lm[2].length, new HtmlWidget(marker, 'lp-bullet'));
       const contentStart = line.from + lm[0].length;
       // 属性键：「- 定义: 」的键名加粗
-      const km = /^([^:：\s][^:：]{0,13}?)\s*[:：]/.exec(t.slice(lm[0].length));
+      const km = KEY_RE.exec(t.slice(lm[0].length));
       if (km && !km[1].includes('[') && !km[1].includes(']')) pushMark(contentStart, contentStart + km[0].length, 'lp-key');
       inlineMarks(t.slice(lm[0].length), contentStart);
       continue;
     }
 
     // ---------- 独占一行的图片 / 图片嵌入：整行替换（block 部件） ----------
-    const embedLine = /^\s*!\[\[([^\]\n|]+?)(?:\|([^\]\n]+?))?\]\]\s*$/.exec(t);
-    const imgLine = /^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(t);
+    const embedLine = EMBED_LINE_RE.exec(t);
+    const imgLine = IMG_LINE_RE.exec(t);
     if (embedLine && imgExtRe.test(embedLine[1].trim())) {
       const name = embedLine[1].trim();
       const data = resolveImage(name);
@@ -506,7 +585,7 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
     }
 
     // 普通段落里的「属性: 」键
-    const pk = /^([^:：\-*#> ][^:：]{0,13}?)\s*[:：]/.exec(t);
+    const pk = PLAIN_KEY_RE.exec(t);
     if (pk) pushMark(line.from, line.from + pk[0].length, 'lp-key');
     inlineMarks(t, line.from);
     ordered = null;
@@ -522,9 +601,17 @@ export function livePreview(getReadFile?: () => ReadFileFn | undefined): Extensi
     create: (state) => (state.field(livePreviewOn) ? buildSet(state, getReadFile) : Decoration.none),
     update(value, tr) {
       const toggled = tr.effects.some((e) => e.is(toggleEffect));
-      // 活动行随光标移动而变，选区变化也需重建
       if (!toggled && !tr.docChanged && !tr.selection) return value;
       if (!tr.state.field(livePreviewOn)) return Decoration.none;
+      // 文档没变、活动行号也没变（同行内移动光标/框选）：buildSet 的输出只由
+      // 「文档 + head 所在行号」决定，重建结果必然相同 → 直接复用旧值。
+      // 方向键逐字移动、同行点击是编辑里的高频动作，原来每次都全篇重扫。
+      // 跨行移动仍然重建（活动行渲染规则不同）；docChanged 也重建（内容变了）。
+      if (!toggled && !tr.docChanged
+        && tr.startState.doc.lineAt(tr.startState.selection.main.head).number
+          === tr.state.doc.lineAt(tr.state.selection.main.head).number) {
+        return value;
+      }
       return buildSet(tr.state, getReadFile);
     },
     provide: (f) => EditorView.decorations.from(f),
