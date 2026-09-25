@@ -13,11 +13,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEsc } from './useEsc';
 import ForceGraph from 'force-graph';
-import { parseFrontmatter } from '../core/parser';
+import { parseFrontmatterCached } from '../core/parser';
 import { loadMistakes } from '../core/mistakes';
 import type { LinkIndex } from '../core/linkIndex';
 
-const PALETTE = ['#0e76f7', '#3a6ea8', '#b26a2e', '#7c3aed', '#b23a2e', '#0e7490', '#8a8478', '#3b82f6', '#a8577e', '#5a67d8'];
+/** 章节色板：与全局 Aurora Indigo 同族（统一的 600 号饱和度/明度带），色相均布且相邻可辨。
+ *  此前是土棕/暗蓝/暖灰的 90 年代混合，压在极光底上像另一套系统。
+ *  全部颜色在浅底（--bg #f8f9fb）与深底（--bg #08090d）上都 ≥3:1（WCAG 1.4.11 图形件），
+ *  因此两主题共用一套，无需分别维护。#标签 仍独占琥珀（TAG_COLOR），错题热力独占红。 */
+const PALETTE = ['#4f46e5', '#0891b2', '#e11d48', '#059669', '#7c3aed', '#ea580c', '#2563eb', '#c026d3', '#0d9488', '#db2777'];
 const TAG_COLOR = '#d97706';
 const DANGER = '#ff5f57';
 /** 标签节点：至少出现的笔记数 & 最多展示的标签数（防大库爆炸） */
@@ -76,7 +80,7 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
     const chapterColor = new Map<string, string>();
     const nodes: GNode[] = paths.map((p, i) => {
       idx.set(p, i); // 用 map 索引，避免初始化中引用 nodes 触 TDZ
-      const { title, meta } = parseFrontmatter(docs.get(p) ?? '');
+      const { title, meta } = parseFrontmatterCached(p, docs.get(p) ?? '');
       const chapter = (meta.chapter || '未分类').split('/')[0];
       if (!chapterColor.has(chapter)) chapterColor.set(chapter, PALETTE[chapterColor.size % PALETTE.length]);
       const mk = mistakes[p];
@@ -111,7 +115,7 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
     if (showTags) {
       const tagNotes = new Map<string, string[]>();
       for (const p of paths) {
-        const { meta } = parseFrontmatter(docs.get(p) ?? '');
+        const { meta } = parseFrontmatterCached(p, docs.get(p) ?? '');
         for (const t of meta.tags) {
           if (!tagNotes.has(t)) tagNotes.set(t, []);
           tagNotes.get(t)!.push(p);
@@ -176,7 +180,8 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
       .linkColor((l: GLink) => {
         const hl = hlRef.current;
         if (hl.nodes.size > 0) {
-          if (hl.links.has(l)) return dark() ? 'rgba(167, 139, 250, 0.75)' : 'rgba(108, 92, 231, 0.7)';
+          // 悬停邻域用主题强调色（浅 #4f46e5 / 深 #a5b4fc），与全应用的选中色一致
+          if (hl.links.has(l)) return dark() ? 'rgba(165, 180, 252, 0.8)' : 'rgba(79, 70, 229, 0.75)';
           return dark() ? 'rgba(140, 150, 168, 0.08)' : 'rgba(120, 125, 140, 0.07)';
         }
         return dark() ? 'rgba(150, 160, 180, 0.22)' : 'rgba(120, 130, 150, 0.25)';
@@ -218,7 +223,7 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
         ctx.globalAlpha = dimmed ? 0.2 : 1;
         ctx.lineWidth = (hovered ? 2.4 : 1) / globalScale;
         ctx.strokeStyle = hovered
-          ? (dark() ? '#c3adfd' : '#6c5ce7')
+          ? (dark() ? '#a5b4fc' : '#4f46e5')
           : (dark() ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.14)');
         ctx.stroke();
         ctx.globalAlpha = 1;
