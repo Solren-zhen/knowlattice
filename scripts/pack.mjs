@@ -264,7 +264,7 @@ const MODEL_COVERAGE_FLOOR = 50;
 }
 
 // ---------- 3. 组装 ----------
-const staging = join(repo, '.yanagent', 'pack-staging');
+const staging = join(repo, '.pack-staging');
 // 必须确认清掉了：copyTree 是「建目录 + 逐文件覆盖」，不清干净就会把新构建合并进旧暂存，
 // 包里会同时出现两套构建产物（见 removeTree 的说明）。
 if (!removeTree(staging)) {
@@ -394,7 +394,7 @@ if (!ok) {
   ok = zipOk();
 }
 if (!ok) {
-  console.error('[pack] 压缩失败，未生成 zip（staging 保留在 .yanagent/pack-staging 以便排查）');
+  console.error('[pack] 压缩失败，未生成 zip（staging 保留在 .pack-staging 以便排查）');
   process.exit(1);
 }
 
@@ -440,7 +440,7 @@ if (!ok) {
       console.error(`[pack] 打包中止：zip 内容与暂存树不一致（多 ${extra.length} 个 / 少 ${missing.length} 个）。`);
       for (const f of extra.slice(0, 10)) console.error(`[pack]   多出来的：${f}`);
       for (const f of missing.slice(0, 10)) console.error(`[pack]   少掉的：${f}`);
-      console.error('[pack] 多半是暂存目录没清干净（旧构建文件被合并进来）：删掉 .yanagent/pack-staging 后重试。');
+      console.error('[pack] 多半是暂存目录没清干净（旧构建文件被合并进来）：删掉 .pack-staging 后重试。');
       process.exit(1);
     }
     log(`压缩校验：${inZip.size} 个文件与暂存树一一对应`);
@@ -448,7 +448,7 @@ if (!ok) {
 }
 
 // ---------- 5. 清理 ----------
-if (!removeTree(staging)) log('提示：暂存目录没删掉（不影响包本身，可手动删 .yanagent/pack-staging）');
+if (!removeTree(staging)) log('提示：暂存目录没删掉（不影响包本身，可手动删 .pack-staging）');
 
 log(`完成：${zipPath}（${mb(statSync(zipPath).size)}）`);
 log(`笔记 ${noteCount} 篇 · 题库 ${qbanks.length} 库 / ${qCount} 题 · 合并备份 ${sources.length} 份`);

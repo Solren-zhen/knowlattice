@@ -44,7 +44,7 @@ export interface Todo {
   subtasks?: Subtask[];
   /** 备注：补充说明（搜索也认它） */
   memo?: string;
-  /** 已投入的番茄数：专注前选这条待办，做完一个番茄 +1（量化投入，不是估的） */
+  /** 已投入的专注次数：专注前选这条待办，做完一轮专注 +1（量化投入，不是估的） */
   pomos?: number;
   /** 手动排序权重（拖拽重排时写入） */
   order?: number;
@@ -354,7 +354,7 @@ export function updateTodo(list: Todo[], id: string, patch: Partial<Todo>): Todo
   return list.map((t) => (t.id === id ? { ...t, ...patch } : t));
 }
 
-/** 完成一个番茄，给这条待办 +1（量化投入：这是真做过的 25 分钟，不是估的） */
+/** 完成一轮专注，给这条待办 +1（量化投入：这是真做过的 25 分钟，不是估的） */
 export function bumpPomo(list: Todo[], id: string, n = 1): Todo[] {
   if (!id || n <= 0) return list;
   let hit = false;

@@ -501,7 +501,7 @@ describe('M9 批量操作 / 顺延', () => {
   });
 });
 
-describe('M10 番茄数（pomos）', () => {
+describe('M10 专注次数（pomos）', () => {
   it('bumpPomo 给指定待办 +1；没命中或 n<=0 时不产生新对象', () => {
     const base = [todo({ id: 'a' }), todo({ id: 'b' })];
     const next = bumpPomo(base, 'a');

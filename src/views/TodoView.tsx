@@ -1,13 +1,13 @@
 /**
- * 番茄工作台（整页）：把「专注 / 待办 / 统计」装进一个工作面，三者共用一份数据。
+ * 专注工作台（整页）：把「专注 / 待办 / 统计」装进一个工作面，三者共用一份数据。
  *
  * 布局：顶部标签切模块 + 常驻计时条（切到哪一页都在走，一眼看得到还剩多久）
  *   专注  计时环 + 开始/暂停/重置/跳过 + 关联待办 + 今日累计 + 时长设置
  *   待办  左栏智能列表 / 中栏列表+批量 / 右栏详情+统计（详见下面）
- *   统计  番茄总览 + 近 7 天趋势 + 待办完成率 + 学习打卡热力图
+ *   统计  专注总览 + 近 7 天趋势 + 待办完成率 + 学习打卡热力图
  *
- * 工作台形态参照 github.com/GarryLiang/pomodoro-workbench：番茄钟与待办联动——
- * 专注前选一条待办，每完成一个番茄它 +1。落地时按本仓库的数据模型做了两处取舍：
+ * 工作台形态参照 github.com/GarryLiang/pomodoro-workbench：专注计时器与待办联动——
+ * 专注前选一条待办，每完成一轮专注它 +1。落地时按本仓库的数据模型做了两处取舍：
  *   - 不另做一套手动「习惯打卡」：复习评卡 / 题库作答已经在记打卡（core/stats），
  *     热力图直接画那份真实学习记录，避免两套「连续天数」互相打架；
  *   - 计时按真实时间戳算（core/pomodoro）：关掉面板也在走，重开按时间接上，不漂移。
@@ -46,7 +46,7 @@ import {
 
 type View = SmartList | 'notes';
 
-/** 工作台模块：专注（番茄钟）/ 待办（本来的面板）/ 统计 */
+/** 工作台模块：专注（专注计时器）/ 待办（本来的面板）/ 统计 */
 type Module = 'focus' | 'board' | 'stats';
 
 const MODULE_KEY = 'knowlattice-todo-module';
@@ -216,7 +216,7 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
     composerRef.current?.focus();
   };
 
-  // ---------- 番茄钟（工作台常驻：切模块不停，关掉面板也在走）----------
+  // ---------- 专注计时器（工作台常驻：切模块不停，关掉面板也在走）----------
   const [module, setModule] = useState<Module>(() => readPref(MODULE_KEY, MODULES.map((m) => m.key), 'board'));
   const [cfg, setCfg] = useState<PomodoroConfig>(loadConfig);
   const [timer, setTimer] = useState<PomodoroState>(loadPomoState);
@@ -278,7 +278,7 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
           const bumped = bumpPomo(listRef.current, r.record.taskId);
           if (bumped !== listRef.current) commitRef.current(bumped);
         }
-        toast(`完成 1 个番茄（${r.record.minutes} 分钟）· ${PHASE_LABELS[r.state.phase]}开始`, 'ok', 3200);
+        toast(`完成 1 个专注周期（${r.record.minutes} 分钟）· ${PHASE_LABELS[r.state.phase]}开始`, 'ok', 3200);
       } else {
         toast(`${PHASE_LABELS[r.state.phase]}开始`, 'info', 2200);
       }
@@ -776,7 +776,7 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
                               </span>
                             )}
                             {t.pomos ? (
-                              <span className="todo-badge todo-badge--pomo" aria-label={`已投入 ${t.pomos} 个番茄`}>
+                              <span className="todo-badge todo-badge--pomo" aria-label={`已投入 ${t.pomos} 个专注周期`}>
                                 <IconTimer size={11} /> {t.pomos}
                               </span>
                             ) : null}

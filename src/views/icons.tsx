@@ -162,7 +162,7 @@ export const IconChart = ({ size = 15 }: P) => (
   </svg>
 );
 
-/** 番茄钟：表盘 + 指针 + 顶部小柄（剪影先认得出是计时器） */
+/** 专注计时器：表盘 + 指针 + 顶部小柄（剪影先认得出是计时器） */
 export const IconTimer = ({ size = 15 }: P) => (
   <svg {...base(size)}>
     <circle cx="12" cy="13.6" r="7.6" {...wash} />
