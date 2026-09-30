@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * 整包备份回环：导出 → 清空 → 导入，番茄记录、待办、打卡都要回来。
+ * 整包备份回环：导出 → 清空 → 导入，专注记录、待办、打卡都要回来。
  *
- * 番茄记录只活在 localStorage 里。备份漏了它，用户换设备就等于白专注——这条链路值得一个测试。
+ * 专注记录只活在 localStorage 里。备份漏了它，用户换设备就等于白专注——这条链路值得一个测试。
  * 适配器是 vault.ts 的模块级单例，没有注入点，所以照 vault.load.test.tsx 的做法 mock 掉 storage/web。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -62,8 +62,8 @@ beforeEach(async () => {
 
 afterEach(() => cleanup());
 
-describe('整包备份：番茄记录不丢', () => {
-  it('导出带上番茄记录，清空后导入能回来（待办里的番茄数也一起）', async () => {
+describe('整包备份：专注记录不丢', () => {
+  it('导出带上专注记录，清空后导入能回来（待办里的专注次数也一起）', async () => {
     await recordAnswer('备份题库', 'q-1', false, Date.UTC(2026, 0, 15, 9));
     localStorage.setItem('knowlattice-pomodoros', JSON.stringify([
       { id: 'p-1', day: '2026-09-21', endedAt: 1758400000000, minutes: 25, taskId: 't-1' },

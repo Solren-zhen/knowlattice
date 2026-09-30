@@ -504,7 +504,7 @@ export function useVault() {
       days: exportDays(),
       // v4 起补上卡片自定义（改写正/背面、删卡）：和待办同一类问题，不随备份走就会丢
       cardEdits: exportCardEdits(),
-      // v5 起补上番茄专注记录：工作台的「今日/累计/趋势」全靠它，丢了就等于白专注
+      // v5 起补上专注周期专注记录：工作台的「今日/累计/趋势」全靠它，丢了就等于白专注
       pomodoros: exportPomodoros(),
       pathwayTemplates: await exportPathwayTemplates(),
     };

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 番茄工作台的 DOM 测试：模块切换、计时（用假时钟走真实时间线）、番茄与待办联动、
+ * 专注工作台的 DOM 测试：模块切换、计时（用假时钟走真实时间线）、专注与待办联动、
  * 统计页数字、关掉面板后重开的补记。计时逻辑本身的单测在 core/__tests__/pomodoro.test.ts。
  */
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -117,7 +117,7 @@ describe('专注页计时', () => {
     expect(records()).toHaveLength(1); // 20 分钟跑完正好到点
   });
 
-  it('跳过专注不记番茄', () => {
+  it('跳过专注不记专注周期', () => {
     renderView();
     fireEvent.click(tab('专注'));
     fireEvent.click(screen.getByText('开始专注'));
@@ -143,7 +143,7 @@ describe('专注页计时', () => {
   });
 });
 
-describe('番茄与待办联动', () => {
+describe('专注与待办联动', () => {
   it('行上的「专注」把这条设为本次专注对象并切到专注页', () => {
     seedTodo();
     renderView();
@@ -152,7 +152,7 @@ describe('番茄与待办联动', () => {
     expect(select.value).toBe('t-1');
   });
 
-  it('完成一个番茄：记录落库 + 关联待办 +1 + 行上出现番茄数', () => {
+  it('完成一轮专注：记录落库 + 关联待办 +1 + 行上出现专注次数', () => {
     seedTodo();
     renderView();
     fireEvent.click(tab('专注'));
@@ -168,10 +168,10 @@ describe('番茄与待办联动', () => {
     expect(screen.getByLabelText(/短休息剩余/).getAttribute('aria-label')).toContain('05:00');
 
     fireEvent.click(tab('待办'));
-    expect(screen.getByLabelText('已投入 1 个番茄')).toBeTruthy();
+    expect(screen.getByLabelText('已投入 1 个专注周期')).toBeTruthy();
   });
 
-  it('没关联待办时只记番茄，不动任何待办', () => {
+  it('没关联待办时只记专注周期，不动任何待办', () => {
     seedTodo();
     renderView();
     fireEvent.click(tab('专注'));
@@ -227,7 +227,7 @@ describe('底部短语法说明', () => {
 });
 
 describe('统计页', () => {
-  it('番茄总览、趋势、完成率、热力图都按真实数据画', () => {
+  it('专注总览、趋势、完成率、热力图都按真实数据画', () => {
     const today = dayKey(new Date(T0));
     const yesterday = dayKey(new Date(T0 - 24 * 60 * MIN));
     localStorage.setItem('knowlattice-pomodoros', JSON.stringify([
@@ -243,14 +243,14 @@ describe('统计页', () => {
     fireEvent.click(tab('统计'));
 
     const stats = document.querySelector('.wb-cards') as HTMLElement;
-    expect(stats.textContent).toContain('今日番茄2');
+    expect(stats.textContent).toContain('今日专注周期2');
     expect(stats.textContent).toContain('今日专注50');
-    expect(stats.textContent).toContain('累计番茄3');
+    expect(stats.textContent).toContain('累计专注周期3');
     expect(stats.textContent).toContain('累计专注65');
     expect(screen.getByText('50%')).toBeTruthy();          // 1/2 完成率
     expect(document.querySelectorAll('.wb-heat__col')).toHaveLength(12);
     expect(document.querySelectorAll('.wb-heat__col .wb-heat__cell')).toHaveLength(84);
-    // 今天的柱子有 2 个番茄
-    expect((document.querySelector('.wb-trend__item:last-child') as HTMLElement).title).toContain('2 个番茄');
+    // 今天的柱子有 2 个专注周期
+    expect((document.querySelector('.wb-trend__item:last-child') as HTMLElement).title).toContain('2 个专注周期');
   });
 });

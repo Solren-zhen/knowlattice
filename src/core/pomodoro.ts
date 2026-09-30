@@ -1,5 +1,5 @@
 /**
- * 番茄钟（Pomodoro）：专注 25 分钟 → 短休息 5 分钟 → 每 4 个专注后长休息 15 分钟。
+ * 专注计时器（Pomodoro）：专注 25 分钟 → 短休息 5 分钟 → 每 4 个专注后长休息 15 分钟。
  *
  * 计时**按真实时间戳算**（now − startedAt + 已累计），不靠 setInterval 累加毫秒：
  * 累加式在标签页被挂起、系统休眠、渲染卡顿时都会漂移，25 分钟能差出几十秒。
@@ -10,7 +10,7 @@
  * 「专注了多少分钟」是自欺欺人。
  *
  * 两条记账口径（刻意的，不是随手定的）：
- *   - 一条番茄记在**完成那一刻**所在的那一天：23:50 开始、00:15 跑完，算第二天——
+ *   - 一条专注周期记在**完成那一刻**所在的那一天：23:50 开始、00:15 跑完，算第二天——
  *     和本应用打卡（评卡/作答按当下记）保持一致，统计页的趋势与连续天数才对得上；
  *   - 记录里的 endedAt 是**真正跑完的时刻**（startedAt + 计划时长 − 暂停前已跑），
  *     不是「你重开面板的那一刻」，所以关着面板跨天再打开也不会记错日子。
@@ -119,7 +119,7 @@ function enter(state: PomodoroState, cfg: PomodoroConfig, phase: PomodoroPhase, 
   };
 }
 
-/** 跳过当前阶段（跳过专注**不**记一个番茄——没做完就是没做完） */
+/** 跳过当前阶段（跳过专注**不**记一轮专注——没做完就是没做完） */
 export function skip(state: PomodoroState, cfg: PomodoroConfig, now: number): PomodoroState {
   return enter(state, cfg, nextPhase(state, cfg), now);
 }
@@ -287,7 +287,7 @@ export function pomoStats(records: PomodoroRecord[], today: string): PomoStats {
   return { todayCount, todayMinutes, totalCount: records.length, totalMinutes };
 }
 
-/** 近 N 天每天完成的番茄数（含今天，末尾是今天） */
+/** 近 N 天每天完成的专注次数（含今天，末尾是今天） */
 export function pomoTrend(records: PomodoroRecord[], today: string, days = 7): Array<{ day: string; count: number; minutes: number }> {
   const byDay = new Map<string, { count: number; minutes: number }>();
   for (const r of records) {

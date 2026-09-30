@@ -13,6 +13,15 @@ describe('normalizePdfSelection', () => {
   it('移除软连字符和首尾空白', () => {
     expect(normalizePdfSelection('  hyper\u00adthyroidism  ')).toBe('hyperthyroidism');
   });
+
+  it('清除全角空格与排版空格（中文 PDF 缩进/表格对齐的主要来源）', () => {
+    expect(normalizePdfSelection('\u3000\u3000肺牵张反射\u3000是主动过程\u3000\u3000HR\u3000120次'))
+      .toBe('肺牵张反射是主动过程HR 120次');
+  });
+
+  it('删除零宽字符，全角空格转成的英文词间距保留一个', () => {
+    expect(normalizePdfSelection('oxygen\u200bdeliver\u3000\u3000curves\ufeff')).toBe('oxygen deliver curves');
+  });
 });
 
 describe('normalizePdfSelection hyphenation + paragraphs', () => {
