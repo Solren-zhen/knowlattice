@@ -7,7 +7,7 @@
  * 属性键加粗与 wikilink 通过「占位标记 → 渲染后替换」实现，点击走事件委托，
  * 不再注入内联 onclick 和 window 全局函数。
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { renderMarkdown } from '../core/markdown';
 import { FORMAT_KEYS } from '../core/formatKeys';
 import { IconFile, IconLink, IconSave, IconSearch } from './icons';
@@ -83,12 +83,25 @@ interface Props {
   /** 空状态 Hero 主 CTA */
   onSearch?: () => void;
   onGraph?: () => void;
+  /**
+   * 正文渲染完成（含失败回退）后回调。
+   * 卡片这类「按内容高度落位」的宿主必须靠它重算位置：正文是异步渲染的，
+   * 首帧只有骨架高度，等 markdown-it 就绪后卡片会突然长高，仅靠 ResizeObserver
+   * 观察卡片自身并不可靠（外框尺寸不随内部内容变化时不触发）。
+   */
+  onRendered?: () => void;
 }
 
-export default function Preview({ content, resolve, onOpenLink, readFile, onSearch, onGraph }: Props) {
+export default function Preview({ content, resolve, onOpenLink, readFile, onSearch, onGraph, onRendered }: Props) {
   // markdown-it 懒加载 → 异步渲染。保持上一份 html 直到新结果就绪（alive 守卫防竞态），
   // 避免切笔记时闪空白；content 为 null 时走 placeholder 分支，不消费 html
   const [html, setHtml] = useState('');
+  /** onRendered 走 ref：宿主每次渲染都会传新闭包，不能让它进入 effect 依赖（会无限重渲染） */
+  const renderedRef = useRef(onRendered);
+  useEffect(() => { renderedRef.current = onRendered; });
+  /** 正文已写入 html，但还没提交到 DOM；提交完（layout effect）才通知宿主量尺寸 */
+  const pendingNotifyRef = useRef(false);
+
   useEffect(() => {
     if (!content) return;
     let alive = true;
@@ -101,11 +114,30 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
       if (!data) return m;
       return `![${alt}](${data})`;
     });
-    void renderMarkdown(src).then((raw) => {
-      if (alive) setHtml(postprocess(raw, resolve ?? (() => null)));
-    });
+    // 渲染失败（chunk 加载失败 / 渲染器抛错）不能让正文永远停在空白：
+    // 这里统一兜底成提示文案，并照样通知宿主重算落位。
+    renderMarkdown(src)
+      .then((raw) => {
+        if (!alive) return;
+        pendingNotifyRef.current = true;
+        setHtml(postprocess(raw, resolve ?? (() => null)));
+      })
+      .catch((e: unknown) => {
+        if (!alive) return;
+        console.error('Markdown 渲染失败：', e);
+        pendingNotifyRef.current = true;
+        setHtml('<p class="preview-error">正文渲染失败，可直接在编辑器中打开查看。</p>');
+      });
     return () => { alive = false; };
   }, [content, resolve, readFile]);
+
+  // 正文提交到 DOM 之后再通知宿主：此刻量到的才是最终高度。
+  // 放在 .then 里直接调用会早一帧——那时 DOM 还是骨架，宿主按旧高度落位等于没修。
+  useLayoutEffect(() => {
+    if (!html || !pendingNotifyRef.current) return;
+    pendingNotifyRef.current = false;
+    renderedRef.current?.();
+  }, [html]);
 
   // 事件委托：点击 wikilink 锚点 → onOpenLink(目标名)
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {

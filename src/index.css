@@ -1396,6 +1396,8 @@ a.wikilink.missing::after {
 }
 /* 正文复用预览渲染器：卡片里不要它的大留白与 760px 版心，也不要再叠一层入场动画 */
 .anatomy-note-card__body .preview { padding: 0; max-width: none; animation: none; }
+/* 正文渲染失败时的兜底文案（Preview 的 catch 分支），避免看起来像一张空白卡片 */
+.anatomy-note-card__body .preview-error { margin: 6px 0; color: var(--muted); }
 .anatomy-note-card__body .markdown-body { font-size: var(--fs-body); }
 .anatomy-note-card__body .markdown-body h1 {
   font-size: 16px; border-bottom: none; padding-bottom: 0; margin: 0 0 var(--sp-2);
@@ -2107,7 +2109,7 @@ a.wikilink.missing::after {
   .todo-foot__grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* ============================================================ M10：番茄工作台（专注 / 待办 / 统计）
+/* ============================================================ M10：专注工作台（专注 / 待办 / 统计）
    一个工作面：顶部标签切模块，计时条常驻（切到哪一页都在走）。 */
 .wb-tabs { display: flex; gap: 2px; margin-left: auto; }
 .wb-tab {
@@ -2196,7 +2198,7 @@ a.wikilink.missing::after {
 .wb-heat__cell--future { background: none; box-shadow: inset 0 0 0 1px var(--border); }
 .wb-heat__legend { display: flex; align-items: center; gap: 4px; margin-top: 8px; font-size: var(--fs-micro); }
 
-/* 待办行上的番茄数 / 一键去专注 */
+/* 待办行上的专注次数 / 一键去专注 */
 .todo-badge--pomo { display: inline-flex; align-items: center; gap: 3px; color: var(--amber-text); border-color: currentColor; }
 .todo-focus-btn { color: var(--accent); border-color: var(--border-accent); }
 
@@ -3071,6 +3073,70 @@ a.wikilink.missing::after {
   min-height: 44px;
 }
 .pdf-file { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
+/* 书架：顶栏的书名即切换入口，点开是书目下拉 */
+.pdf-shelf { position: relative; min-width: 0; }
+.pdf-shelf__btn {
+  display: flex; align-items: center; gap: 6px;
+  max-width: 32vw;
+  padding: 5px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  color: var(--text-1); font-size: 13px; font-weight: 600;
+  cursor: pointer;
+}
+.pdf-shelf__btn:disabled { opacity: .6; cursor: default; }
+.pdf-shelf__btn:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+.pdf-shelf__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-shelf__chevron { flex: none; font-size: 10px; color: var(--muted); }
+.pdf-shelf__menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  width: min(360px, 76vw);
+  max-height: min(60vh, 420px); overflow-y: auto;
+  padding: var(--sp-2);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-modal);
+}
+.pdf-shelf__title { padding: 4px var(--sp-2) 6px; font-size: var(--fs-micro); }
+.pdf-shelf__item {
+  display: grid; grid-template-columns: 1fr auto; align-items: center;
+  gap: 2px var(--sp-2);
+  padding: 7px var(--sp-2);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.pdf-shelf__item:hover { background: var(--bg-hover, rgba(79, 70, 229, .07)); }
+.pdf-shelf__item.on { background: var(--accent-soft, rgba(79, 70, 229, .1)); }
+.pdf-shelf__item-name {
+  grid-column: 1; font-size: var(--fs-control); color: var(--text-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pdf-shelf__item.on .pdf-shelf__item-name { color: var(--accent); font-weight: 600; }
+.pdf-shelf__item-meta { grid-column: 1; font-size: var(--fs-micro); }
+.pdf-shelf__del { grid-column: 2; grid-row: 1 / span 2; opacity: 1; }
+.pdf-shelf__item:hover .pdf-shelf__del, .pdf-shelf__item:focus-within .pdf-shelf__del { opacity: 1; }
+/* 直白按钮行：导入书籍 / 删除历史书籍 */
+.pdf-shelf__actions { display: flex; gap: 8px; padding: 2px var(--sp-2) 8px; }
+.pdf-shelf__actions .btn-small { flex: 1; justify-content: center; }
+.pdf-shelf__clear { color: var(--danger); border-color: var(--danger); }
+.pdf-shelf__clear:hover { background: var(--danger); color: var(--danger-ink); }
+/* 空态对齐主页：徽标 + 大标题 + 直白按钮 + 三步教学 */
+.pdf-empty { gap: 14px; }
+.pdf-empty__badge {
+  padding: 3px 14px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.04em;
+}
+.pdf-empty__title {
+  margin: 0; font-size: 24px; font-weight: 650; color: var(--text);
+  letter-spacing: -0.01em;
+}
+.pdf-empty__cta { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.pdf-empty__cta .btn-primary { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pdf-empty__cta .btn-small { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pdf-empty__steps { margin: 12px auto 0; }
+.pdf-empty__hint { margin: 2px 0 0; font-size: var(--fs-micro); }
+.pdf-shelf__hint { padding: 6px var(--sp-2) 2px; border-top: 1px solid var(--border); margin-top: var(--sp-2); font-size: var(--fs-micro); }
 .pdf-ocr-tip {
   padding: 7px 16px;
   background: var(--warn-bg); border-bottom: 1px solid var(--warn-border);
@@ -3090,6 +3156,13 @@ a.wikilink.missing::after {
 }
 .pdf-viewer-host { flex: 1; min-height: 0; position: relative; }
 .pdf-viewer-host > .rpv-core__viewer { height: 100%; }
+/* PDF 渲染失败时的兜底提示（Viewer 的 renderError 分支），避免看起来像一片空白 */
+.pdf-error-hint {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--sp-2); height: 100%; padding: var(--sp-6);
+  text-align: center;
+}
+.pdf-error-hint p { margin: 0; }
 /* Word 渲染（docx-preview 还原原版排版） */
 .pdf-doc-scroll { flex: 1; min-height: 0; overflow: auto; padding: 24px; }
 .pdf-doc-render { max-width: 940px; margin: 0 auto; }
@@ -3830,7 +3903,7 @@ a.wikilink.missing::after {
   font-family: var(--font-reading);
 }
 
-/* ============ unified feature panel skeleton (impeccable layout) ============
+/* ============ unified feature panel skeleton ============
    Two geometries, one spec: header / scroll / action hierarchy.
      .panel-backdrop + .panel  overlay: tools and lists (centered card)
      .panel--full              full-bleed: 3D, graph, mindmap, PDF

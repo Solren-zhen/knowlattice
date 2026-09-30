@@ -8,21 +8,26 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { useEsc, escThenClose } from './useEsc';
-import { Viewer, Worker } from '@react-pdf-viewer/core';
+import { Viewer } from '@react-pdf-viewer/core';
 import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
 import '@react-pdf-viewer/core/lib/styles/index.css';
 import '@react-pdf-viewer/default-layout/lib/styles/index.css';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+// worker 地址由 core/pdfLib 统一设置（pdfWorkerSrc 指向 public/pdfjs/ 的稳定路径，
+// 不走 ?url —— 见该文件注释）；这里只需保证打开文档前调用过 loadPdfjs。
+import {
+  detectScannedPdf, loadPdfjs, listPdfBooks, getPdfBook, putPdfBook,
+  removePdfBook, savePdfPage, setCurrentPdfBook, getCurrentPdfName,
+  migrateLegacyPdf, type PdfBook,
+} from '../core/pdfLib';
 import { renderAsync } from 'docx-preview';
-import { detectScannedPdf, saveLastPdf, getLastPdf } from '../core/pdfLib';
-import { toast } from '../core/feedback';
+import { confirmBox, toast } from '../core/feedback';
 import { netErrorHint } from '../core/netError';
 import { generateDraft, draftToMarkdown, type Draft } from '../core/noteGen';
 import { normalizePdfSelection } from '../core/pdfText';
 import {
   beginGeometrySelection, clearHighlights, endGeometrySelection, selectByGeometry,
 } from '../core/pdfCharSelect';
-import { IconPlus, IconClose, IconFile } from './icons';
+import { IconPlus, IconClose, IconFile, IconBook } from './icons';
 import { clickable } from './a11y';
 import Loading from './Loading';
 
@@ -80,9 +85,45 @@ const GEOMSEL_KEY = 'knowlattice-pdf-geomsel';
 /** Column mode (default off): middle lines stay inside the drag x band. */
 const COLMODE_KEY = 'knowlattice-pdf-colmode';
 
+/** 已打开的 PDF 文档 */
+interface OpenDoc {
+  data: Uint8Array;
+  name: string;
+}
+
+/** PDF 页面渲染器：worker 由 core/pdfLib 统一配置（见 loadPdfjs） */
+function PdfViewer({ doc, plugin, onPageChange }: {
+  doc: OpenDoc;
+  plugin: ReturnType<typeof defaultLayoutPlugin>;
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <Viewer
+      // 换书必须重挂：<Viewer> 只在挂载时读一次 fileUrl，光改 prop 不会重新加载文档
+      // （切书后画布停在上本、或直接空白，就是这里）。key 由调用方给（书名 + 打开序号）。
+      fileUrl={doc.data}
+      plugins={[plugin]}
+      // 说明：这里不设 initialPage —— default-layout 下没人消费它（只被 core 收下），
+      // 实测切书后仍停在第 1 页。也没有稳定的跳页途径（jumpToPage 需等插件 store 就绪、
+      // 直接改 .rpv-core__inner-pages 的 scrollTop 会被它的虚拟滚动重置）。
+      // 因此页码只做「记录 + 显示」（书架里能看到读到第几页），暂不自动跳回。
+      renderLoader={(percentages: number) => (
+        <Loading label={`PDF 渲染中… ${Math.round(percentages)}%`} />
+      )}
+      renderError={(error) => (
+        <div className="pdf-error-hint">
+          <p>PDF 渲染失败</p>
+          <p className="muted">{String(error?.message ?? error)}</p>
+        </div>
+      )}
+      onPageChange={(e) => onPageChange(e.currentPage + 1)}
+    />
+  );
+}
+
 export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }: Props) {
   const defaultLayoutPluginInstance = useRef(defaultLayoutPlugin()).current;
-  const [doc, setDoc] = useState<{ data: Uint8Array; name: string } | null>(null);
+  const [doc, setDoc] = useState<OpenDoc | null>(null);
   const [docType, setDocType] = useState<'pdf' | 'docx' | null>(null);
   const [docBuf, setDocBuf] = useState<ArrayBuffer | null>(null); // docx → 源 buffer（docx-preview 渲染）
   const [fileName, setFileName] = useState<string | null>(null);
@@ -101,6 +142,12 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
   const [geomSel, setGeomSel] = useState(() => localStorage.getItem(GEOMSEL_KEY) !== '0');
   const [colMode, setColMode] = useState(() => localStorage.getItem(COLMODE_KEY) === '1');
   const [scanned, setScanned] = useState(false);
+  /** 书架（只含元数据，正文按需单独读） */
+  const [books, setBooks] = useState<PdfBook[]>([]);
+  const [shelfOpen, setShelfOpen] = useState(false);
+  /** 每打开一次文档 +1：作为 viewer 的 key 后缀，保证重开同一本也会重建 */
+  const [docSeq, setDocSeq] = useState(0);
+  const shelfRef = useRef<HTMLDivElement>(null);
 
   const paneRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -151,8 +198,11 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
 
-  // 打开文档：按扩展名分流 PDF / Word / PPT（都可选中文字生成草稿）
-  const openDoc = async (name: string, source: File | ArrayBuffer) => {
+  // 打开文档：按扩展名分流 PDF / Word（都可选中文字生成草稿）。
+  // opts.persist=false 表示这次打开不写入书架（从书架点一本已有的书时，不该刷新它的排序）。
+  const openDoc = async (
+    name: string, source: File | ArrayBuffer, opts: { persist?: boolean } = {}
+  ) => {
     setBusy(true);
     try {
       const buf = source instanceof File ? await source.arrayBuffer() : source;
@@ -161,8 +211,12 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         // 用 docx-preview 渲染原始版式（保留段落/表格/图片/分页，可划选）
         setDoc(null); setDocType('docx'); setDocBuf(buf);
       } else {
+        // 必须在渲染 <Viewer> 之前把 pdfjs 的 workerSrc 设好，否则 pdfjs 会按自己的
+        // 默认路径找 worker（那个路径在生产产物里不存在）→ 静默渲染成空白。
+        await loadPdfjs();
         setDoc({ data: new Uint8Array(buf), name });
         setDocType('pdf'); setDocBuf(null);
+        setDocSeq((n) => n + 1);
         setPage(1);
         setSelected(null);
         setScanned(false);
@@ -170,7 +224,11 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         clearHighlights(paneRef.current);
         // 几何选区回到用户偏好（默认开）；扫描件随后强制开启
         setGeomSel(localStorage.getItem(GEOMSEL_KEY) !== '0');
-        if (source instanceof File) void saveLastPdf(name, buf);
+        if (opts.persist !== false) {
+          // 入架并置为当前书；同名文件重选即覆盖（putPdfBook 的 keyPath 就是书名）。
+          // 示例 PDF 走 ArrayBuffer 也照此入架，用户不必每次重新载入。
+          void putPdfBook(name, buf).then(() => refreshBooks());
+        }
         // 采样前几页文字层判断扫描件；必须传副本，pdf.js 会 detach 传入的 ArrayBuffer
         void detectScannedPdf(buf.slice(0)).then((isScanned) => {
           setScanned(isScanned);
@@ -178,6 +236,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         });
       }
       setFileName(name);
+      setShelfOpen(false);
     } catch (e) {
       toast(`文档打开失败：${netErrorHint(e)}`, 'err');
     } finally {
@@ -185,13 +244,104 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
     }
   };
 
-  // 启动时恢复上次的 PDF
+  const refreshBooks = async () => setBooks(await listPdfBooks());
+
+  /** 从书架切到另一本书：读正文 → 按它自己记下的页码打开，不改变排序 */
+  const openBook = async (book: PdfBook) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const rec = await getPdfBook(book.name);
+      if (!rec) {
+        toast('这本书的正文找不到了，请重新选择文件', 'err');
+        setBooks(await removePdfBook(book.name));
+        return;
+      }
+      await setCurrentPdfBook(book.name);
+      await openDoc(rec.name, rec.data, { persist: false });
+      await refreshBooks();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteBook = async (book: PdfBook) => {
+    const wasCurrent = fileName === book.name;
+    const rest = await removePdfBook(book.name);
+    setBooks(rest);
+    if (!wasCurrent) return;
+    // 删掉的是正在看的这本：自动切到书架里最近的一本，没有就回到空态
+    if (rest[0]) await openBook(rest[0]);
+    else {
+      setDoc(null); setDocType(null); setDocBuf(null); setFileName(null);
+      await setCurrentPdfBook('');
+    }
+  };
+
+  /** 删除历史书籍：保留当前打开的这本，其余全部移除（先确认，防手滑） */
+  const clearBookHistory = async () => {
+    const doomed = books.filter((b) => b.name !== fileName);
+    if (doomed.length === 0) return;
+    const ok = await confirmBox({
+      title: `清空另外 ${doomed.length} 本历史书籍？`,
+      detail: '只删书架记录，当前这本书与笔记摘录都不受影响。',
+      okText: '清空',
+      danger: true,
+    });
+    if (!ok) return;
+    for (const b of doomed) await removePdfBook(b.name);
+    setBooks(await listPdfBooks());
+  };
+
+  // 启动时先迁移旧的单本存储，再恢复上次那本书
   useEffect(() => {
     void (async () => {
-      const last = await getLastPdf();
-      if (last) await openDoc(last.name, last.data);
+      await migrateLegacyPdf();
+      await refreshBooks();
+      const currentName = await getCurrentPdfName();
+      if (!currentName) return;
+      const rec = await getPdfBook(currentName);
+      if (rec) await openDoc(rec.name, rec.data, { persist: false });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 切书下拉：点外面 / Esc 收起（挂在捕获阶段，避免被面板自身的 Esc 处理抢先）
+  useEffect(() => {
+    if (!shelfOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!shelfRef.current?.contains(e.target as Node)) setShelfOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShelfOpen(false); };
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [shelfOpen]);
+
+  // 翻页时把进度记到当前这本书上（防抖：翻页会连发多次）
+  useEffect(() => {
+    if (docType !== 'pdf' || !fileName) return;
+    const timer = setTimeout(() => { void savePdfPage(fileName, page); }, 600);
+    return () => clearTimeout(timer);
+  }, [page, docType, fileName]);
+
+  // 复制净化：在左侧原文面板里 Ctrl+C / 右键复制时，粘贴出去的就是清理过的文本
+  // （原生复制会把 PDF 排版产生的多余空格一起带上；只拦左栏，右栏草稿不受影响）
+  useEffect(() => {
+    const onCopy = (e: ClipboardEvent) => {
+      const pane = paneRef.current;
+      const sel = window.getSelection();
+      if (!pane || !sel || sel.isCollapsed || !sel.anchorNode || !pane.contains(sel.anchorNode)) return;
+      const cleaned = normalizePdfSelection(sel.toString());
+      if (!cleaned) return;
+      e.clipboardData?.setData('text/plain', cleaned);
+      e.preventDefault();
+    };
+    document.addEventListener('copy', onCopy);
+    return () => document.removeEventListener('copy', onCopy);
   }, []);
 
   // docx：用 docx-preview 渲染原始 Word 版式（保留段落/表格/图片/分页，可划选）
@@ -388,7 +538,64 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
     <div className="panel panel--full pdf-overlay">
       <div className="panel__head pdf-topbar">
         <button className="btn-small" onClick={onClose}>← 退出对照</button>
-        <span className="pdf-file">{fileName ?? '未选择 PDF'}</span>
+        {/* 书架：书名即按钮，点开切换书籍；没书时退化成一段提示 */}
+        <div className="pdf-shelf" ref={shelfRef}>
+          <button
+            className="pdf-shelf__btn"
+            disabled={books.length === 0}
+            aria-haspopup="listbox"
+            aria-expanded={shelfOpen}
+            title={books.length ? '切换书籍' : '还没有书，先选择 PDF / Word'}
+            onClick={() => setShelfOpen((v) => !v)}
+          >
+            <IconBook />
+            <span className="pdf-shelf__name">{fileName ?? '未选择 PDF'}</span>
+            {books.length > 0 && <span className="pdf-shelf__chevron">▾</span>}
+          </button>
+          {shelfOpen && (
+            <div className="pdf-shelf__menu" role="listbox" aria-label="书架">
+              {/* 直白按钮：导入 / 清空历史，不用翻找 */}
+              <div className="pdf-shelf__actions">
+                <button className="btn-small" disabled={busy} onClick={() => fileRef.current?.click()}>
+                  <IconFile /> 导入书籍
+                </button>
+                {books.length > 1 && (
+                  <button
+                    className="btn-small pdf-shelf__clear"
+                    title="删除当前这本以外的全部书籍（笔记摘录不受影响）"
+                    onClick={() => void clearBookHistory()}
+                  >
+                    删除历史书籍
+                  </button>
+                )}
+              </div>
+              <div className="pdf-shelf__title muted">书架 · {books.length} 本 · 点书目切换</div>
+              {books.map((b) => (
+                <div
+                  key={b.name}
+                  aria-selected={b.name === fileName}
+                  className={`pdf-shelf__item${b.name === fileName ? ' on' : ''}`}
+                  onClick={() => void openBook(b)}
+                  {...clickable(`打开《${b.name}》`)}
+                >
+                  <span className="pdf-shelf__item-name">{b.name}</span>
+                  <span className="pdf-shelf__item-meta muted">
+                    {b.name === fileName && page > 0 ? `第 ${page} 页 · ` : (b.page > 0 ? `读到第 ${b.page} 页 · ` : '')}
+                    {new Date(b.at).toLocaleDateString()}
+                  </span>
+                  <button
+                    className="btn-icon pdf-shelf__del"
+                    aria-label={`从书架移除《${b.name}》`}
+                    title="从书架移除（笔记摘录不受影响）"
+                    onClick={(e) => { e.stopPropagation(); void deleteBook(b); }}
+                  >
+                    <IconClose />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <span className="spacer" />
         <label className="pdf-toggle" title="选中文字后自动粘贴到右栏草稿；默认关闭，选中后点「粘贴到右侧」">
           <input
@@ -434,7 +641,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
           双栏模式
         </label>
         <button className="btn-small" disabled={busy} onClick={() => fileRef.current?.click()}>
-          {busy ? '打开中…' : '选择 PDF / Word'}
+          {busy ? '导入中…' : '导入书籍'}
         </button>
         <input
           ref={fileRef} type="file" accept=".pdf,.docx" style={{ display: 'none' }}
@@ -445,7 +652,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
           onClick={async () => {
             try {
               const buf = await fetchSamplePdf();
-              await openDoc('sample-lecture.pdf', buf);
+              await openDoc('sample-lecture.pdf', buf, { persist: true });
             } catch (e) { toast(netErrorHint(e), 'err'); }
           }}
         >
@@ -455,8 +662,8 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
 
       <div className="pdf-ocr-tip">
         {scanned
-          ? '这个 PDF 几乎没有文字层（扫描件）：已自动用「几何选区」按视觉位置精确选字。选好后按 Enter 或点「粘贴到右侧」，原文会直接粘进右栏。'
-          : '划选文字后按 Enter（或 Alt+V）直接把原文粘进右栏草稿，攒多段后选目标笔记一次追加（不会每段单独成笔记）。默认「几何选区」按视觉位置选字，拖动不会整页闪烁/跳行；选字如需浏览器原生划选可关闭。'}
+          ? '扫描件 · 已开「几何选区」· 划选原文，Enter 粘进右栏'
+          : '划选原文 · Enter 粘进右栏草稿 · 多段累积，一次追加'}
       </div>
 
       <div className="panel__body pdf-split">
@@ -471,17 +678,15 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         >
           {docType === 'pdf' && doc && (
             <div className="pdf-viewer-host">
-              <Worker workerUrl={workerUrl}>
-                <Viewer
-                  fileUrl={doc.data}
-                  plugins={[defaultLayoutPluginInstance]}
-                  renderLoader={(percentages: number) => (
-                    <Loading label={`PDF 渲染中… ${Math.round(percentages)}%`} />
-                  )}
-                  onPageChange={(e) => { setPage(e.currentPage + 1); endGeometrySelection();
-                    clearHighlights(paneRef.current); setSelected(null); }}
-                />
-              </Worker>
+              {/* key：换书（或重开同一本）时强制重挂 viewer —— 它只在挂载时读 fileUrl，
+                  否则切书后画布会停在上本书、或干脆空白。序号保证「重开同一本」也会重建。 */}
+              <PdfViewer
+                key={`${doc.name}#${docSeq}`}
+                doc={doc}
+                plugin={defaultLayoutPluginInstance}
+                onPageChange={(n) => { setPage(n); endGeometrySelection();
+                  clearHighlights(paneRef.current); setSelected(null); }}
+              />
             </div>
           )}
           {docType === 'docx' && docBuf && (
@@ -489,18 +694,29 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
           )}
           {!docType && (
             <div className="pdf-empty">
-              <p>选择 PDF / Word 开始对照阅读</p>
-              <p className="muted">Word 会还原原版排版；PDF 渲染原版页面。划选重点即可粘贴到右侧</p>
-              <button className="btn-small" onClick={() => fileRef.current?.click()}><IconFile /> 选择 PDF / Word</button>
-              <button
-                className="btn-small"
-                onClick={async () => {
-                  try {
-                    const buf = await fetchSamplePdf();
-                    await openDoc('sample-lecture.pdf', buf);
-                  } catch (e) { toast(netErrorHint(e), 'err'); }
-                }}
-              >载入示例</button>
+              <div className="pdf-empty__badge">PDF 对照</div>
+              <div className="pdf-empty__title">左看原文，右记笔记</div>
+              <div className="pdf-empty__cta">
+                <button className="btn-primary" onClick={() => fileRef.current?.click()}>
+                  <IconFile /> 导入书籍
+                </button>
+                <button
+                  className="btn-small"
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      const buf = await fetchSamplePdf();
+                      await openDoc('sample-lecture.pdf', buf, { persist: true });
+                    } catch (e) { toast(netErrorHint(e), 'err'); }
+                  }}
+                >载入示例</button>
+              </div>
+              <div className="teach-steps pdf-empty__steps">
+                <div className="teach-step"><kbd>划选</kbd><span>原文粘进右栏</span></div>
+                <div className="teach-step"><kbd>Enter</kbd><span>快速粘贴</span></div>
+                <div className="teach-step"><kbd>书架</kbd><span>切换书籍</span></div>
+              </div>
+              <p className="muted pdf-empty__hint">导入的书籍自动入架 · 随时切换</p>
             </div>
           )}
           {selected && (
@@ -538,7 +754,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
               <div className="pdf-paste">
                 <textarea
                   className="quiz-paste" rows={2}
-                  placeholder="没有文字层？粘一段教材文字，生成原文摘录"
+                  placeholder="粘一段原文，生成摘录"
                   value={pasteText}
                   onChange={(e) => setPasteText(e.target.value)}
                 />
@@ -549,8 +765,8 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
               {savedMsg && <div className="pdf-saved">✓ {savedMsg}</div>}
               {!draft ? (
                 <div className="pdf-draft-empty">
-                  <p>在左侧划选一段重点，点「粘贴到右侧」直接粘进来</p>
-                  <p className="muted">多段摘录会在这里累积，选好目标笔记后一次追加</p>
+                  <p>左侧划选重点，粘到这里</p>
+                  <p className="muted">多段累积 · 选目标笔记一次追加</p>
                 </div>
               ) : (
                 <>
@@ -602,7 +818,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
                   <button className="btn-small" onClick={clearExcerpts}>清空</button>
                 </div>
               )}
-              {excerpts.length === 0 && <div className="pdf-draft-empty"><p>还没有摘录</p><p className="muted">划选生成的原文摘录会自动记入历史，可随时回填修改</p></div>}
+              {excerpts.length === 0 && <div className="pdf-draft-empty"><p>还没有摘录</p><p className="muted">划选原文自动记入 · 可回填</p></div>}
               {excerpts.map((x) => (
                 <div key={x.id} className="excerpt-item">
                   <div className="excerpt-main">

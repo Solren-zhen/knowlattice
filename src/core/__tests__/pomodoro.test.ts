@@ -1,5 +1,5 @@
 /**
- * 番茄钟（core/pomodoro.ts）：状态机、真实时间戳计时（不漂移）、记录与统计、持久化。
+ * 专注计时器（core/pomodoro.ts）：状态机、真实时间戳计时（不漂移）、记录与统计、持久化。
  * 计时部分全用显式传入的 now，不碰真实时钟，所以断言是确定的。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -15,7 +15,7 @@ const T0 = Date.parse('2026-09-21T10:00:00'); // 固定基准时间
 const MIN = 60_000;
 const cfg: PomodoroConfig = { ...DEFAULT_CONFIG };
 
-describe('番茄钟：配置', () => {
+describe('专注计时器：配置', () => {
   it('坏配置回落到默认值，数值被夹在合理区间', () => {
     expect(sanitizeConfig(null)).toEqual(DEFAULT_CONFIG);
     expect(sanitizeConfig({ focusMin: 0, shortMin: 999, longMin: -3, longEvery: 0 })).toEqual({
@@ -38,7 +38,7 @@ describe('番茄钟：配置', () => {
   });
 });
 
-describe('番茄钟：计时不漂移', () => {
+describe('专注计时器：计时不漂移', () => {
   it('运行中剩余时间随真实时间线性减少（不是每秒累加出来的）', () => {
     const s = start(defaultState(), T0);
     expect(remainingMs(s, cfg, T0)).toBe(25 * MIN);
@@ -71,7 +71,7 @@ describe('番茄钟：计时不漂移', () => {
   });
 });
 
-describe('番茄钟：阶段推进', () => {
+describe('专注计时器：阶段推进', () => {
   it('专注走完 → 短休息，并产出记录（分钟数用计划时长）', () => {
     const s = start({ ...defaultState('t-1'), }, T0);
     const r = tick(s, cfg, T0 + 25 * MIN, 'p-1');
@@ -120,7 +120,7 @@ describe('番茄钟：阶段推进', () => {
     expect(remainingMs(r.state, off, T0 + 999 * MIN)).toBe(5 * MIN); // 没跑就不会自己走完
   });
 
-  it('跳过专注不记番茄、也不推进节奏', () => {
+  it('跳过专注不记专注周期、也不推进节奏', () => {
     const s = skip(start(defaultState(), T0), cfg, T0 + MIN);
     expect(s.phase).toBe('short');
     expect(s.focusDone).toBe(0);
@@ -144,7 +144,7 @@ describe('番茄钟：阶段推进', () => {
   });
 });
 
-describe('番茄钟：持久化与记录', () => {
+describe('专注计时器：持久化与记录', () => {
   it('状态读写往返；坏数据回落到干净状态', () => {
     const s = start({ ...defaultState('t-9'), focusDone: 2 }, T0);
     saveState(s);

@@ -2,7 +2,7 @@
  * 工作台 · 专注页：计时环 + 开始/暂停/重置/跳过 + 关联待办 + 今日累计 + 时长设置。
  *
  * 计时本身在 core/pomodoro.ts（按真实时间戳算，不漂移），这里只负责画和转发意图。
- * 「关联待办」是工作台的关键一环：每完成一个番茄，那条待办 +1 番茄数——
+ * 「关联待办」是工作台的关键一环：每完成一轮专注，那条待办 +1 专注次数——
  * 投入是记出来的，不是估出来的。
  */
 import { formatClock, PHASE_LABELS, type PomoStats, type PomodoroConfig, type PomodoroState } from '../core/pomodoro';
@@ -54,7 +54,7 @@ export default function TodoFocus({
           <div className="wb-ring__center">
             <div className="wb-ring__phase">{PHASE_LABELS[state.phase]}</div>
             <div className="wb-ring__time">{formatClock(remaining)}</div>
-            <div className="wb-ring__round">第 {round} / {cfg.longEvery} 个番茄</div>
+            <div className="wb-ring__round">第 {round} / {cfg.longEvery} 个专注周期</div>
           </div>
         </div>
 
@@ -86,24 +86,24 @@ export default function TodoFocus({
             <option value="">不关联</option>
             {open.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.text}{t.pomos ? `（已有 ${t.pomos} 个番茄）` : ''}
+                {t.text}{t.pomos ? `（已有 ${t.pomos} 个专注周期）` : ''}
               </option>
             ))}
           </select>
           {linked ? (
             <p className="muted wb-tip">
-              已关联「{linked.text}」，当前 {linked.pomos ?? 0} 个番茄。完成一个番茄自动 +1。
+              已关联「{linked.text}」，当前 {linked.pomos ?? 0} 个专注周期。完成一轮专注自动 +1。
             </p>
           ) : (
-            <p className="muted wb-tip">选一条待办再开始：每完成一个番茄，它 +1 番茄数——投入是记出来的，不是估出来的。</p>
+            <p className="muted wb-tip">选一条待办再开始：每完成一轮专注，它 +1 专注次数——投入是记出来的，不是估出来的。</p>
           )}
         </section>
 
         <section className="wb-card">
           <h3 className="wb-card__title">今日 / 累计</h3>
-          <div className="wb-kv"><span>今日番茄</span><b>{stats.todayCount}</b></div>
+          <div className="wb-kv"><span>今日专注周期</span><b>{stats.todayCount}</b></div>
           <div className="wb-kv"><span>今日专注</span><b>{stats.todayMinutes} 分钟</b></div>
-          <div className="wb-kv"><span>累计番茄</span><b>{stats.totalCount}</b></div>
+          <div className="wb-kv"><span>累计专注周期</span><b>{stats.totalCount}</b></div>
           <div className="wb-kv"><span>累计专注</span><b>{stats.totalMinutes} 分钟</b></div>
         </section>
 
@@ -131,7 +131,7 @@ export default function TodoFocus({
             每
             <input type="number" min={1} max={12} aria-label="长休息间隔" value={cfg.longEvery}
               onChange={(e) => onChangeConfig({ longEvery: Number(e.target.value) })} />
-            个番茄后长休息
+            个专注周期后长休息
           </label>
           <label className="wb-field wb-field--check">
             <input type="checkbox" aria-label="自动开始下一阶段" checked={cfg.autoStart}

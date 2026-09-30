@@ -34,6 +34,8 @@ export default function AnatomyNoteCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const [zhOrgans, setZhOrgans] = useState<Map<string, string> | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  /** 上一次写入的位置：内容反复变化时避免用相同 left/top 反复 setState 触发无谓重渲染 */
+  const lastPosRef = useRef<{ left: number; top: number } | null>(null);
 
   // 中文词典与浏览器/3D 视图共用同一份缓存，这里不会产生额外请求
   useEffect(() => {
@@ -56,12 +58,25 @@ export default function AnatomyNoteCard({
     const size: CardSize = el.offsetWidth && el.offsetHeight
       ? { width: el.offsetWidth, height: el.offsetHeight }
       : CARD_ESTIMATE;
-    setPos(placeCard(anchor, { left: s.left, top: s.top, width: s.width, height: s.height }, size));
+    const next = placeCard(anchor, { left: s.left, top: s.top, width: s.width, height: s.height }, size);
+    const prev = lastPosRef.current;
+    if (prev && prev.left === next.left && prev.top === next.top) return;
+    lastPosRef.current = next;
+    setPos(next);
   }, [anchor, stage]);
 
   useLayoutEffect(() => {
     reposition();
   }, [reposition, content]);
+
+  /**
+   * 正文渲染完成后重算落位。
+   * 卡片正文是异步渲染的（markdown-it 懒加载）：首帧只有头部骨架那么高，
+   * 渲染完会长到 max-height。仅靠下面的 ResizeObserver 观察卡片自身不可靠——
+   * 外框尺寸被 max-height 约束、内部内容撑开时它不一定触发，卡片就会停在
+   * 首帧算出的位置，底部连同正文一起溢出到舞台外。
+   */
+  const handleRendered = useCallback(() => { reposition(); }, [reposition]);
 
   // 舞台尺寸变化（窗口缩放 / 侧栏开合）与卡片自身高度变化（笔记正文异步渲染完）都要重新夹紧。
   // 只改 left/top、不改尺寸，因此不会与 ResizeObserver 形成回环。
@@ -103,6 +118,7 @@ export default function AnatomyNoteCard({
             resolve={resolve}
             readFile={readFile}
             onOpenLink={onOpenLink}
+            onRendered={handleRendered}
           />
         ) : (
           <div className="anatomy-note-card__empty">

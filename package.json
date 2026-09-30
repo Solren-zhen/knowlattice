@@ -6,12 +6,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "node scripts/clean-dist.mjs",
+    "prebuild": "node scripts/clean-dist.mjs && node scripts/copy-pdf-worker.mjs",
     "build": "tsc -b && vite build && node scripts/assert-public-dist.mjs",
     "lint": "oxlint",
     "test": "vitest run",
     "preview": "vite preview",
-    "pack": "node scripts/pack.mjs"
+    "pack": "node scripts/pack.mjs",
+    "predev": "node scripts/copy-pdf-worker.mjs",
+    "tauri": "node scripts/tauri.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -36,7 +38,7 @@
     "markdown-it": "^15.0.0",
     "mind-elixir": "^6.0.0-next.4",
     "minisearch": "^7.2.0",
-    "pdfjs-dist": "^4.10.38",
+    "pdfjs-dist": "3.11.174",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "sql.js": "^1.14.2",
@@ -44,9 +46,12 @@
     "three": "^0.185.1",
     "ts-fsrs": "^5.4.1",
     "turndown": "^7.2.4",
-    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz",
+    "@tauri-apps/plugin-updater": "^2",
+    "@tauri-apps/plugin-process": "^2"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^24.13.3",
