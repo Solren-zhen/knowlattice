@@ -63,11 +63,10 @@ its own terms.
 | @firecrawl/anydoc-wasm (anydoc) | MIT | document to Markdown |
 | @niivue/niivue | BSD-2-Clause | medical image viewer (brain atlas) |
 | pdfjs-dist | Apache-2.0 | PDF rendering / text layer |
-| @react-pdf-viewer/core + default-layout | MIT | PDF viewer React shell |
+| @react-pdf-viewer/core + default-layout | Custom — see below | PDF viewer React shell |
 | mammoth | BSD-2-Clause | .docx to HTML |
-| docx-preview | MIT | .docx rendering |
+| docx-preview | Apache-2.0 | .docx rendering |
 | turndown | MIT | HTML to Markdown |
-| docx | MIT | .docx export |
 | three | MIT | 3D rendering |
 | force-graph | MIT | knowledge graph |
 | mind-elixir | MIT | mind map |
@@ -85,6 +84,24 @@ its own terms.
 | @vscode/markdown-it-katex | MIT | KaTeX plugin for markdown-it |
 
 Tauri (Apache-2.0 / MIT) is used for the optional desktop shell.
+
+## @react-pdf-viewer — custom licence, NOT open source
+
+`@react-pdf-viewer/core` and `@react-pdf-viewer/default-layout` are not under a
+standard open-source licence. The LICENSE.md shipped inside the package states:
+"You have to purchase a Commercial License at the official website"
+(https://react-pdf-viewer.dev/license) — free for personal / non-commercial use,
+paid for commercial use.
+
+KnowLattice relies on the free non-commercial terms: the project is GPL-3.0,
+distributed at no charge, and educational in purpose. Consequences:
+
+- If KnowLattice is ever sold, bundled into a paid product, or deployed
+  commercially, remove these two packages or purchase a licence first.
+- The upstream repository was archived in August 2024 and is unmaintained.
+  `pdfjs-dist` is already a direct dependency of this project, so the migration
+  path (a plain pdfjs viewer, or an MIT-licensed wrapper such as EmbedPDF) is
+  kept deliberately cheap.
 
 ## Icon geometry
 

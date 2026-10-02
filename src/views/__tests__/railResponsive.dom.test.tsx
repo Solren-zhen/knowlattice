@@ -24,6 +24,7 @@ function railProps(): ComponentProps<typeof Rail> {
     onTag: vi.fn(),
     onDash: vi.fn(),
     onAi: vi.fn(),
+    onAgent: vi.fn(),
     onDraft: vi.fn(),
     onPdf: vi.fn(),
     onConvert: vi.fn(),

@@ -43,6 +43,7 @@ const ConvertView = lazy(() => import('./ConvertView'));
 // 历史版本面板：快照读取/恢复
 const HistoryPanel = lazy(() => import('./HistoryPanel'));
 import AiPanel from './AiPanel';
+import AiAgentPanel from './AiAgentPanel';
 import DraftGen from './DraftGen';
 import TodoView from './TodoView';
 import TagBrowser from './TagBrowser';
@@ -87,6 +88,7 @@ export default function Workspace() {
   const [tagOpen, setTagOpen] = useState(false);
   const [dashOpen, setDashOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [draftOpen, setDraftOpen] = useState(false);
   const [draftText, setDraftText] = useState('');
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -579,6 +581,7 @@ export default function Workspace() {
         onTag={() => setTagOpen(true)}
         onDash={() => setDashOpen(true)}
         onAi={() => setAiOpen((v) => !v)}
+        onAgent={() => setAgentOpen((v) => !v)}
         onDraft={openDraft}
         onPdf={() => setPdfOpen(true)}
         onConvert={() => setConvertOpen(true)}
@@ -884,6 +887,16 @@ export default function Workspace() {
         />
       )}
       {aiOpen && <AiPanel onClose={() => setAiOpen(false)} />}
+      {agentOpen && (
+        <AiAgentPanel
+          onClose={() => setAgentOpen(false)}
+          docs={vault.docs}
+          onSave={(path, content) => vault.save(path, content)}
+          onOpenPath={(p) => openNote(p)}
+          currentPath={vault.currentPath}
+          resolveLink={vault.resolveLink}
+        />
+      )}
       {noticeOpen && <SafetyNotice onClose={() => setNoticeOpen(false)} />}
       {draftOpen && (
         <DraftGen

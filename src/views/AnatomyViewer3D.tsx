@@ -48,20 +48,24 @@ function categoryColor(organ: ManifestOrgan): number | null {
   if (organ.system === 'lymphatic' || /lymph|node/i.test(n)) return 0x5aa86c;
   if (organ.system === 'nervous' || /nerv/i.test(n)) return 0xe3b83e;
   if (organ.system === 'cardiovascular') {
-    if (/arter/i.test(n)) return 0xc0392b;
-    if (/vein|venous/i.test(n)) return 0x3a6ea8;
+    if (/arter/i.test(n)) return 0xd24634;
+    if (/vein|venous/i.test(n)) return 0x4e86c4;
   }
   return null;
 }
 
-/** 各系统基础色：仿真实人体解剖色（高饱和） */
+/**
+ * 各系统基础色：仿真实人体解剖色（高饱和）。
+ * 视口是深色影棚背景（.viewer3d-canvas），深色器官（肝肾脾等）统一提亮一档，
+ * 否则在深底上会闷成一片；骨骼等浅色结构在深底上轮廓反而最清晰。
+ */
 const SYSTEM_COLORS: Record<string, number> = {
   skeletal: 0xEDE3CF,
-  muscular: 0xDC2626,
+  muscular: 0xE4372B,
   articular: 0xE3E8EA,
   digestive: 0xD9975C,
   respiratory: 0xCE8F8F,
-  renal: 0xA34A42,
+  renal: 0xBE5B4F,
   reproductive: 0xC9718A,
   endocrine: 0xA9B45E,
   integumentary: 0xDE9F63,
@@ -72,10 +76,10 @@ const SYSTEM_COLORS: Record<string, number> = {
 const ORGAN_OVERRIDES: Array<[RegExp, number]> = [
   [/heart|cardiac/i, 0xD41F1F],
   [/lung|pulmon/i, 0xC98383],
-  [/liver|hepat/i, 0x8E3527],
+  [/liver|hepat/i, 0xB04A32],
   [/stomach|gastr/i, 0xD9825C],
-  [/kidney|renal/i, 0x96453C],
-  [/spleen|splenic/i, 0x6E3050],
+  [/kidney|renal/i, 0xB65E50],
+  [/spleen|splenic/i, 0x9C4670],
   [/brain|cerebr|enceph/i, 0xC79A9A],
   [/spinal/i, 0xD8CBB8],
   [/intestin|colon|cecum|rectum|jejunum|ileum|duodenum/i, 0xD98F70],

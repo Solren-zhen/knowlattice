@@ -314,6 +314,9 @@ const srcRoot = join(root, 'source');
 mkdirSync(srcRoot, { recursive: true });
 copyTree(join(repo, 'src'), join(srcRoot, 'src'));
 copyTree(join(repo, 'scripts'), join(srcRoot, 'scripts'));
+// package.json 里 xlsx 声明为 file:vendor/xlsx-*.tgz。源码缺了这个目录，收件人
+// 在 source/ 里 npm install 会直接失败——GPL-3.0 第 6 节的「对应源码」必须能编译。
+if (existsSync(join(repo, 'vendor'))) copyTree(join(repo, 'vendor'), join(srcRoot, 'vendor'));
 for (const f of ['package.json', 'package-lock.json', 'vite.config.ts', 'vitest.config.ts',
   'tsconfig.json', 'tsconfig.app.json', 'tsconfig.node.json', 'index.html', '.oxlintrc.json']) {
   const p = join(repo, f);
@@ -376,22 +379,33 @@ log(`压缩中（约 65 MB，请稍候）…`);
 
 const zipOk = () => existsSync(zipPath) && statSync(zipPath).size > 0;
 let ok = false;
-// 首选 Windows 自带的 bsdtar：写 zip 稳定，不受 Compress-Archive 的 BinaryReader 缺陷影响
+// 首选 bsdtar + --options zip:compression=deflate：真 zip、正斜杠条目、deflate 压缩（42 MB 级）。
+// 这条路上有三个坑，都踩过：
+//   · 必须用 System32 绝对路径：node 在 Windows 上按 PATH 把 'tar.exe' 解析到 Git 自带的
+//     GNU tar，后者根本写不了 zip——会产出改名为 .zip 的裸 tar（2026-10-02 的 73.5 MB 假包）；
+//   · 必须传相对路径：bsdtar 把 `-f C:\...` 里的 `C:` 当远程主机名（"Cannot connect to C:"）；
+//   · 「bsdtar 不压缩」是误判：当时拿随机数据做样本，deflate 对随机数据本来就无效。
+// Compress-Archive 仅作兜底：PS 5.1 写 zip 条目用反斜杠分隔（macOS/Linux 解压全碎），别依赖。
+const tarExe = process.platform === 'win32'
+  ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe')
+  : 'tar';
 try {
-  execFileSync('tar.exe', ['-a', '-c', '-f', zipPath, '-C', staging, 'KnowLattice-Portable'], { cwd: repo, stdio: 'inherit' });
+  execFileSync(tarExe, ['-a', '-c', '--options', 'zip:compression=deflate', '-f', relative(repo, zipPath), '-C', staging, 'KnowLattice-Portable'], { cwd: repo, stdio: 'inherit' });
   ok = zipOk();
 } catch {
-  log('tar 打包失败，改用 Compress-Archive…');
+  log('bsdtar 打包失败，改用 Compress-Archive…');
 }
 if (!ok) {
   try {
+    // -Path 传「目录本身」而不是 "目录\*"：后者会把 app/、source/ 等散在 zip 根层，
+    // 丢掉 KnowLattice-Portable/ 顶层目录（2026-10-02 之前的包一直是这个散装结构）。
     execFileSync(
       'powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `Compress-Archive -Path "${join(root, '*')}" -DestinationPath "${zipPath}" -Force`],
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `Compress-Archive -Path "${root}" -DestinationPath "${zipPath}" -Force`],
       { stdio: 'inherit' },
     );
+    ok = zipOk();
   } catch { /* 下面统一判定 */ }
-  ok = zipOk();
 }
 if (!ok) {
   console.error('[pack] 压缩失败，未生成 zip（staging 保留在 .pack-staging 以便排查）');
@@ -419,13 +433,21 @@ if (!ok) {
 // 2026-09-21 那次污染（包里同时有两套构建产物）任何日志都看不出来，只有对账能抓到。
 {
   const zipEntries = () => {
+    // 不用外部 tar：node 在 Windows 上把 'tar.exe' 解析到 Git 自带的 GNU tar（读不了 zip，
+    // 之前对账因此被静默跳过）。改用 .NET ZipFile 枚举，Windows 10+ 自带，无歧义。
     try {
-      return execFileSync('tar.exe', ['-tf', zipPath], { encoding: 'utf8' })
+      const out = execFileSync(
+        'powershell.exe',
+        ['-NoProfile', '-Command',
+          `Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::OpenRead('${zipPath.replace(/'/g, "''")}').Entries.FullName`],
+        { encoding: 'utf8' },
+      );
+      return out
         .split(/\r?\n/)
         .map((s) => s.trim())
         .filter(Boolean)
-        .filter((s) => !s.endsWith('/'))
-        .map((s) => s.replace(/\\/g, '/'));
+        .map((s) => s.replace(/\\/g, '/'))
+        .filter((s) => !s.endsWith('/'));
     } catch {
       return null; // 列不出来就不做这项检查（别把打包卡死在一项附加校验上）
     }

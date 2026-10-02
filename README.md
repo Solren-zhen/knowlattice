@@ -80,4 +80,6 @@ Web 版数据保存在当前浏览器的本地存储中。清理浏览器数据�
 
 项目源代码以 [GNU General Public License v3.0](LICENSE) 发布。
 
+接受代码贡献前请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)（贡献条款与提交前自检）。
+
 仓库中的解剖模型、脑图谱和第三方依赖各自遵循原始许可，完整信息见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 以及各资源目录中的 NOTICE 文件。
