@@ -64,3 +64,5 @@ src-tauri/gen/
 # 更新签名私钥（泄露=任何人可推假更新，务必别提交）
 src-tauri/private.key
 src-tauri/*.key*
+# 更新器元数据（发版产物，由 scripts/pack/make-latest-json.mjs 本地生成）
+/latest.json

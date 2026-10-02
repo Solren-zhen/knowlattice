@@ -9,7 +9,7 @@ import {
 } from '../core/theme';
 import {
   IconLogo, IconTree, IconPathway, IconChevron, IconSearch, IconHistory, IconBody, IconBrain, IconGraph, IconCards,
-  IconTarget, IconQuiz, IconTodo, IconTag, IconChart, IconAi, IconWand, IconBook,
+  IconTarget, IconQuiz, IconTodo, IconTag, IconChart, IconAi, IconAgent, IconWand, IconBook,
   IconConvert, IconSun, IconMoon, IconInfo,
 } from './icons';
 
@@ -31,6 +31,7 @@ interface Props {
   onTag: () => void;
   onDash: () => void;
   onAi: () => void;
+  onAgent: () => void;
   onDraft: () => void;
   onPdf: () => void;
   onConvert: () => void;
@@ -183,6 +184,10 @@ export default function Rail(p: Props) {
       <button className={`rail-btn${p.activeItem === 'ai' ? ' on' : ''}`} aria-current={p.activeItem === 'ai' ? 'page' : undefined} data-tip="AI 助手：内嵌网页问答" aria-label="AI 助手" onClick={p.onAi}>
         <IconAi />
         <span className="rail-label">AI 助手</span>
+      </button>
+      <button className={`rail-btn${p.activeItem === 'agent' ? ' on' : ''}`} aria-current={p.activeItem === 'agent' ? 'page' : undefined} data-tip="AI 笔记助手：对话式检索与修改笔记（先预览后写入）" aria-label="AI 笔记助手" onClick={p.onAgent}>
+        <IconAgent />
+        <span className="rail-label">AI 笔记助手</span>
       </button>
       <button className={`rail-btn${p.activeItem === 'draft' ? ' on' : ''}`} aria-current={p.activeItem === 'draft' ? 'page' : undefined} data-tip="智能草稿：讲义 / PDF 一键成笔记" aria-label="智能草稿" onClick={p.onDraft}>
         <IconWand />

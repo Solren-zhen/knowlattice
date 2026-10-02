@@ -16,6 +16,7 @@ KnowLattice 源代码(随离线包一同分发)
 二、目录说明
 src/                 应用本体(React + TypeScript)
 scripts/             构建与打包脚本(含离线包打包器 scripts/pack.mjs)
+vendor/              本地依赖包(xlsx 以 file:vendor/ 方式引用,npm install 必需)
 package.json         依赖与命令
 vite.config.ts       构建配置
 tsconfig*.json       TypeScript 配置

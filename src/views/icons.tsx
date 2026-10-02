@@ -193,6 +193,14 @@ export const IconAi = ({ size = 15 }: P) => (
   </svg>
 );
 
+/** AI 笔记助手：对话气泡 + 笔尖（能动笔的助手，与网页问答的星光区分） */
+export const IconAgent = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <path d="M12 4.4c4.7 0 8 2.9 8 6.8s-3.3 6.8-8 6.8c-.9 0-1.7-.1-2.5-.3L5.2 19.4l.9-3.2C4.7 15 4 13 4 11.2c0-3.9 3.3-6.8 8-6.8z" {...wash} fillOpacity={0.12} />
+    <path d="M9.6 13.2l4.7-4.7 1.9 1.9-4.7 4.7-2.5.6z" strokeWidth={1.6} />
+  </svg>
+);
+
 /** 智能草稿：魔棒 + 一颗星（原先三处碎火星，20px 下只是噪点） */
 export const IconWand = ({ size = 15 }: P) => (
   <svg {...base(size)}>
