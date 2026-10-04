@@ -18,10 +18,28 @@ export type { MedBookHit, MedBookInfo, MedBookMeta };
 let fullTextCache: Array<{ name: string; text: string }> | null = null;
 /** 正在进行的全文读取：并发检索共享同一次 IndexedDB 读，避免重复加载几十 MB */
 let fullTextLoading: Promise<Array<{ name: string; text: string }>> | null = null;
+/** 缓存代际：失效时自增。在途读库回来时若代际已变，说明期间导入/删除了教材，
+ *  那份 texts 是旧的——既不能写回缓存，也不能拿去检索。 */
+let cacheGen = 0;
 
 export function invalidateMedBooksCache(): void {
+  cacheGen++;
   fullTextCache = null;
   fullTextLoading = null;
+}
+
+/** 读回全文：命中缓存直接返回；否则共享一次读库。失效发生在等待期间时返回 null，由调用方重读。 */
+async function loadFullText(): Promise<Array<{ name: string; text: string }> | null> {
+  if (fullTextCache !== null) return fullTextCache;
+  const gen = cacheGen;
+  const pending = (fullTextLoading ??= getMedBookTexts().then((texts) => {
+    if (gen === cacheGen) fullTextCache = texts;
+    return texts;
+  }));
+  const texts = await pending;
+  if (fullTextLoading === pending) fullTextLoading = null;
+  // 期间被失效（导入/删除了教材）：这次读到的是旧内容，丢弃让调用方重读
+  return gen === cacheGen ? texts : null;
 }
 
 /** 教材清单（不含正文） */
@@ -34,17 +52,14 @@ export async function medBookRecords(): Promise<MedBookMeta[]> {
   return listMedBookRecords();
 }
 
-/** 检索教材：先读回全文（有缓存；并发请求共享同一次读库），再走纯检索 */
+/** 检索教材：先读回全文（有缓存；并发请求共享同一次读库），再走纯检索。
+ *  等待期间缓存被失效时重读一次，避免「刚导入的教材查不到 / 已删的教材还能搜到」。 */
 export async function medBooksSearch(query: string, limit = 6, book?: string): Promise<MedBookHit[]> {
-  if (fullTextCache === null) {
-    fullTextLoading ??= getMedBookTexts().then((texts) => {
-      fullTextCache = texts;
-      fullTextLoading = null;
-      return texts;
-    });
-    await fullTextLoading;
+  for (let attempt = 0; ; attempt++) {
+    const texts = await loadFullText();
+    if (texts) return searchMedBooks(texts, query, limit, book);
+    if (attempt >= 2) throw new Error('教材库正在更新，请稍后重试。');
   }
-  return searchMedBooks(fullTextCache!, query, limit, book);
 }
 
 /** 删除一本教材并使缓存失效 */
