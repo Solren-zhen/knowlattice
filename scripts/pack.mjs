@@ -325,6 +325,28 @@ for (const f of ['package.json', 'package-lock.json', 'vite.config.ts', 'vitest.
 copyTree(join(repo, 'scripts', 'pack', 'source-README.txt'), join(srcRoot, 'README.txt'));
 log(`已随包附上源代码:${srcRoot}`);
 
+// ---------- 3c. 公开守卫（2026-10-04 审计 S1）----------
+// 构建产物要过 assert-public-dist，但 pack 真正分发的是暂存树：--data 塞进来的
+// notes-and-qbanks.json、staging 里的源码副本、README……这些 dist 守卫都看不到。
+// 压缩前直接对暂存树整体跑一遍同一套规则（含 --private-data 的授权路径也要过：
+// 授权只豁免「题库可随包」这一件事，密钥与本机路径没有豁免）。命中即中止打包。
+{
+  const guard = join(repo, 'scripts', 'assert-public-dist.mjs');
+  log('公开守卫：对暂存树执行 assert-public-dist…');
+  try {
+    // PACK_STAGING=1：豁免 data/notes-and-qbanks.json 的文件名规则（离线包自带该文件），
+    // 内容规则照常——放行的是「文件名」，绝不是「题库/备份内容进公开 dist」。
+    execFileSync(process.execPath, [guard, staging], {
+      stdio: 'inherit',
+      env: { ...process.env, PACK_STAGING: '1' },
+    });
+  } catch {
+    console.error('[pack] 打包中止：暂存树未通过公开守卫（见上方 public-guard 输出）。');
+    console.error('[pack] 随包数据或源码副本疑似包含私有题库/备份/密钥/本机路径，处理后再试。');
+    process.exit(1);
+  }
+}
+
 // ---------- 4. 压缩 ----------
 /**
  * 只改 zip 中央目录里某条记录的 Unix 权限位，不动压缩数据、不动 CRC，

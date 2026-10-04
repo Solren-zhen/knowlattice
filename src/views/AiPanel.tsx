@@ -36,11 +36,15 @@ export default function AiPanel({ onClose }: Props) {
   const [custom, setCustom] = useState('');
   // 内嵌页首屏是白屏：用统一载入语汇补上「正在加载」的反馈，换站点时重置
   const [frameLoading, setFrameLoading] = useState(true);
+  // 延迟挂 iframe：只有用户真正「打开」过某站点才挂载（2026-10-04 审计 M4）。
+  // 旧实现面板一打开就把 PRESETS[0] 挂进 iframe，等于每次开面板都主动连一次第三方。
+  const [frameArmed, setFrameArmed] = useState(false);
 
   // Esc 快捷关闭。走全局 Esc 栈（只关最上面那一层）；焦点在输入框里时先退出输入框
   useEsc(escThenClose(onClose));
 
   const pick = (url: string) => {
+    setFrameArmed(true); // 用户主动打开过才挂 iframe
     if (url !== src) setFrameLoading(true); // 只有真的换站点才重新进入载入态
     setSrc(url);
     localStorage.setItem(KEY, url);
@@ -89,7 +93,12 @@ export default function AiPanel({ onClose }: Props) {
         </button>
       </div>
       <p className="ai-hint muted">只允许 HTTPS。内嵌页面中的内容会直接发送给所选第三方平台，请勿输入姓名、病历、未公开资料或受版权限制的题库原文。</p>
-      {canEmbed ? (
+      {!frameArmed ? (
+        <div className="ai-frame-blocked">
+          <strong>尚未打开任何 AI 站点</strong>
+          <span>选择上方预设或粘贴地址后再连接第三方；打开前不会发起任何网络请求。</span>
+        </div>
+      ) : canEmbed ? (
         <div className="ai-frame-wrap">
           {frameLoading && <Loading label="正在载入内嵌页面…" />}
           <iframe
