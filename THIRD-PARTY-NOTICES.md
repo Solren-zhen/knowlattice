@@ -72,6 +72,7 @@ its own terms.
 | mind-elixir | MIT | mind map |
 | minisearch | MIT | full-text search |
 | ts-fsrs | MIT | spaced-repetition scheduler |
+| @earendil-works/pi-agent-core + pi-ai | MIT | AI assistant engine (agent loop, provider transport) |
 | sql.js | MIT | SQLite in WebAssembly |
 | xlsx (SheetJS) | Apache-2.0 | spreadsheet import |
 | jszip | MIT | zip export |
