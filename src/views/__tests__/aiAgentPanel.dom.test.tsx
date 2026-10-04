@@ -7,6 +7,20 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import AiAgentPanel from '../AiAgentPanel';
 import type { WireMessage } from '../../core/aiAgent';
 
+/** 面板在 pi 引擎包加载失败时回退内置引擎。默认走真实 pi 路径，
+ *  需要覆盖「内置引擎」时才把开关打开（两者对半截回答的处理不同）。 */
+const piSwitch = vi.hoisted(() => ({ fail: false }));
+vi.mock('../../core/piAgent', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../core/piAgent')>();
+  return {
+    ...real,
+    runPiAgent: async (opts: Parameters<typeof real.runPiAgent>[0]) => {
+      if (piSwitch.fail) throw new real.PiUnavailableError(new Error('test: pi 包加载失败'));
+      return real.runPiAgent(opts);
+    },
+  };
+});
+
 const SETTINGS_KEY = 'knowlattice-ai-agent-settings';
 const SESSIONS_KEY = 'knowlattice-ai-agent-sessions';
 
@@ -86,6 +100,7 @@ async function sendMessage(text: string) {
 beforeEach(() => {
   localStorage.clear();
   seedSettings();
+  piSwitch.fail = false;
 });
 
 afterEach(() => {
@@ -558,6 +573,126 @@ describe('Claudian 式交互', () => {
     const second = bodies[1];
     expect(second.messages.map((m) => [m.role, m.content])).toContainEqual(['user', '第一条']);
     expect(second.messages.map((m) => [m.role, m.content])).toContainEqual(['assistant', '第一条完成。']);
+    void fetchMock;
+  });
+
+  it('点停止：排队消息退回输入框，本轮结束后不再自动补发', async () => {
+    let resolveFirst!: (r: Response) => void;
+    const first = new Promise<Response>((res) => { resolveFirst = res; });
+    const fetchMock = stubFetch([async () => first]);
+    renderPanel();
+
+    await sendMessage('第一条');
+    await sendMessage('第二条');
+    expect(await screen.findByText('第二条', { selector: '.agent-queued-text' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '停止' }));
+
+    // 队列清空，且消息没有丢：退回输入框等用户自己决定
+    expect(document.querySelector('.agent-queued')).toBeNull();
+    expect((screen.getByLabelText('对 AI 笔记助手说点什么') as HTMLTextAreaElement).value).toBe('第二条');
+
+    resolveFirst(sseResponse(finalChunks('第一条完成。')));
+    await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeTruthy());
+    await new Promise((r) => setTimeout(r, 20));
+    // 停止就是不要继续跑：不会在下一轮静默补发第二条
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    void fetchMock;
+  });
+});
+
+describe('流式输出与视口', () => {
+  /** 可控 SSE 流：测试自己决定何时吐 delta、何时断 */
+  function heldStream() {
+    let ctrl!: ReadableStreamDefaultController<Uint8Array>;
+    let markReady!: () => void;
+    const ready = new Promise<void>((res) => { markReady = res; });
+    const make = async (_url: string, init?: RequestInit) => {
+      const signal = init?.signal;
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          ctrl = c;
+          markReady();
+          signal?.addEventListener('abort', () => {
+            try { c.error(new DOMException('Aborted', 'AbortError')); } catch { /* 已关闭 */ }
+          });
+        },
+      });
+      return new Response(stream, { status: 200 });
+    };
+    return {
+      make,
+      ready,
+      push: (text: string) => ctrl.enqueue(new TextEncoder().encode(dataLine({ choices: [{ delta: { content: text } }] }))),
+      fail: (e: unknown) => ctrl.error(e),
+    };
+  }
+
+  it('用户上翻回看时，流式输出不会把视口拽回底部；贴回底部后恢复跟随', async () => {
+    const held = heldStream();
+    const fetchMock = stubFetch([held.make]);
+    const { view } = renderPanel();
+    await sendMessage('讲讲心脏');
+    await held.ready;
+
+    const log = view.container.querySelector('.agent-log') as HTMLDivElement;
+    Object.defineProperty(log, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(log, 'clientHeight', { value: 100, configurable: true });
+
+    // 上翻到顶部回看：不跟随
+    log.scrollTop = 0;
+    fireEvent.scroll(log);
+    held.push('第一段');
+    await screen.findByText(/第一段/);
+    expect(log.scrollTop).toBe(0);
+
+    // 贴回底部：恢复跟随
+    log.scrollTop = 900;
+    fireEvent.scroll(log);
+    held.push('第二段');
+    await waitFor(() => expect(log.scrollTop).toBe(1000));
+
+    held.fail(new DOMException('Aborted', 'AbortError'));
+    void fetchMock;
+  });
+
+  it('中途停止：已流出的正文不丢，落成一条标注未写完的消息', async () => {
+    // 内置引擎（pi 包不可用时的回退）在中断时不会自己把半截回答落成消息，靠面板兜住
+    piSwitch.fail = true;
+    const held = heldStream();
+    const fetchMock = stubFetch([held.make]);
+    renderPanel();
+    await sendMessage('讲讲心脏');
+    await held.ready;
+
+    held.push('心脏是肌性器官');
+    await screen.findByText(/心脏是肌性器官/);
+    fireEvent.click(screen.getByRole('button', { name: '停止' }));
+
+    expect(await screen.findByText('（已停止，以上为未写完的回答）')).toBeTruthy();
+    // 正文走 Preview（markdown-it 懒加载），渲染完成才算保住
+    await waitFor(() => expect(screen.getAllByText(/心脏是肌性器官/).length).toBeGreaterThan(0));
+    void fetchMock;
+  });
+});
+
+describe('同一轮多处写入', () => {
+  it('自主模式下同一轮连续两处 patch：第二处基于第一处写入后的正文，不会把第一处覆盖掉', async () => {
+    localStorage.setItem('knowlattice-ai-agent-prefs', JSON.stringify({ readonly: false, autoApply: false, autonomous: true }));
+    const fetchMock = stubFetch([
+      async () => sseResponse(patchCallChunks('p1', '心肌收缩泵血。', '心肌收缩泵血，维持循环。')),
+      async () => sseResponse(patchCallChunks('p2', '瓣膜防止倒流。', '瓣膜防止血液倒流。')),
+      async () => sseResponse(finalChunks('两处都改好了。')),
+    ]);
+    const saved: Array<[string, string]> = [];
+    const docs = new Map([['解剖/心脏.md', '# 心脏\n心肌收缩泵血。\n瓣膜防止倒流。\n']]);
+    renderPanel({ docs, onSave: async (p, c) => { saved.push([p, c]); } });
+
+    await sendMessage('这两句都补一下');
+    await waitFor(() => expect(saved).toHaveLength(2));
+    // 第二处必须建立在第一处已落盘的正文上（docsRef 同步推进），否则第一处被静默覆盖
+    expect(saved[0][1]).toBe('# 心脏\n心肌收缩泵血，维持循环。\n瓣膜防止倒流。\n');
+    expect(saved[1][1]).toBe('# 心脏\n心肌收缩泵血，维持循环。\n瓣膜防止血液倒流。\n');
     void fetchMock;
   });
 });
