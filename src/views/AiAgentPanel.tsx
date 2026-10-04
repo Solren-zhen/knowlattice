@@ -10,7 +10,7 @@
  * - 模型走 OpenAI 兼容协议，地址 / Key / 模型名由用户配置（小米 MiMo / DeepSeek /
  *   智谱 / Kimi / OpenRouter / Ollama 均可），配置与会话只存本机 localStorage
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   agentNetHint, buildHistoryMessages, buildNoteSystemPrompt, detectMention, expandCommand, extractMentionedNotes, formatNoteList,
   isAbortError, listCommands, MEDBOOK_TOOLS, NOTE_AGENT_TOOLS, runAgent, searchNotes, truncateForModel,
@@ -21,7 +21,7 @@ import {
   type MedBookHit, type MedBookMeta,
 } from '../core/medBooks';
 import { PiUnavailableError, runPiAgent } from '../core/piAgent';
-import { collapseDiff, diffLines, type CollapsedRow } from '../core/aiDiff';
+import { collapseDiff, diffLines } from '../core/aiDiff';
 import { LEARNING_TOOLS, quizProgressReport, reviewDueReport, studySummaryReport, weakChaptersReport } from '../core/aiLearning';
 import { loadBanks } from '../core/qbank';
 import { initializeStats } from '../core/qbankStats';
@@ -100,28 +100,50 @@ function useDeferredMarkdown(text: string): string {
   return html;
 }
 
-/** 引用核验徽标：把回答里 “…”〔…〕 形式的引用逐条与库内原文比对，展示四档结论 */
+/** 引用核验徽标：把回答里 “…”〔…〕 形式的引用逐条与库内原文比对，展示四档结论。
+ *  没给出原文的标记也照实列出来——否则用户会以为所有引用都核验过了。 */
 function CitationCheck({ text, docs }: { text: string; docs: Map<string, string> }) {
-  const results = useMemo(
-    () => verifyCitations(text, docs).filter((c) => c.quote),
-    [text, docs]
-  );
+  const results = useMemo(() => verifyCitations(text, docs), [text, docs]);
   if (!results.length) return null;
   return (
     <div className="agent-cites">
-      {results.map((c, i) => (
+      {results.map((c, i) => (c.quote ? (
         <span
           key={i}
-          className={`agent-cite agent-cite-${c.status}`}
-          title={`${CITE_LABEL[c.status]}${c.sourcePath ? `：${c.sourcePath}` : ''}\n“${c.quote}”`}
+          className={`agent-cite agent-cite-${c.status}${c.ambiguous ? ' agent-cite-multi' : ''}`}
+          title={`${CITE_LABEL[c.status]}${c.sourcePath ? `：${c.sourcePath}` : ''}\n“${c.quote}”`
+            + (c.ambiguous ? `\n库内 ${c.hits} 篇笔记都含此句，出处不唯一` : '')}
         >
           {CITE_MARK[c.status]} {c.quote.length > 18 ? `${c.quote.slice(0, 18)}…` : c.quote}
           {c.page ? ` P${c.page}` : ''}
+          {c.ambiguous ? ` · ${c.hits} 处` : ''}
         </span>
-      ))}
+      ) : (
+        <span key={i} className="agent-cite agent-cite-nocite" title={`${c.raw}\n没有给出原文，无法逐字核验`}>
+          未给出原文
+        </span>
+      )))}
     </div>
   );
 }
+
+/** 提案 diff：只在 old/next 变化时重算。
+ *  流式输出每个 token 都会让整个列表重渲，inline 计算会把每张待确认卡片的 diff 重跑一遍。 */
+const ProposalDiff = memo(function ProposalDiff({ old, next }: { old: string; next: string }) {
+  const rows = useMemo(() => collapseDiff(diffLines(old, next), 2), [old, next]);
+  return (
+    <pre className="agent-diff">
+      {rows.map((row, idx) => (row.type === 'gap'
+        ? <div key={idx} className="agent-diff-gap">⋯ 还有 {row.count} 行未变 ⋯</div>
+        : (
+          <div key={idx} className={`agent-diff-${row.type}`}>
+            {row.type === 'add' ? '+ ' : row.type === 'del' ? '− ' : '  '}{row.text}
+          </div>
+        )
+      ))}
+    </pre>
+  );
+});
 
 type ChatItem =
   | {
@@ -161,6 +183,8 @@ interface AgentSession {
 
 const ZERO_USAGE: SessionUsage = { promptTokens: 0, completionTokens: 0, estimated: false };
 const DEFAULT_PREFS: AgentPrefs = { readonly: false, autoApply: false, autonomous: false };
+/** 停顿看门狗阈值：这么久没有任何流事件就认为连接卡死（模型思考会走 thinking 增量） */
+const STALL_IDLE_MS = 120_000;
 
 /** 全部工具＝笔记工具＋学习状态工具；只读模式只留检索与学习状态（写入类都以 propose_ 开头） */
 const ALL_AGENT_TOOLS = [...NOTE_AGENT_TOOLS, ...MEDBOOK_TOOLS, ...LEARNING_TOOLS];
@@ -378,6 +402,8 @@ export default function AiAgentPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   /** 视口是否贴着底部（用户上翻回看时为 false，此时不自动跟随） */
   const pinnedRef = useRef(true);
+  /** 本轮最后一次「有事件」的时刻（增量/思考/工具开始）：停顿看门狗据此判断连接卡死 */
+  const lastEventRef = useRef(0);
   const caretRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -468,6 +494,7 @@ export default function AiAgentPanel({
 
   /** 工具执行器：只读工具直接返回结果；写入工具先出 diff 卡片等确认 */
   const executeTool = async (name: string, argsJson: string, signal: AbortSignal): Promise<string> => {
+    lastEventRef.current = Date.now();
     let args: Record<string, unknown>;
     try {
       args = JSON.parse(argsJson) as Record<string, unknown>;
@@ -688,6 +715,9 @@ export default function AiAgentPanel({
   };
 
   const deleteSession = () => {
+    // 会话一旦删掉就找不回来（对话记录不随笔记进历史版本），有内容时先问一句
+    if (active.items.length
+      && !window.confirm(`删除会话「${active.title}」？这段对话记录会一起删除，无法恢复。`)) return;
     const rest = sessions.filter((s) => s.id !== activeId);
     if (!rest.length) {
       const f = freshSession();
@@ -731,6 +761,13 @@ export default function AiAgentPanel({
     abortRef.current = ctrl;
     let wasAborted = false;
     let thinkAccum = '';
+    // 停顿看门狗：连接卡死时流不会给出任何事件（这不是「模型在思考」，思考会走 thinking 增量），
+    // 面板会一直停在「停止」按钮上等下去。任何事件都会刷新 lastEventRef。
+    let stalled = false;
+    lastEventRef.current = Date.now();
+    const watchdog = window.setInterval(() => {
+      if (Date.now() - lastEventRef.current > STALL_IDLE_MS) { stalled = true; ctrl.abort(); }
+    }, 5_000);
 
     // @ 引用：把被引用笔记的全文附进消息（模型无需再 read_note）
     const mentioned = extractMentionedNotes(text, [...docsRef.current.keys()].filter((p) => p.endsWith('.md')));
@@ -770,12 +807,14 @@ export default function AiAgentPanel({
       tools: prefsRef.current.readonly ? READONLY_TOOLS : ALL_AGENT_TOOLS,
       executeTool,
       signal: ctrl.signal,
-      onDelta: (t) => { streamRef.current += t; setStreamText(streamRef.current); },
+      onDelta: (t) => { lastEventRef.current = Date.now(); streamRef.current += t; setStreamText(streamRef.current); },
       onThinking: (t) => {
+        lastEventRef.current = Date.now();
         thinkAccum += t;
         setThinkingText((s) => s + t);
       },
       onAssistantMessage: (msg) => {
+        lastEventRef.current = Date.now();
         if (thinkAccum) {
           push({ kind: 'thinking', id: idRef.current++, text: thinkAccum });
           thinkAccum = '';
@@ -802,9 +841,12 @@ export default function AiAgentPanel({
       if (isAbortError(e)) wasAborted = true;
       push({
         kind: 'error', id: idRef.current++,
-        text: isAbortError(e) ? '已停止。' : agentNetHint(e),
+        text: stalled
+          ? `连接超过 ${Math.round(STALL_IDLE_MS / 1000)} 秒没有任何响应，已自动中止。可重试，或换一个服务商/模型。`
+          : isAbortError(e) ? '已停止。' : agentNetHint(e),
       });
     } finally {
+      window.clearInterval(watchdog);
       runningRef.current = false;
       setRunning(false);
       // 已流出但没落定的正文不要丢：停止/流中途出错时落成一条「未写完」的消息
@@ -870,18 +912,6 @@ export default function AiAgentPanel({
   };
 
   /* ------------------------------------------------------------- 渲染 */
-
-  const renderDiffRows = (old: string, next: string) => {
-    const rows: CollapsedRow[] = collapseDiff(diffLines(old, next), 2);
-    return rows.map((row, idx) => {
-      if (row.type === 'gap') return <div key={idx} className="agent-diff-gap">⋯ 还有 {row.count} 行未变 ⋯</div>;
-      return (
-        <div key={idx} className={`agent-diff-${row.type}`}>
-          {row.type === 'add' ? '+ ' : row.type === 'del' ? '− ' : '  '}{row.text}
-        </div>
-      );
-    });
-  };
 
   /** 助手消息里的 [[双链]]：能解析就跳转对应笔记 */
   const openWikiLink = (name: string) => {
@@ -949,6 +979,7 @@ export default function AiAgentPanel({
         ref={scrollRef}
         role="log"
         aria-live="polite"
+        aria-busy={running}
         aria-label="AI 笔记助手对话"
         onScroll={(e) => {
           const el = e.currentTarget;
@@ -1049,7 +1080,7 @@ export default function AiAgentPanel({
                       笔记在提案后被你改动过。应用会以提案内容覆盖当前笔记（历史版本可回溯）。
                     </div>
                   )}
-                  <pre className="agent-diff">{renderDiffRows(item.old, item.next)}</pre>
+                  <ProposalDiff old={item.old} next={item.next} />
                   <div className="agent-proposal-actions">
                     <button
                       className="btn-primary"
