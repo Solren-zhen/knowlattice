@@ -38,7 +38,10 @@ const forbiddenPath = /(?:knowlattice-导入-|knowlattice-题库|题库)/i;
 // dist 里出现它 = 打包数据混进构建产物（真泄漏）；离线包暂存树里出现它 = 预期文件，
 // 不按文件名报警，只对其内容做备份/密钥扫描（见 packStaging 参数）。
 const forbiddenPackDataPath = /(?:^|\/)notes-and-qbanks\.json$/i;
-const forbiddenContent = /"app"\s*:\s*"(?:medvault|knowlattice)"\s*,\s*"(?:version|exportedAt|files)"|"questions"\s*:\s*\[\s*\{\s*"id"/;
+// 备份文件「带了用户数据」才算泄漏：按**非空载荷**判定，不能只看 {"app":"knowlattice","version":…}
+// 这个头部——pack 在没有 --data 时也会写一份空模板（files/questions/mistakes/todos 全为空数组），
+// 那种文件里没有任何用户内容，按头部判定会把默认的 `npm run pack` 直接拦下（2026-10-04 实测踩到）。
+const forbiddenContent = /"files"\s*:\s*\[\s*\{|"questions"\s*:\s*\[\s*\{\s*"id"|"(?:mistakes|todos)"\s*:\s*\[\s*\{|"(?:srs|days|cardEdits)"\s*:\s*\{\s*"/;
 // 签名/私钥材料绝不能进公开产物（泄露=任何人可推假更新）：按文件名与内容各查一遍。
 // 注意：src-tauri/tauri.conf.json 里的 updater pubkey 是公开公钥，不匹配下列内容模式。
 const forbiddenSecretPath = /(?:^|\/)(?:private\.key|.*\.pem|.*\.p12|.*\.pfx)$/i;
