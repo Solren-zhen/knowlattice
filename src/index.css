@@ -1921,6 +1921,56 @@ a.wikilink.missing::after {
 .mistake-item .btn-icon { color: var(--muted); }
 .mistake-item .btn-icon:hover { color: var(--danger); }
 
+/* 错因分布（列表上方）：堆叠条给比例，图例给绝对数与占比 */
+.reason-section {
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+.reason-bar {
+  display: flex; gap: 2px;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel-deep);
+  margin-bottom: 10px;
+}
+/* flex-basis 只给条内子项：图例里的小圆点同样挂 .reason-seg--* 取色，
+   若在 .reason-seg 上统一写 flex-basis:0，圆点会被压成 min-width 那么宽 */
+.reason-bar > .reason-seg { flex-basis: 0; min-width: 3px; }
+.reason-seg--knowledge { background: var(--accent); }
+.reason-seg--confusion { background: var(--cyan-text); }
+.reason-seg--careless { background: #f59e0b; }
+.reason-seg--reasoning { background: var(--success); }
+.reason-seg--none { background: var(--border-strong); }
+.reason-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.reason-legend-item {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-caption); color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.reason-legend-item b { font-weight: 650; color: var(--text); }
+.reason-legend-item .muted { font-size: var(--fs-micro); }
+.reason-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* 逐条错因标注：紧凑 chips，点选中项 = 取消回「未标注」 */
+.reason-pick { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.reason-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  font-size: var(--fs-micro); line-height: 16px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.reason-chip:hover { border-color: var(--border-accent); color: var(--text); }
+.reason-chip.on {
+  color: var(--accent); background: var(--accent-soft);
+  border-color: var(--border-accent); font-weight: 600;
+}
+.reason-chip--none.on { color: var(--muted); background: var(--panel-deep); border-color: var(--border-strong); }
+
 /* ============================================================ 待办清单 */
 .todo-add {
   display: flex; gap: 8px; padding: var(--sp-2) var(--sp-4);
@@ -2348,6 +2398,29 @@ a.wikilink.missing::after {
 }
 .dash-demo .muted { max-width: 420px; line-height: 1.65; }
 .dash-tip { line-height: 1.7; }
+
+/* 元认知校准：5 档自信度的实际正确率条形 + 一行结论 */
+.dash-calib { padding: 0 var(--sp-4) var(--sp-3); }
+.dash-calib h4 { font-size: var(--fs-body); margin: 0 0 12px; font-weight: 650; letter-spacing: -0.01em; }
+.dash-calib-rows { display: grid; gap: 8px; }
+.dash-calib-row {
+  display: grid; grid-template-columns: 74px minmax(0, 1fr) 52px 46px;
+  align-items: center; gap: 10px; font-size: var(--fs-caption);
+}
+.dash-calib-label { color: var(--text-2); }
+.dash-calib-track {
+  height: 8px; border-radius: 999px; overflow: hidden;
+  background: var(--bg-raised); border: 1px solid var(--border);
+}
+.dash-calib-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) 0%, #818cf8 100%);
+  transition: width 0.3s ease;
+}
+.dash-calib-pct { text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.dash-calib-n { text-align: right; font-size: var(--fs-micro); }
+.dash-calib-verdict { margin: 12px 0 0; font-size: var(--fs-caption); color: var(--text-2); line-height: 1.7; }
+.dash-calib-empty { margin: 0; font-size: var(--fs-caption); line-height: 1.7; }
 
 /* ============================================================ 思维导图
    节点配色走 MindMapView.tsx 里的 theme（22 个 CSS 变量，值全部指向本项目 token，
