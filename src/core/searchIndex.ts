@@ -13,6 +13,7 @@
 import MiniSearch, { type SearchResult } from 'minisearch';
 import { expandQuery } from './medSynonyms';
 import { parseFrontmatterCached } from './parser';
+import { stripPageAnchors } from './pageAnchor';
 
 /** 中英混合分词：连续 ASCII 词元保留，CJK 部分做二元切分 */
 export function bigramTokenize(text: string): string[] {
@@ -56,7 +57,8 @@ const aliasText = (id: string, content: string): string =>
 const toIndexed = (id: string, content: string): IndexedDoc => ({
   id,
   title: titleOf(id),
-  content,
+  // 页码锚点是坐标不是正文：进索引前剥掉，避免 kb / p182 之类噪声词元
+  content: stripPageAnchors(content),
   aliases: aliasText(id, content),
 });
 

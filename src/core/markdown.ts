@@ -10,6 +10,7 @@
  */
 
 import { isPathwayLang, renderPathwaySvg } from './pathway';
+import { stripPageAnchors } from './pageAnchor';
 import type { StateInline } from 'markdown-it';
 
 type MdInstance = InstanceType<(typeof import('markdown-it'))['default']>;
@@ -83,5 +84,7 @@ function instance(withMath: boolean): Promise<MdInstance> {
 }
 
 export async function renderMarkdown(src: string): Promise<string> {
-  return (await instance(hasMathSyntax(src))).render(src);
+  // 页码锚点是存储层坐标，html:false 下会原样显示成文字，渲染前必须剥离
+  const clean = stripPageAnchors(src);
+  return (await instance(hasMathSyntax(clean))).render(clean);
 }
