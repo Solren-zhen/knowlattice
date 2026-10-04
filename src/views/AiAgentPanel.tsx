@@ -124,7 +124,11 @@ function CitationCheck({ text, docs }: { text: string; docs: Map<string, string>
 }
 
 type ChatItem =
-  | { kind: 'msg'; id: number; role: 'user' | 'assistant'; text: string; quote?: QuoteSelection }
+  | {
+      kind: 'msg'; id: number; role: 'user' | 'assistant'; text: string; quote?: QuoteSelection;
+      /** 用户中途停止（或流中途出错）时留下的未写完回答 */
+      partial?: boolean;
+    }
   /** 已完成的只读工具：一行摘要 + 可展开的原始结果 */
   | { kind: 'tool'; id: number; name: string; summary: string; detail: string }
   /** 推理模型的思考过程（折叠展示，不回传给模型） */
@@ -323,6 +327,11 @@ export default function AiAgentPanel({
   const [mentionIdx, setMentionIdx] = useState(0);
   /** 编辑器「问 AI」带进来的待发送选段：null = 无。发送后清空 */
   const [pendingQuote, setPendingQuote] = useState<QuoteSelection | null>(null);
+  /** 选段的同步副本：sendText 发出后 setState 要等下一轮渲染才生效，
+   *  排队续跑是在同一个 sendText 闭包里递归调用的，读 state 会把选段重复注入到续跑的那条消息上 */
+  const pendingQuoteRef = useRef<QuoteSelection | null>(null);
+  /** 已流出的正文（含未落定部分）：停止/出错时据此保住半截回答 */
+  const streamRef = useRef('');
 
   const active = sessions.find((s) => s.id === activeId) ?? sessions[0];
   const items = active.items;
@@ -367,6 +376,8 @@ export default function AiAgentPanel({
   /** 待确认提案的裁决函数：提案条目 id → resolve */
   const pendingRef = useRef(new Map<number, (d: Decision) => void>());
   const scrollRef = useRef<HTMLDivElement>(null);
+  /** 视口是否贴着底部（用户上翻回看时为 false，此时不自动跟随） */
+  const pinnedRef = useRef(true);
   const caretRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -379,14 +390,16 @@ export default function AiAgentPanel({
       localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
     } catch { /* 忽略 */ }
   }, [prefs]);
-  // 新消息/流式输出时滚到底部（用户上翻查看时不打扰：只贴底就顺滑跟随）
+  // 新消息/流式输出时滚到底部；用户上翻查看时不打扰（pinnedRef 由 onScroll 维护：
+  // 只在本来就贴底时跟随，否则流式 token 会把正在回看的视口一直拽回底部）
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [items.length, streamText, thinkingText, queued.length]);
   // 消费编辑器「问 AI」带进来的选段：进入待发送区，等用户补一句话再发
   useEffect(() => {
     if (quote && quote.text.trim()) {
+      pendingQuoteRef.current = quote;
       setPendingQuote(quote);
       onQuoteConsumed?.();
     }
@@ -419,7 +432,11 @@ export default function AiAgentPanel({
   /** 等用户在 diff 卡片上点「应用 / 拒绝」；中止信号会把等待裁决为拒绝 */
   const awaitDecision = (itemId: number, signal: AbortSignal): Promise<Decision> =>
     new Promise<Decision>((resolve) => {
-      const onAbort = () => resolve('rejected');
+      // 中止也要把裁决函数从表里摘掉：条目 id 单调递增不复用，留着就是永久泄漏
+      const onAbort = () => {
+        pendingRef.current.delete(itemId);
+        resolve('rejected');
+      };
       signal.addEventListener('abort', onAbort, { once: true });
       pendingRef.current.set(itemId, (d) => {
         signal.removeEventListener('abort', onAbort);
@@ -633,6 +650,10 @@ export default function AiAgentPanel({
         patchProposal(itemId, { status: 'failed', error: msg });
         return `写入失败：${msg}`;
       }
+      // 同步推进本地快照：vault.save 内部会换 docs 引用，但面板的 docsRef 只靠 passive effect
+      // 同步（晚于微任务）。同一轮里模型常连续提多处 patch，第二处若读旧正文，
+      // 会把第一处刚写进去的改动算没、再整篇覆盖回去（静默丢改动）。
+      docsRef.current = new Map(docsRef.current).set(path, next);
       patchProposal(itemId, { status: 'applied', autoApplied: autoOk && !drifted });
       if (autoOk && !drifted) {
         // 自动应用/自主模式静默落盘：必须让用户看见「笔记已经变了」。
@@ -649,6 +670,15 @@ export default function AiAgentPanel({
   const stop = () => {
     abortRef.current?.abort();
     abortRef.current = null;
+    // 队列里排的是「本轮跑完自动接续」的消息。按停止＝不要继续跑了：
+    // 留着会被下一次运行的 finally 取走，在用户没要求的时候静默补发；
+    // 直接丢掉又会吞掉用户敲的字，所以退回输入框让他自己决定发不发。
+    if (queueRef.current.length) {
+      const back = queueRef.current.join('\n');
+      queueRef.current = [];
+      setQueued([]);
+      setInput((cur) => (cur.trim() ? `${cur}\n${back}` : back));
+    }
   };
 
   const createSession = () => {
@@ -673,13 +703,17 @@ export default function AiAgentPanel({
   const sendText = async (text: string) => {
     if (!text || runningRef.current) return;
     if (!settingsRef.current) { setSettingsOpen(true); return; }
+    // 选段只属于本轮：同步清掉 ref，排队续跑（同一闭包递归调用）才不会把同一段选段再注入一次
+    const quoteForTurn = pendingQuoteRef.current;
+    pendingQuoteRef.current = null;
+    setPendingQuote(null);
     // 历史快照先取（不含本轮消息）；当前 user 消息随后的追加只影响 UI 与下一轮
     const history = buildHistoryMessages(
       itemsRef.current
         .filter((i): i is Extract<ChatItem, { kind: 'msg' }> => i.kind === 'msg')
         .map((i) => ({ role: i.role, text: i.text }))
     );
-    const userItem: ChatItem = { kind: 'msg', id: idRef.current++, role: 'user', text, quote: pendingQuote ?? undefined };
+    const userItem: ChatItem = { kind: 'msg', id: idRef.current++, role: 'user', text, quote: quoteForTurn ?? undefined };
     itemsRef.current = [...itemsRef.current, userItem];
     updateActive((s) => ({
       ...s,
@@ -690,6 +724,7 @@ export default function AiAgentPanel({
     }));
     runningRef.current = true;
     setRunning(true);
+    streamRef.current = '';
     setStreamText('');
     setThinkingText('');
     const ctrl = new AbortController();
@@ -709,12 +744,11 @@ export default function AiAgentPanel({
       wireContent = `${text}\n\n---\n【用户引用的笔记】\n${blocks}`;
     }
     // 编辑器「问 AI」选段：作为最高优先引用附上，模型自动知道针对这段话回答
-    if (pendingQuote) {
-      const from = pendingQuote.path ? `（来自：${pendingQuote.path}）` : '';
-      wireContent = `${wireContent}\n\n---\n【用户选中的原文】${from}\n${truncateForModel(pendingQuote.text, MENTION_CONTENT_LIMIT)}`
+    if (quoteForTurn) {
+      const from = quoteForTurn.path ? `（来自：${quoteForTurn.path}）` : '';
+      wireContent = `${wireContent}\n\n---\n【用户选中的原文】${from}\n${truncateForModel(quoteForTurn.text, MENTION_CONTENT_LIMIT)}`
         + '\n（用户的问题针对上面这段选中的原文，请围绕它回答。）';
     }
-    setPendingQuote(null);
 
     const agentMd = docsRef.current.get(AGENT_MD);
     const sys = buildNoteSystemPrompt(currentPath, agentMd ? truncateForModel(agentMd, 4_000) : null)
@@ -736,7 +770,7 @@ export default function AiAgentPanel({
       tools: prefsRef.current.readonly ? READONLY_TOOLS : ALL_AGENT_TOOLS,
       executeTool,
       signal: ctrl.signal,
-      onDelta: (t) => setStreamText((s) => s + t),
+      onDelta: (t) => { streamRef.current += t; setStreamText(streamRef.current); },
       onThinking: (t) => {
         thinkAccum += t;
         setThinkingText((s) => s + t);
@@ -750,6 +784,7 @@ export default function AiAgentPanel({
         if (msg.content) {
           push({ kind: 'msg', id: idRef.current++, role: 'assistant', text: msg.content });
         }
+        streamRef.current = '';
         setStreamText('');
       },
       onUsage: applyUsage,
@@ -772,6 +807,12 @@ export default function AiAgentPanel({
     } finally {
       runningRef.current = false;
       setRunning(false);
+      // 已流出但没落定的正文不要丢：停止/流中途出错时落成一条「未写完」的消息
+      // （正常收尾时 onAssistantMessage 已经把正文推成正式消息并清空了 ref）
+      if (streamRef.current.trim()) {
+        push({ kind: 'msg', id: idRef.current++, role: 'assistant', text: streamRef.current, partial: true });
+      }
+      streamRef.current = '';
       setStreamText('');
       setThinkingText('');
       if (abortRef.current === ctrl) abortRef.current = null;
@@ -903,7 +944,17 @@ export default function AiAgentPanel({
         />
       )}
 
-      <div className="agent-log" ref={scrollRef} role="log" aria-live="polite" aria-label="AI 笔记助手对话">
+      <div
+        className="agent-log"
+        ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-label="AI 笔记助手对话"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+      >
         {!items.length && !running && (
           <div className="agent-empty">
             <p className="agent-empty-title">让 AI 陪你把知识学扎实。</p>
@@ -950,6 +1001,7 @@ export default function AiAgentPanel({
             return item.role === 'assistant' ? (
               <div key={item.id} className="agent-msg assistant">
                 <Preview content={item.text} resolve={resolveLink} onOpenLink={openWikiLink} />
+                {item.partial && <p className="agent-partial">（已停止，以上为未写完的回答）</p>}
                 <CitationCheck text={item.text} docs={citationDocs} />
               </div>
             ) : (

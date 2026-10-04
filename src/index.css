@@ -3418,6 +3418,8 @@ a.wikilink.missing::after {
 }
 .agent-msg.streaming::after { content: '▍'; opacity: 0.55; animation: agent-caret 1s steps(2) infinite; }
 @keyframes agent-caret { 50% { opacity: 0; } }
+/* 用户中途停止时保住的半截回答：正文照常渲染，末尾标注未写完 */
+.agent-partial { margin: 6px 0 0; color: var(--muted); font-size: var(--fs-micro); }
 /* 只读工具卡：一行摘要，点开看原始返回 */
 .agent-tool {
   align-self: flex-start; max-width: 92%;
