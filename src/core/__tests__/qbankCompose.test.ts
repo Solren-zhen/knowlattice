@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type { QuizBank, QuizQuestion } from '../qbank';
 import {
   DEFAULT_RULES, chapterCompare, chapterCounts, composeQuestions,
-  filterPool, sortByChapter, weightOf, type ComposeRules,
+  filterPool, interleaveByChapter, sortByChapter, weightOf, type ComposeRules,
 } from '../qbankCompose';
 import type { QStat, StatsMap } from '../qbankStats';
 
@@ -181,5 +181,79 @@ describe('qbankCompose · 章节自然序', () => {
     const input = [...bank.questions];
     sortByChapter(input);
     expect(input.map((x) => x.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
+/** 线性同余：给「同一 rnd 结果一致」提供可复现的伪随机流（Math.random 每次不同，证明不了确定性） */
+function seededRnd(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+describe('qbankCompose · 按章节交错', () => {
+  const ids = (qs: QuizQuestion[]) => qs.map((x) => x.id);
+  /** 相邻两题是否同章（空 chapter 也算同一桶） */
+  const hasAdjacentSameChapter = (qs: QuizQuestion[]) => {
+    const cs = qs.map((x) => x.chapter ?? '');
+    return cs.some((c, i) => i > 0 && c === cs[i - 1]);
+  };
+
+  it('两章交替：同章节不连续，且章节内部保持原相对顺序', () => {
+    const input = [q('a0', 'A'), q('a1', 'A'), q('a2', 'A'), q('b0', 'B'), q('b1', 'B')];
+    const out = interleaveByChapter(input, () => 0.5);
+    expect(out).toHaveLength(input.length);
+    expect(hasAdjacentSameChapter(out)).toBe(false);
+    expect(ids(out).filter((x) => x.startsWith('a'))).toEqual(['a0', 'a1', 'a2']);
+    expect(ids(out).filter((x) => x.startsWith('b'))).toEqual(['b0', 'b1']);
+  });
+
+  it('多章不等长：不丢题、不重题、尽量不连续', () => {
+    const input = [q('a0', 'A'), q('b0', 'B'), q('a1', 'A'), q('c0', 'C'), q('b1', 'B'), q('c1', 'C'), q('a2', 'A')];
+    const out = interleaveByChapter(input, seededRnd(7));
+    expect(out).toHaveLength(input.length);
+    expect(new Set(ids(out)).size).toBe(input.length);
+    expect(new Set(ids(out))).toEqual(new Set(ids(input)));
+    expect(hasAdjacentSameChapter(out)).toBe(false);
+  });
+
+  it('传同一个 rnd 结果一致（可复现）', () => {
+    const input = [q('a0', 'A'), q('a1', 'A'), q('b0', 'B'), q('b1', 'B'), q('c0', 'C'), q('c1', 'C')];
+    const first = ids(interleaveByChapter(input, seededRnd(42)));
+    const again = ids(interleaveByChapter(input, seededRnd(42)));
+    expect(first).toEqual(again);
+    expect(new Set(first)).toEqual(new Set(ids(input)));
+  });
+
+  it('边界：只有一道题', () => {
+    expect(ids(interleaveByChapter([q('only', 'A')], () => 0.5))).toEqual(['only']);
+  });
+
+  it('边界：只有一个章节 → 无解，保持原顺序且不丢不重', () => {
+    const input = [q('a0', 'A'), q('a1', 'A'), q('a2', 'A')];
+    const out = interleaveByChapter(input, seededRnd(3));
+    expect(ids(out)).toEqual(['a0', 'a1', 'a2']);
+  });
+
+  it('边界：无 chapter 的题归入「未分类」桶一起轮询', () => {
+    // q() 传 '' → chapter 为空串，等价于「没标章节」
+    const input = [q('x0', ''), q('y0', 'B'), q('x1', ''), q('y1', 'B')];
+    const out = interleaveByChapter(input, () => 0.5);
+    expect(new Set(ids(out))).toEqual(new Set(ids(input)));
+    expect(hasAdjacentSameChapter(out)).toBe(false);
+  });
+
+  it('composeQuestions order=interleave：只重排已抽中的题，不改变集合', () => {
+    const stats = statsWith({ a: stat({ wrong: 5 }), b: stat({ wrong: 1 }) });
+    const picked = composeQuestions(bank, rules({ count: 4, order: 'interleave' }), stats, NOW, () => 0.5);
+    expect(new Set(picked.map((x) => x.id))).toEqual(new Set(['a', 'b', 'c', 'd']));
+    expect(picked).toHaveLength(4);
+    expect(hasAdjacentSameChapter(picked)).toBe(false);
+  });
+
+  it('默认 order 仍是 shuffle（交错要显式选，不悄悄改旧行为）', () => {
+    expect(DEFAULT_RULES.order).toBe('shuffle');
   });
 });

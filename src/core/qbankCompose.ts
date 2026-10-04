@@ -13,7 +13,7 @@ import type { QuizBank, QuizQuestion } from './qbank';
 import { isDue, statOf, type QStat, type StatsMap } from './qbankStats';
 
 export type ComposeScope = 'all' | 'new' | 'wrong' | 'due';
-export type ComposeOrder = 'shuffle' | 'chapter';
+export type ComposeOrder = 'shuffle' | 'chapter' | 'interleave';
 export type ComposeType = 'choice' | 'recall';
 
 export interface ComposeRules {
@@ -139,13 +139,70 @@ export function composeQuestions(
   const pool = filterPool(bank.questions, rules, stats, bank.name, now);
   const k = rules.count > 0 ? Math.min(rules.count, pool.length) : pool.length;
   const picked = weightedPick(pool, (q) => weightOf(statOf(stats, bank.name, q.id), now), k, rnd);
-  return rules.order === 'chapter' ? sortByChapter(picked) : picked;
+  if (rules.order === 'chapter') return sortByChapter(picked);
+  if (rules.order === 'interleave') return interleaveByChapter(picked, rnd);
+  return picked;
 }
 
 export function sortByChapter(questions: QuizQuestion[]): QuizQuestion[] {
   return [...questions].sort(
     (a, b) => chapterCompare(a.chapter ?? '', b.chapter ?? '') || chapterCompare(a.stem, b.stem),
   );
+}
+
+/**
+ * 按章节交错排列：同一章节的题尽量不连续出现，章节内部保持入参的相对顺序。
+ *
+ * 为什么交错：顺序练习时人会顺着上一题的思路惯性做下去，相似知识点之间的边界被糊掉；
+ * 交错强迫每道题都重新判断「这题该用哪条知识」，这正是它能提升辨别力的原因。
+ *
+ * 做法：先按 `chapter` 分桶（无 chapter 的归入 ''），每轮从「剩余最多、且与上一题不同章」
+ * 的桶里取一题。取剩余最多的桶不是偏好——若先取小桶，最后大桶会剩一堆只能连着出；
+ * 只有当某章题数超过其余各章总和时才会出现同章相邻，这是数学上无法避免的，不硬凑。
+ * `rnd` 只在「剩余数相同的候选桶」之间取舍（默认 Math.random），用来打散每轮顺序，
+ * 同时不破坏上述不连续保证；传固定 rnd 即可复现。只重排，不增删题目。
+ */
+export function interleaveByChapter(
+  questions: QuizQuestion[],
+  rnd: () => number = Math.random,
+): QuizQuestion[] {
+  // chapter 名在编译期不可知，且需要按首次出现顺序稳定迭代 → 动态键的 Map
+  const buckets = new Map<string, QuizQuestion[]>();
+  for (const q of questions) {
+    const key = q.chapter ?? '';
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(q);
+    else buckets.set(key, [q]);
+  }
+  // 只保留章节名与读取游标：桶内保持入参相对顺序，取一题即游标后移
+  interface ChapterBucket { chapter: string; items: QuizQuestion[]; at: number }
+  const groups: ChapterBucket[] = [...buckets.entries()].map(([chapter, items]) => ({ chapter, items, at: 0 }));
+  /** 取剩余最多的桶的下一题；剩余数相同则用 rnd 挑，保证结果可复现。
+   *  `skip` 用于避开上一题的章节，allowSame=true 时不做该过滤（无解时的兜底）。 */
+  const takeBiggest = (skip: string | null, allowSame: boolean): QuizQuestion | null => {
+    let max = 0;
+    let picks: ChapterBucket[] = [];
+    for (const g of groups) {
+      if (!allowSame && g.chapter === skip) continue;
+      const left = g.items.length - g.at;
+      if (left <= 0) continue;
+      if (left > max) { max = left; picks = [g]; }
+      else if (left === max) picks.push(g);
+    }
+    if (!picks.length) return null;
+    const g = picks[Math.min(picks.length - 1, Math.floor(rnd() * picks.length))];
+    return g.items[g.at++];
+  };
+  const out: QuizQuestion[] = [];
+  let last: string | null = null;
+  while (out.length < questions.length) {
+    // 优先避开上一题的章节；若剩下的全在同一章（无解）再退回去取，避免死循环
+    const q: QuizQuestion | null = takeBiggest(last, false) ?? takeBiggest(null, true);
+    if (!q) break;
+    out.push(q);
+    last = q.chapter ?? '';
+  }
+  return out;
 }
 
 /** 章节清单（组题弹窗用）：按自然序，带每章题数 */

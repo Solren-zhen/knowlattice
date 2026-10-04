@@ -17,6 +17,7 @@ import {
   type ComposeOrder, type ComposeRules, type ComposeScope,
 } from '../core/qbankCompose';
 import { bankProgress, consumeSaveFailure, initializeStats, loadStats, recordAnswer } from '../core/qbankStats';
+import { CONFIDENCE_LABELS, CONFIDENCE_VALUES, recordCalibration, type Confidence } from '../core/qbankCalib';
 import { buildChapterIndex, questionNoteLabel, resolveQuestionNote } from '../core/qbankNotes';
 import { recordMistake } from '../core/mistakes';
 import { toast, confirmBox } from '../core/feedback';
@@ -70,6 +71,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   const [results, setResults] = useState<(boolean | undefined)[]>([]);
   const [picked, setPicked] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
+  /** 作答前自报的把握度（1~5）；null = 没报。可选，不报也能作答，只是不计入校准样本 */
+  const [confidence, setConfidence] = useState<Confidence | null>(null);
   /** 正在写批注的选项下标（null = 没在写）与草稿文本 */
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
@@ -202,6 +205,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
     setResults(new Array(qs.length).fill(undefined));
     setPicked(null);
     setRevealed(false);
+    setConfidence(null);
     setEditing(null);
   };
 
@@ -209,6 +213,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   const judge = async (correct: boolean) => {
     if (!q) return;
     markStudy(); // 打卡
+    // 报过把握度才记样本：校准要的是「自信 vs 实际」的对照，没报的作答没有对照价值
+    if (confidence !== null) recordCalibration(confidence, correct);
     setResults((prev) => prev.map((r, i) => (i === idx ? correct : r)));
     await recordAnswer(session!.bankName, q.id, correct);
     setStats(loadStats());
@@ -227,6 +233,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   const next = () => {
     setPicked(null);
     setRevealed(false);
+    setConfidence(null);
     setEditing(null);
     setIdx((i) => i + 1);
   };
@@ -282,6 +289,23 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
           <div className="panel__body quiz-body">
             {q.chapter && <span className="quiz-chapter">{q.chapter}</span>}
             <p className="quiz-stem">{q.stem}</p>
+
+            {/* 作答前自报把握度：可选，不选也能直接答；答完再用一行对照把「自信」和「实际」摆一起 */}
+            <div className="compose-chips" role="group" aria-label="作答把握度（可选）">
+              <span className="muted">有几分把握？（不选也行）</span>
+              {CONFIDENCE_VALUES.map((c) => (
+                <button
+                  key={c}
+                  className={`chip${confidence === c ? ' on' : ''}`}
+                  // 看到答案后再改自信度就没有对照意义了，所以揭示/作答后锁住
+                  disabled={answered || revealed}
+                  aria-pressed={confidence === c}
+                  onClick={() => setConfidence(confidence === c ? null : c)}
+                >
+                  {c} {CONFIDENCE_LABELS[c]}
+                </button>
+              ))}
+            </div>
 
             {q.type === 'choice' ? (
               <div className="quiz-opts">
@@ -360,6 +384,12 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
                 <b>{results[idx] ? '✓ 答对了' : '✗ 答错了'}</b>
                 <p>{q.explanation}</p>
               </div>
+            )}
+            {/* 把握度对照：只把「报的」和「实际」并排摆出来，不下「你高估了」这种结论 */}
+            {answered && confidence !== null && (
+              <p className="muted" role="status">
+                你报的是「{CONFIDENCE_LABELS[confidence]}」，这题{results[idx] ? '答对了' : '答错了'}
+              </p>
             )}
             {q.type === 'recall' && revealed && !answered && (
               <div className="quiz-actions">
@@ -484,8 +514,11 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
             <div className="compose-row">
               <span className="compose-label">顺序</span>
               <div className="compose-chips">
-                {([['shuffle', '乱序'], ['chapter', '按章节']] as Array<[ComposeOrder, string]>).map(([v, label]) => (
-                  <button key={v} className={`chip${rules.order === v ? ' on' : ''}`} onClick={() => setRules((r) => ({ ...r, order: v }))}>{label}</button>
+                {([['shuffle', '乱序'], ['chapter', '按章节'], ['interleave', '按章节交错']] as Array<[ComposeOrder, string]>).map(([v, label]) => (
+                  <button key={v} className={`chip${rules.order === v ? ' on' : ''}`} onClick={() => setRules((r) => ({ ...r, order: v }))}>
+                    {label}
+                    {v === 'interleave' && <span className="muted">（推荐：混着练更能分辨相似知识点）</span>}
+                  </button>
                 ))}
               </div>
             </div>
