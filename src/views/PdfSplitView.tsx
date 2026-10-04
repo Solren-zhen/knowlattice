@@ -20,6 +20,7 @@ import {
   migrateLegacyPdf, type PdfBook,
 } from '../core/pdfLib';
 import { renderAsync } from 'docx-preview';
+import { sanitizeRenderedHyperlinks } from '../core/domSanitize';
 import { confirmBox, toast } from '../core/feedback';
 import { netErrorHint } from '../core/netError';
 import { generateDraft, draftToMarkdown, type Draft } from '../core/noteGen';
@@ -352,6 +353,11 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
       inWrapper: true,
       breakPages: true,
       ignoreWidth: false,
+    }).then(() => {
+      // 审计 M1：docx-preview 不校验 a[href] 协议，Word 里的 javascript:/file: 链接
+      // 会原样落 DOM。渲染完成后做一遍清洗（只动属性，不破坏排版）。
+      const n = sanitizeRenderedHyperlinks(docRenderRef.current);
+      if (n > 0) console.warn(`docx 内 ${n} 个非安全协议链接已禁用`);
     }).catch((e) => console.error('docx 渲染失败：', e));
   }, [docType, docBuf]);
 

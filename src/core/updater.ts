@@ -1,10 +1,9 @@
 /**
- * 桌面版自动更新（Tauri updater 插件；网页版所有函数安全返回 null/false）。
+ * 桌面版更新检查（Tauri updater 插件；网页版所有函数安全返回 null/false）。
  *
- * 流程：
- * 1. 应用启动 8 秒后静默检查 GitHub Releases 上的 latest.json
- * 2. 有新版本 → 后台静默下载（minisign 签名校验，被篡改的安装包装不上）
- * 3. 下载完成 → 自动安装并重启应用（笔记/书架数据都在本地，更新不丢）
+ * 策略（2026-10-04 审计 M3 后收紧）：启动时只**检查并提示**，绝不静默下载安装——
+ * 自动换掉正在运行的应用属于用户不知情的变更；安装动作一律由用户在
+ * 「关于与许可」面板手动触发（仍走 minisign 签名校验，被篡改的安装包装不上）。
  *
  * 发布新版本（开发者操作，详见 scripts/make-update-manifest.mjs 注释）：
  *   npm run tauri build → node scripts/make-update-manifest.mjs
@@ -23,7 +22,7 @@ export interface PdfUpdate {
   version: string;
   /** 更新说明（latest.json 的 notes） */
   notes: string;
-  /** 下载（带签名校验）→ 静默安装 → 自动重启应用 */
+  /** 下载（带签名校验）→ 安装 → 重启应用。只由用户在界面主动触发，启动流程绝不调用。 */
   install: (onProgress?: (pct: number | null) => void) => Promise<void>;
 }
 
@@ -63,19 +62,17 @@ export async function checkForUpdate(): Promise<PdfUpdate | null> {
   }
 }
 
-/** 启动后自动检查并静默更新（仅桌面版；网页版不执行） */
+/** 启动后只检查并提示，不自动安装（2026-10-04 审计 M3）。
+ *  旧实现会静默下载并重启应用——更新窗口期正好打断用户、且用户对「应用自己换了
+ *  一个版本」没有知情/选择权。现在改为：发现新版本只弹提示，安装动作留给用户
+ *  在「关于与许可」面板手动触发（签名校验与手动路径完全一致）。 */
 export function autoUpdateOnStartup(delayMs = 8000): void {
   if (!isDesktopApp()) return;
   window.setTimeout(() => {
     void (async () => {
       const update = await checkForUpdate();
       if (!update) return;
-      toast(`发现新版本 v${update.version}，正在自动更新…`);
-      try {
-        await update.install();
-      } catch {
-        toast('自动更新失败，可到「关于与许可」手动重试', 'err');
-      }
+      toast(`发现新版本 v${update.version}，可到「关于与许可」面板手动安装`, 'ok', 6000);
     })();
   }, delayMs);
 }

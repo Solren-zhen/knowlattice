@@ -16,6 +16,7 @@ import { searchKeymap, highlightSelectionMatches, search, findNext, SearchQuery,
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { livePreview, toggleLivePreview } from '../core/livePreview';
+import { safeExternalUrl } from '../core/domSanitize';
 import { FORMAT_KEYS, toggleMark, wikiLink } from '../core/mdFormat';
 import { insertTable, tableSkeleton, TABLE_MAX_COLS, TABLE_MAX_ROWS, textToTable } from '../core/mdTable';
 import { toast } from '../core/feedback';
@@ -131,6 +132,8 @@ interface Props {
   onAttach?: (filename: string, blob: Blob) => Promise<string>;
   /** 「草稿」按钮：把选中文本交给智能草稿 */
   onDraft?: (text: string) => void;
+  /** 右键菜单「问 AI」：把选中文本作为引用上下文交给 AI 助手面板 */
+  onAskAi?: (text: string) => void;
   /** 注册需要在当前光标处执行的通路插入操作 */
   onPathwayReady?: (insert: ((markdown: string) => void) | null) => void;
   /** vault 相对路径 → 文件内容，用于实时预览内联渲染图片 */
@@ -149,7 +152,7 @@ interface Props {
   onJumpReady?: (jump: ((line: number) => void) | null) => void;
 }
 
-export default function Editor({ value, onChange, linkNames = [], onOpenLink, onAttach, onDraft, onPathwayReady, readFile, highlight, headingLines = [], onActiveHeading, onJumpReady }: Props) {
+export default function Editor({ value, onChange, linkNames = [], onOpenLink, onAttach, onDraft, onAskAi, onPathwayReady, readFile, highlight, headingLines = [], onActiveHeading, onJumpReady }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -303,7 +306,18 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               const linkEl = target.closest?.('.lp-link') as HTMLElement | null;
               if (linkEl) {
                 const url = linkEl.getAttribute('data-lp-url');
-                if (url) { e.preventDefault(); window.open(url, '_blank', 'noopener'); return true; }
+                // 审计 L1：白名单协议才开窗（javascript:/file:/自定义协议一律拒绝）
+                const safe = url ? safeExternalUrl(url) : null;
+                if (safe) {
+                  e.preventDefault();
+                  window.open(safe, '_blank', 'noopener');
+                  return true;
+                }
+                if (url) {
+                  e.preventDefault();
+                  toast('链接已禁用：只允许 http(s) 与 mailto', 'err');
+                  return true;
+                }
               }
               // [[双链]]（实时预览部件）→ 跳转笔记
               const fn = openLinkRef.current;
@@ -336,7 +350,13 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               while ((m = linkRe.exec(line.text))) {
                 if (col >= m.index && col <= m.index + m[0].length) {
                   e.preventDefault();
-                  window.open(m[2], '_blank', 'noopener');
+                  // 审计 L1：源码模式兜底同样过白名单（这里抓的是原文 URL，更要把不可信协议拦下）
+                  const safe = safeExternalUrl(m[2]);
+                  if (safe) {
+                    window.open(safe, '_blank', 'noopener');
+                  } else {
+                    toast('链接已禁用：只允许 http(s) 与 mailto', 'err');
+                  }
                   return true;
                 }
               }
@@ -347,6 +367,10 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               const view = viewRef.current;
               if (!view || view.state.selection.main.empty) return false;
               e.preventDefault();
+              // 「问 AI」菜单项要用的选区文本：打开菜单的瞬间同步一次
+              //（平时只有表格面板开着才同步，这里不补的话菜单里读到的是旧值）
+              const s = view.state.selection.main;
+              setSelText(view.state.sliceDoc(s.from, s.to));
               // 只用键盘唤出（Shift+F10 / 菜单键）时把焦点移进菜单。实测鼠标右键的 contextmenu
               // 事件 detail 也是 0，唯一可靠的区分是 button：右键为 2，键盘触发为 -1/0。
               // macOS 的 Ctrl+点击是鼠标手势（button 0 + ctrlKey），同样不该抢焦点。
@@ -780,6 +804,22 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
             else if (e.key === 'End') { e.preventDefault(); moveMenuFocus('end'); }
           }}
         >
+          {onAskAi && (
+            <button
+              className="cm-ctx-item cm-ctx-askai"
+              type="button"
+              role="menuitem"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (selText.trim()) onAskAi(selText);
+                closeMenu(false);
+              }}
+            >
+              <span>✦ 问 AI</span>
+              <kbd>选中即问</kbd>
+            </button>
+          )}
+          <div className="cm-ctx-sep" role="separator" />
           {CTX_ACTIONS.map((a) => (
             <button
               key={a.label}
