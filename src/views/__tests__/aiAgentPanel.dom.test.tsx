@@ -57,6 +57,32 @@ function stubFetch(script: FetchScript): ReturnType<typeof vi.fn> {
   return mock;
 }
 
+/** 可控 SSE 流：测试自己决定何时吐 delta、何时断（流式跟随/半截回答/看门狗都用它） */
+function heldStream() {
+  let ctrl!: ReadableStreamDefaultController<Uint8Array>;
+  let markReady!: () => void;
+  const ready = new Promise<void>((res) => { markReady = res; });
+  const make = async (_url: string, init?: RequestInit) => {
+    const signal = init?.signal;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        ctrl = c;
+        markReady();
+        signal?.addEventListener('abort', () => {
+          try { c.error(new DOMException('Aborted', 'AbortError')); } catch { /* 已关闭 */ }
+        });
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+  return {
+    make,
+    ready,
+    push: (text: string) => ctrl.enqueue(new TextEncoder().encode(dataLine({ choices: [{ delta: { content: text } }] }))),
+    fail: (e: unknown) => ctrl.error(e),
+  };
+}
+
 const BASE_DOCS = new Map([['解剖/心脏.md', '# 心脏\n心肌收缩泵血。\n']]);
 
 function seedSettings() {
@@ -602,32 +628,6 @@ describe('Claudian 式交互', () => {
 });
 
 describe('流式输出与视口', () => {
-  /** 可控 SSE 流：测试自己决定何时吐 delta、何时断 */
-  function heldStream() {
-    let ctrl!: ReadableStreamDefaultController<Uint8Array>;
-    let markReady!: () => void;
-    const ready = new Promise<void>((res) => { markReady = res; });
-    const make = async (_url: string, init?: RequestInit) => {
-      const signal = init?.signal;
-      const stream = new ReadableStream<Uint8Array>({
-        start(c) {
-          ctrl = c;
-          markReady();
-          signal?.addEventListener('abort', () => {
-            try { c.error(new DOMException('Aborted', 'AbortError')); } catch { /* 已关闭 */ }
-          });
-        },
-      });
-      return new Response(stream, { status: 200 });
-    };
-    return {
-      make,
-      ready,
-      push: (text: string) => ctrl.enqueue(new TextEncoder().encode(dataLine({ choices: [{ delta: { content: text } }] }))),
-      fail: (e: unknown) => ctrl.error(e),
-    };
-  }
-
   it('用户上翻回看时，流式输出不会把视口拽回底部；贴回底部后恢复跟随', async () => {
     const held = heldStream();
     const fetchMock = stubFetch([held.make]);
@@ -694,5 +694,121 @@ describe('同一轮多处写入', () => {
     expect(saved[0][1]).toBe('# 心脏\n心肌收缩泵血，维持循环。\n瓣膜防止倒流。\n');
     expect(saved[1][1]).toBe('# 心脏\n心肌收缩泵血，维持循环。\n瓣膜防止血液倒流。\n');
     void fetchMock;
+  });
+});
+
+describe('上下文预算 / 引用核验 / 面板细节', () => {
+  it('内置引擎：单条工具结果超限被截断，累计超预算的更早结果被省略', async () => {
+    piSwitch.fail = true; // 走内置引擎（pi 路径的同一套预算由 core/aiBudget 提供）
+    const big = `# 心脏\n${'心'.repeat(20_000)}`;
+    const bodies: Array<{ messages: Array<{ role: string; content?: string }> }> = [];
+    const calls = [1, 2, 3, 4, 5, 6].map((n) => ({
+      index: n - 1, id: `r${n}`, function: { name: 'read_note', arguments: '{"path":"解剖/心脏.md"}' },
+    }));
+    const fetchMock = stubFetch([
+      async () => sseResponse([dataLine({ choices: [{ delta: { tool_calls: calls } }] })]),
+      async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return sseResponse(finalChunks('读完了。'));
+      },
+    ]);
+    renderPanel({ docs: new Map([['解剖/心脏.md', big]]) });
+
+    await sendMessage('把这六段都读一遍');
+    await waitFor(() => expect(bodies).toHaveLength(1));
+
+    const tools = bodies[0].messages.filter((m) => m.role === 'tool');
+    expect(tools).toHaveLength(6);
+    // 单条：read_note 的 12000 字上限之上再裁到 8000，并写明截断
+    expect(tools[5].content!.length).toBeLessThanOrEqual(8_000);
+    expect(tools[5].content).toContain('已截断');
+    // 累计：6 × 8000 超预算，最旧的换成占位说明
+    expect(tools[0].content).toContain('已省略');
+    void fetchMock;
+  });
+
+  it('引用核验：给出原文的标记逐字核验，没给原文的标记如实标为无法核验', async () => {
+    const fetchMock = stubFetch([
+      async () => sseResponse(finalChunks('据“心肌收缩泵血。”〔《心脏》 P1〕可知。另见〔《内科学》 P20〕。')),
+    ]);
+    renderPanel();
+
+    await sendMessage('讲讲心脏');
+    await waitFor(() => expect(document.querySelectorAll('.agent-cite')).toHaveLength(2));
+    expect(document.querySelector('.agent-cite-exact')?.textContent).toContain('心肌收缩泵血。');
+    expect(document.querySelector('.agent-cite-nocite')?.textContent).toContain('未给出原文');
+    void fetchMock;
+  });
+
+  it('流式期间 agent-log 标为 busy，结束后恢复', async () => {
+    const held = heldStream();
+    const fetchMock = stubFetch([held.make]);
+    const { view } = renderPanel();
+    await sendMessage('讲讲心脏');
+    await held.ready;
+
+    const busy = () => view.container.querySelector('.agent-log')!.getAttribute('aria-busy');
+    expect(busy()).toBe('true');
+    held.fail(new DOMException('Aborted', 'AbortError'));
+    await waitFor(() => expect(busy()).toBe('false'));
+    void fetchMock;
+  });
+
+  it('删除会话：有内容时先确认，取消则保留', async () => {
+    const fetchMock = stubFetch([async () => sseResponse(finalChunks('第一条回答。'))]);
+    renderPanel();
+    await sendMessage('你好');
+    await waitFor(() => expect(screen.getByText('第一条回答。')).toBeTruthy());
+
+    // 需要有第二个会话，删除按钮才可用；切回有内容的那个
+    fireEvent.click(screen.getByRole('button', { name: '新对话' }));
+    const firstId = (JSON.parse(localStorage.getItem(SESSIONS_KEY)!) as Array<{ id: string }>)[0].id;
+    fireEvent.change(screen.getByLabelText('切换会话'), { target: { value: firstId } });
+
+    const ids = () => (JSON.parse(localStorage.getItem(SESSIONS_KEY)!) as Array<{ id: string }>).map((s) => s.id);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    fireEvent.click(screen.getByRole('button', { name: '删除当前会话' }));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(ids()).toContain(firstId);
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: '删除当前会话' }));
+    expect(ids()).not.toContain(firstId);
+    confirmSpy.mockRestore();
+    void fetchMock;
+  });
+
+  it('提案卡片渲染 diff 行（删除行与新增行）', async () => {
+    const fetchMock = stubFetch([
+      async () => sseResponse(patchCallChunks('c1', '心肌收缩泵血。', '心肌收缩泵血，维持循环。')),
+      async () => sseResponse(finalChunks('改好了。')),
+    ]);
+    renderPanel();
+
+    await sendMessage('改一下');
+    await screen.findByText(/修改笔记/, { selector: '.agent-proposal-head' });
+    const box = document.querySelector('.agent-diff')!;
+    expect(box.querySelector('.agent-diff-add')?.textContent).toContain('心肌收缩泵血，维持循环。');
+    expect(box.querySelector('.agent-diff-del')?.textContent).toContain('心肌收缩泵血。');
+    void fetchMock;
+  });
+
+  it('停顿看门狗：流长时间没有任何事件时自动中止并给出可行动的提示', async () => {
+    // shouldAdvanceTime：假时钟跟着真实时间走，RTL 的 waitFor 才不会卡住
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const held = heldStream();
+      const fetchMock = stubFetch([held.make]);
+      renderPanel();
+      await sendMessage('讲讲心脏');
+      await held.ready;
+
+      // 面板阈值 120s（STALL_IDLE_MS）；推到 126s 让看门狗中止
+      await vi.advanceTimersByTimeAsync(126_000);
+      expect(await screen.findByText(/没有任何响应/)).toBeTruthy();
+      void fetchMock;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

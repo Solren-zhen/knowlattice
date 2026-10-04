@@ -3607,6 +3607,10 @@ a.wikilink.missing::after {
 .agent-cite-partial { color: #9a6700; border-color: #9a670040; background: #9a670010; }
 .agent-cite-fabricated { color: #cf222e; border-color: #cf222e40; background: #cf222e10; }
 .agent-cite-not_found { color: var(--muted); }
+/* 只给了引用标记、没给原文：无法核验，虚线弱化，别让用户以为已经核过 */
+.agent-cite-nocite { color: var(--muted); border-style: dashed; }
+/* 库内多处命中：出处不唯一，加一条下划线提示 */
+.agent-cite-multi { text-decoration: underline dotted; text-underline-offset: 2px; }
 /* 应用前的覆盖确认：提案期间笔记被用户改过 */
 .agent-drift {
   margin: 8px 12px 0;
