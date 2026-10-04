@@ -27,6 +27,7 @@ vi.mock('../../storage/web', () => ({
     readAll = () => h.readAll();
     read = async (p: string) => (await h.readAll()).get(p) ?? '';
     exists = async (p: string) => (await h.readAll()).has(p);
+    stat = async (p: string) => ((await h.readAll()).has(p) ? { mtime: 0, size: 0 } : null);
     write = h.write;
     remove = async () => {};
     readAllAttachments = async () => new Map<string, Blob>();

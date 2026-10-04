@@ -12,6 +12,8 @@ import { initializeStats, recordAnswer, resetQbankStatsForTests, statOf } from '
 
 const h = vi.hoisted(() => ({
   readAll: (async () => new Map<string, string>()) as () => Promise<Map<string, string>>,
+  attachments: (async () => new Map<string, Blob>()) as () => Promise<Map<string, Blob>>,
+  written: new Map<string, Blob>(),
 }));
 
 vi.mock('../../storage/web', () => ({
@@ -21,11 +23,13 @@ vi.mock('../../storage/web', () => ({
     readAll = () => h.readAll();
     read = async (p: string) => (await h.readAll()).get(p) ?? '';
     exists = async (p: string) => (await h.readAll()).has(p);
+    stat = async (p: string) => ((await h.readAll()).has(p) ? { mtime: 0, size: 0 } : null);
     write = async () => {};
     remove = async () => {};
-    readAllAttachments = async () => new Map<string, Blob>();
-    writeAttachment = async () => {};
+    readAllAttachments = () => h.attachments();
+    writeAttachment = async (p: string, b: Blob) => { h.written.set(p, b); };
     removeAttachment = async () => {};
+    existsAttachment = async (p: string) => (await h.attachments()).has(p);
   },
 }));
 
@@ -40,20 +44,26 @@ function Probe() {
     <div>
       <span data-testid="state">{!v.loaded ? 'loading' : v.loadError ? 'error' : 'ok'}</span>
       <button onClick={v.exportAll}>导出</button>
-      <button onClick={() => { void v.importBackup(backupText); }}>导入</button>
+      <button onClick={() => { void v.importBackup(backupText).then((r) => { resultRef.current = r; }); }}>导入</button>
     </div>
   );
 }
 
 const store = (key: string): unknown[] => JSON.parse(localStorage.getItem(key) ?? '[]') as unknown[];
 
+/** 捕获 importBackup 返回值（overwritten 断言用） */
+let resultRef: { current: { overwritten?: string[]; ok: number; failed: number } | null } = { current: null };
+
 beforeEach(async () => {
   localStorage.clear();
   resetQbankStatsForTests();
   await resetQbankStorageForTests();
   h.readAll = async () => new Map();
+  h.attachments = async () => new Map();
+  h.written = new Map();
   backupText = '';
   captured = null;
+  resultRef.current = null;
   Object.defineProperty(URL, 'createObjectURL', {
     value: (b: Blob) => { captured = b; return 'blob:test'; }, writable: true, configurable: true,
   });
@@ -80,7 +90,7 @@ describe('整包备份：专注记录不丢', () => {
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
     expect(payload.app).toBe('knowlattice');
-    expect(payload.version).toBe(6);
+    expect(payload.version).toBe(7);
     expect(payload.qbankStats).toMatchObject({ '备份题库': { 'q-1': { wrong: 1 } } });
     expect(payload.pomodoros).toEqual([
       { id: 'p-1', day: '2026-09-21', endedAt: 1758400000000, minutes: 25, taskId: 't-1' },
@@ -116,5 +126,48 @@ describe('整包备份：专注记录不丢', () => {
     fireEvent.click(screen.getByText('导入'));
     await waitFor(() => expect(store('knowlattice-todos')).toHaveLength(1));
     expect(store('knowlattice-pomodoros')).toHaveLength(0);
+  });
+
+  it('二进制附件并入 .json 备份：导出成 dataURL，导入时还原为 Blob 附件', async () => {
+    h.attachments = async () => new Map([['_attachments/img.png', new Blob(['hello'], { type: 'image/png' })]]);
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    fireEvent.click(screen.getByText('导出'));
+    await waitFor(() => expect(captured).not.toBeNull());
+
+    const payload = JSON.parse(await captured!.text()) as {
+      version: number;
+      files: Array<{ path: string; content: string }>;
+    };
+    const att = payload.files.find((f) => f.path === '_attachments/img.png');
+    expect(att?.content).toMatch(/^data:image\/png;base64,/);
+
+    backupText = JSON.stringify(payload);
+    fireEvent.click(screen.getByText('导入'));
+    await waitFor(() => expect(h.written.has('_attachments/img.png')).toBe(true));
+    await expect(h.written.get('_attachments/img.png')!.text()).resolves.toBe('hello');
+  });
+
+  it('导入会报告 overwritten 清单：覆盖已有笔记与附件前先查 exists（审计 M2）', async () => {
+    // 库里已有同路径笔记与附件
+    h.readAll = async () => new Map([['旧笔记.md', '# 旧内容\n']]);
+    h.attachments = async () => new Map([['_attachments/old.png', new Blob(['old'])]]);
+    backupText = JSON.stringify({
+      app: 'knowlattice', version: 7,
+      files: [
+        { path: '旧笔记.md', content: '# 新内容（会覆盖）\n' },
+        { path: '新笔记.md', content: '# 全新笔记\n' },
+        { path: '_attachments/old.png', content: 'data:image/png;base64,bmV3' },
+      ],
+    });
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    fireEvent.click(screen.getByText('导入'));
+    await waitFor(() => expect(h.written.has('_attachments/old.png')).toBe(true));
+
+    // 探针记录 importBackup 返回值
+    await waitFor(() => expect(resultRef.current?.overwritten).toBeDefined());
+    expect(resultRef.current!.overwritten).toEqual(['旧笔记.md', '_attachments/old.png']);
+    expect(resultRef.current!.ok).toBe(2);
   });
 });

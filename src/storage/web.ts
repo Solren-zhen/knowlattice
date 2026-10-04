@@ -72,6 +72,12 @@ export class WebAdapter implements StorageAdapter {
     return (await db.get('files', path)) !== undefined;
   }
 
+  async stat(path: string): Promise<{ mtime: number; size: number } | null> {
+    const db = await this.getDB();
+    const rec: FileRecord | undefined = await db.get('files', path);
+    return rec ? { mtime: rec.mtime, size: rec.size } : null;
+  }
+
   async write(path: string, content: string): Promise<void> {
     const db = await this.getDB();
     const rec: FileRecord = {
@@ -130,5 +136,10 @@ export class WebAdapter implements StorageAdapter {
   async removeAttachment(path: string): Promise<void> {
     const db = await this.getDB();
     await db.delete('attachments', path);
+  }
+
+  async existsAttachment(path: string): Promise<boolean> {
+    const db = await this.getDB();
+    return (await db.get('attachments', path)) !== undefined;
   }
 }

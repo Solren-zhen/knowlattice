@@ -13,6 +13,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StorageAdapter } from '../storage/adapter';
 import { WebAdapter } from '../storage/web';
+import { TauriAdapter } from '../storage/tauri';
+import { isTauri } from '../storage/tauriEnv';
+import { hasChosenVault, getStoredVaultDir, storeVaultDir, pickVaultFolder, authorizeVaultDir } from '../storage/vaultFolder';
+import { migrateIndexedDbToFolder } from '../storage/migrateToFolder';
 import { parseFrontmatterCached } from './parser';
 import { rebuildLinkIndex, updateLinksForPath, backlinks, type LinkIndex } from './linkIndex';
 import { exportSrsState, importSrsState } from './srs';
@@ -26,6 +30,8 @@ import { exportPomodoros, importPomodoros } from './pomodoro';
 import { pushSnapshot } from './history';
 import { repairMarkdown, type MarkdownRepairChange } from './markdownRepair';
 import { exportPathwayTemplates, importPathwayTemplates } from './pathwayTemplates';
+import { enqueueWrite } from './writeQueue';
+import { toast } from './feedback';
 
 export interface TreeNode {
   name: string;
@@ -44,6 +50,10 @@ export interface ImportResult {
   failed: number;
   repaired?: number;
   repairedFiles?: MarkdownRepairFile[];
+  /** 本次导入覆盖掉的已存在路径（笔记与附件分列）。
+   *  供调用方弹「已覆盖 N 篇现有笔记」确认——恢复备份是覆盖性写，
+   *  用户应当知道哪些现有文件被换掉了（审计 M2）。 */
+  overwritten?: string[];
 }
 
 /** 只接受 vault 内的 POSIX 相对路径；导入备份与未来的 Tauri 文件适配器共用。 */
@@ -90,7 +100,40 @@ export function buildTree(paths: string[]): TreeNode[] {
   return root;
 }
 
-const adapter: StorageAdapter = new WebAdapter();
+/** 桌面端（Tauri）写真实文件系统，浏览器版（含离线包展示面）用 IndexedDB。
+ *  桌面端 vault 目录来自用户选择（localStorage 持久化，vaultFolder.ts）：
+ *  null = 默认 <文档>/KnowLattice；「更换库文件夹」后重建适配器并触发整库重载。 */
+let adapter: StorageAdapter = isTauri() ? new TauriAdapter(getStoredVaultDir()) : new WebAdapter();
+
+/** 桌面端启动准备（useVault 每次加载前调用）：
+ *  1. 首次启动弹系统目录选择框定 vault 位置，取消则用默认 <文档>/KnowLattice；
+ *  2. 向 Rust 端重申 fs 运行时作用域（授权不跨重启持久，顺带自愈路径不一致）；
+ *  3. IndexedDB → 文件夹一次性迁移（标记文件幂等，失败下次自动重试）。
+ *  StrictMode 会并发挂载两次 effect：用共享 Promise 保证选择框只弹一次。 */
+let preparePromise: Promise<void> | null = null;
+function prepareTauriVault(): Promise<void> {
+  preparePromise ??= (async () => {
+    if (!hasChosenVault()) {
+      const dir = await pickVaultFolder();
+      storeVaultDir(dir);
+      if (dir) adapter = new TauriAdapter(dir);
+    }
+    await authorizeVaultDir(getStoredVaultDir()).catch((e) => {
+      console.warn('vault 目录授权失败（将依赖上次会话的授权）：', e);
+    });
+    try {
+      const r = await migrateIndexedDbToFolder(adapter);
+      if (!r.skipped && r.notes + r.attachments > 0) {
+        toast(`已把浏览器里的 ${r.notes} 篇笔记、${r.attachments} 个附件迁入库文件夹`, 'ok', 4200);
+      }
+    } catch (e) {
+      console.error('IndexedDB → 文件夹迁移失败（下次启动自动重试）：', e);
+    }
+  })().finally(() => {
+    preparePromise = null;
+  });
+  return preparePromise;
+}
 
 /** IndexedDB 并发写入分批大小 */
 const WRITE_BATCH = 100;
@@ -163,6 +206,20 @@ function dataUrlToBlob(dataUrl: string): Blob | null {
   } catch {
     return null;
   }
+}
+
+/** Blob → dataURL（把二进制附件并入 .json 备份；环境不支持 FileReader 时返回 null，跳过该附件不阻塞整包） */
+function blobToDataUrl(blob: Blob): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 /** frontmatter 解析走 parser.ts 模块级缓存（与 React 渲染无关）：content 引用未变即命中 */
@@ -361,10 +418,18 @@ export function useVault() {
   const [linkIndex, setLinkIndex] = useState<LinkIndex>(() => ({ outgoing: new Map(), incoming: new Map() }));
   /** Blob 对象 URL 缓存：同一附件只 createObjectURL 一次 */
   const attachmentUrlCache = useRef(new Map<string, string>());
+  /** 各路径「我们上次看到的磁盘 mtime」。写盘前比对它来发现外部改动（外部编辑器 /
+   *  另一个窗口 / 同步盘）：不一致就先留档再覆盖，绝不静默吃掉别人的内容。 */
+  const diskMtimesRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // 桌面端：先定 vault 目录（首次启动弹选择框）、重申 fs 授权、做 IndexedDB → 文件夹一次性迁移
+      if (isTauri()) {
+        await prepareTauriVault();
+        if (cancelled) return;
+      }
       // 单遍读出全部笔记与附件；空库首次使用自动创建引导笔记
       const fileMap = await adapter.readAll();
       const attachmentMap = await adapter.readAllAttachments();
@@ -423,38 +488,94 @@ export function useVault() {
     setReloadKey((k) => k + 1);
   }, []);
 
+  /** 桌面端：更换库文件夹（设置入口）。选定后重申授权、重建适配器并整库重载；
+   *  新文件夹为空且浏览器里还有数据时，重载过程会自动做一次性迁移。用户取消返回 null。 */
+  const changeVaultFolder = useCallback(async (): Promise<string | null> => {
+    if (!isTauri()) throw new Error('浏览器版数据存在浏览器里，没有文件夹库');
+    const dir = await pickVaultFolder();
+    if (!dir) return null;
+    await authorizeVaultDir(dir); // 先授权再切换：失败则保持原库不动，错误抛给调用方提示
+    storeVaultDir(dir);
+    adapter = new TauriAdapter(dir);
+    setLoaded(false);
+    setReloadKey((k) => k + 1);
+    return dir;
+  }, []);
+
+  /** 记下某路径当前的磁盘 mtime（打开笔记 / 写盘成功后调用）。
+   *  文件不存在就清掉记录——新建笔记本就没有基线可比。 */
+  const syncDiskMtime = useCallback(async (path: string) => {
+    const meta = await adapter.stat(path).catch(() => null);
+    if (meta) diskMtimesRef.current.set(path, meta.mtime);
+    else diskMtimesRef.current.delete(path);
+  }, []);
+
+  /** 打开笔记时记下基线：保存前的冲突检测要拿它当基准。 */
+  useEffect(() => {
+    if (!currentPath) return;
+    void syncDiskMtime(currentPath);
+  }, [currentPath, syncDiskMtime]);
+
+  /** 写盘前的外部改动检测（审计 H2-2）。
+   *  mtime 与基线不一致 = 这个文件在应用之外被改过（外部编辑器 / 另一个窗口 / 同步盘）。
+   *  mtime 只是廉价闸门，真正判定用内容：`touch` 改 mtime 不改内容、以及我们自己刚写过的
+   *  那一版，磁盘内容都会与内存里的上一版相同，不该留档。只有磁盘内容既不是我们要写的、
+   *  也不是我们内存里那一版时，才把磁盘上的版本推进历史版本（可在「历史版本」面板找回），
+   *  然后照常落盘——用户的应用内编辑不被打断，别人的改动也不会被静默吃掉。 */
+  const keepExternalEdit = useCallback(async (path: string, incoming: string) => {
+    const known = diskMtimesRef.current.get(path);
+    if (known === undefined) return; // 本次会话没打开也没写过 → 没有基线，按旧行为写
+    const meta = await adapter.stat(path).catch(() => null);
+    if (!meta || meta.mtime === known) return;
+    const onDisk = await adapter.read(path).catch(() => null);
+    if (onDisk === null || onDisk === incoming) return;
+    if (onDisk === docsRef.current.get(path)) return; // 只是 mtime 变了，内容还是我们那一版
+    await pushSnapshot(path, onDisk);
+  }, []);
+
   /** 保存：**先落盘、再更新内存**。写失败会抛出，调用方据此提示。
    *  旧写法是「先乐观更新内存、catch 里只 console.error」，于是 IndexedDB 写失败时
-   *  界面照样显示「已保存 ✓」、脏点也消失——用户是在「应用说存住了」的前提下丢稿的。 */
+   *  界面照样显示「已保存 ✓」、脏点也消失——用户是在「应用说存住了」的前提下丢稿的。
+   *  同一路径的写通过 enqueueWrite 串行落盘（见 writeQueues 注释），杜绝「先发后到」
+   *  的 rename 覆盖；内存更新仍在各自的 Promise 里按序进行。 */
   const save = useCallback(async (path: string, content: string) => {
     const safePath = safeVaultPath(path);
     if (!safePath) throw new Error('文件路径不安全');
-    const previous = docsRef.current.get(safePath);
-    const structureChanged = !docsRef.current.has(safePath)
-      || linkMetadataSignature(safePath, previous) !== linkMetadataSignature(safePath, content);
-    await adapter.write(safePath, content);
-    const next = new Map(docsRef.current).set(safePath, content);
-    docsRef.current = next;
-    setDocs(next);
-    updateLinksForPath(linkIndex, safePath, content);
-    if (structureChanged) {
-      setStructureDocs(next);
-    }
-    void pushSnapshot(safePath, content);
-  }, [linkIndex]);
+    await enqueueWrite(safePath, async () => {
+      const previous = docsRef.current.get(safePath);
+      const structureChanged = !docsRef.current.has(safePath)
+        || linkMetadataSignature(safePath, previous) !== linkMetadataSignature(safePath, content);
+      // 先看这个文件有没有被应用之外的东西改过：有就留档，再落盘（见 keepExternalEdit）
+      await keepExternalEdit(safePath, content);
+      await adapter.write(safePath, content);
+      await syncDiskMtime(safePath);
+      const next = new Map(docsRef.current).set(safePath, content);
+      docsRef.current = next;
+      setDocs(next);
+      updateLinksForPath(linkIndex, safePath, content);
+      if (structureChanged) {
+        setStructureDocs(next);
+      }
+      void pushSnapshot(safePath, content);
+    });
+  }, [linkIndex, keepExternalEdit, syncDiskMtime]);
 
-  /** 删除：先落盘、再改内存；失败抛出且内存保持原样（不会再「删了重启又回来」） */
+  /** 删除：先落盘、再改内存；失败抛出且内存保持原样（不会再「删了重启又回来」）。
+   *  同样进同路径写队列：避免「删除刚完成、自动保存的 rename 又把文件写回来」。 */
   const remove = useCallback(async (path: string) => {
     const safePath = safeVaultPath(path);
     if (!safePath) throw new Error('文件路径不安全');
-    await adapter.remove(safePath);
-    const next = new Map(docsRef.current);
-    next.delete(safePath);
-    docsRef.current = next;
-    setDocs(next);
-    if (safePath.endsWith('.md')) setStructureDocs(next);
-    updateLinksForPath(linkIndex, safePath, '');
-    setCurrentPath((cur) => (cur === safePath ? null : cur));
+    await enqueueWrite(safePath, async () => {
+      await adapter.remove(safePath);
+      diskMtimesRef.current.delete(safePath); // 文件没了，基线一并作废
+      const next = new Map(docsRef.current);
+      next.delete(safePath);
+      docsRef.current = next;
+      setDocs(next);
+      if (safePath.endsWith('.md')) setStructureDocs(next);
+      updateLinksForPath(linkIndex, safePath, '');
+      setCurrentPath((cur) => (cur === safePath ? null : cur));
+    });
   }, [linkIndex]);
 
   /** 批量删除：落盘分批限流（避免一次发几千个 IndexedDB 事务），返回**删失败的路径**。
@@ -482,15 +603,24 @@ export function useVault() {
     return failed;
   }, [linkIndex]);
 
-  /** 导出全部笔记为单个 .json 备份文件（直接用内存缓存；新附件库不并入 JSON，
-   *  旧版残留的 dataURL 附件仍随 files 字段导出以保证不丢数据） */
+  /** 导出全部笔记为单个 .json 备份文件（直接用内存缓存）。
+   *  v7 起把二进制附件也以 dataURL 并入 files：此前新附件库只进 ZIP 导出，用户以为
+   *  「备份到 .json」就是全部，换设备才发现图片全丢。旧版残留的 dataURL 附件原样保留。 */
   const exportAll = useCallback(async () => {
-    const files = [...docs]
-      .filter(([path]) => path.endsWith('.md') || path.startsWith('_attachments/'))
-      .map(([path, content]) => ({ path, content }));
+    const fileMap = new Map<string, string>();
+    for (const [path, content] of docs) {
+      if (path.endsWith('.md') || path.startsWith('_attachments/')) fileMap.set(path, content);
+    }
+    // 新附件库（Blob）并入备份：转不成 dataURL 的跳过，不阻塞整包导出
+    for (const [path, blob] of attachments) {
+      if (fileMap.has(path)) continue;
+      const dataUrl = await blobToDataUrl(blob);
+      if (dataUrl) fileMap.set(path, dataUrl);
+    }
+    const files = [...fileMap].map(([path, content]) => ({ path, content }));
     const payload = {
       app: 'knowlattice',
-      version: 6,
+      version: 7,
       exportedAt: new Date().toISOString(),
       files,
       // v2 起随备份保存 SRS 复习调度进度（旧版备份无此字段，导入时自动跳过）
@@ -517,7 +647,7 @@ export function useVault() {
     a.download = `lattice-backup-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [docs]);
+  }, [docs, attachments]);
 
   /** 从备份 .json 恢复（合并模式：同名路径覆盖，其余保留）；笔记/复习进度/题库/错题一并恢复。
    *  旧版备份里的 dataURL 附件会自动转回 Blob 附件库；恢复后直接并入内存缓存，不再全库重读存储。 */
@@ -550,6 +680,16 @@ export function useVault() {
     const notes = valid.filter((f) => !f.path.startsWith('_attachments/'));
     const repaired = repairEntries(notes);
     const legacyAttachments = valid.filter((f) => f.path.startsWith('_attachments/'));
+
+    // 审计 M2：先记录哪些路径会被覆盖（写之前查 exists），恢复完成时随结果返回。
+    // 恢复是覆盖性写，调用方需要把「哪些现有文件被换掉」亮给用户。
+    const overwritten: string[] = [];
+    for (const f of repaired.entries) {
+      if (await adapter.exists(f.path)) overwritten.push(f.path);
+    }
+    for (const f of legacyAttachments) {
+      if (await adapter.existsAttachment(f.path)) overwritten.push(f.path);
+    }
 
     const failedNotes = await writeMany(repaired.entries);
     const failedSet = new Set(failedNotes);
@@ -609,6 +749,7 @@ export function useVault() {
       failed: failedSet.size + attachFailed + invalidFiles,
       repaired: repairCount(repairedFiles),
       repairedFiles,
+      overwritten,
     };
   }, [linkIndex]);
 
@@ -794,6 +935,78 @@ export function useVault() {
     return count;
   }, [docs, attachments]);
 
+  /** 桌面端专用：把此前存在浏览器 IndexedDB 里的笔记/附件一次性写入本机文件夹
+   *  （<文档>/KnowLattice）。切换存储后端后，老用户的桌面端数据都还在 IndexedDB 里，
+   *  不迁移的话界面上就像「笔记全丢了」。合并语义：同名覆盖，其余保留；幂等，可重复点。
+   *  浏览器版不适用（源与目标都是同一个 IndexedDB），返回全 0。 */
+  const migrateFromBrowser = useCallback(async (): Promise<{ notes: number; attachments: number; failed: number }> => {
+    if (!isTauri()) return { notes: 0, attachments: 0, failed: 0 };
+    const src = new WebAdapter();
+    const fileMap = await src.readAll();
+    const attachmentMap = await src.readAllAttachments();
+
+    const notes: Array<{ path: string; content: string }> = [];
+    /** 旧版（v1）把 dataURL 附件塞在 files store 里，单独转换处理 */
+    const legacyAttachments: Array<{ path: string; content: string }> = [];
+    for (const [rawPath, content] of fileMap) {
+      const path = safeVaultPath(rawPath);
+      if (!path) continue;
+      if (path.startsWith('_attachments/')) legacyAttachments.push({ path, content });
+      else notes.push({ path, content });
+    }
+
+    const failedPaths = await writeMany(notes);
+    const failedSet = new Set(failedPaths);
+
+    const migratedBlobs = new Map<string, Blob>();
+    let attachFailed = 0;
+    for (const [rawPath, blob] of attachmentMap) {
+      const path = safeVaultPath(rawPath);
+      if (!path) continue;
+      try {
+        await adapter.writeAttachment(path, blob);
+        migratedBlobs.set(path, blob);
+      } catch (e) {
+        console.error('附件迁移失败：', path, e);
+        attachFailed++;
+      }
+    }
+    for (const f of legacyAttachments) {
+      const blob = dataUrlToBlob(f.content);
+      try {
+        if (blob) {
+          await adapter.writeAttachment(f.path, blob);
+          migratedBlobs.set(f.path, blob);
+        } else {
+          // 转不成 Blob 的旧数据按原文写回，至少不丢
+          await adapter.write(f.path, f.content);
+        }
+      } catch (e) {
+        console.error('旧附件迁移失败：', f.path, e);
+        attachFailed++;
+      }
+    }
+
+    // 并入内存：迁移后无需整库重读，界面直接反映；只并入真正写成功的
+    const okNotes = notes.filter((f) => !failedSet.has(f.path));
+    if (okNotes.length > 0) {
+      const next = new Map(docsRef.current);
+      for (const f of okNotes) next.set(f.path, f.content);
+      docsRef.current = next;
+      setDocs(next);
+      setStructureDocs(next);
+      for (const f of okNotes) updateLinksForPath(linkIndex, f.path, f.content);
+    }
+    if (migratedBlobs.size > 0) {
+      setAttachments((prev) => {
+        const next = new Map(prev);
+        for (const [p, b] of migratedBlobs) next.set(p, b);
+        return next;
+      });
+    }
+    return { notes: okNotes.length, attachments: migratedBlobs.size, failed: failedSet.size + attachFailed };
+  }, [linkIndex]);
+
   /** 所有可用链接名（文件名 + 标题 + alias 去重），供 [[ 自动补全。仅 .md 参与。
    *
    *  排序用 localeCompare(…, 'zh') 是为了**拼音序**（换成码点序，中文列表看着就是乱的），
@@ -854,6 +1067,10 @@ export function useVault() {
     importBackup,
     importMdFiles,
     repairExistingMarkdown,
+    migrateFromBrowser,
+    changeVaultFolder,
+    /** 当前 vault 目录（桌面端 = 默认根名或用户所选绝对路径；浏览器端 null），设置入口展示用 */
+    vaultDir: isTauri() && adapter instanceof TauriAdapter ? adapter.root : null,
     adapter,
   };
 }
