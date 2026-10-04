@@ -13,6 +13,7 @@ import * as mammoth from 'mammoth';
 import TurndownService from 'turndown';
 import { openPdf } from './pdfLib';
 import { normalizeMarkdownSpacing } from './mdSpace';
+import { pageAnchor } from './pageAnchor';
 
 export interface ConvertResult {
   /** 推断标题（文件名去扩展名） */
@@ -301,7 +302,11 @@ export function linesToMarkdown(pages: PdfLine[][], g: PdfGlobals): string {
 
   const push = (s: string) => out.push(s);
 
-  for (const lines of pages) {
+  for (let pi = 0; pi < pages.length; pi++) {
+    const lines = pages[pi];
+    // 页首写入页码锚点（独占一行）：剥离后不显示，检索与核验据此定位页码。
+    // 跨页不合并段落（页尾已把 prevKind 置空），锚点不会混进上一段。
+    push(pageAnchor(pi + 1));
     for (const line of lines) {
       const kind = classifyLine(line, g, hh);
       // 加粗/斜体行内包裹（标题自带强调，跳过）。

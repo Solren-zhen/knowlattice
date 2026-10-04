@@ -27,6 +27,7 @@
  */
 import { openPdf } from './pdfLib';
 import { normalizeMarkdownSpacing } from './mdSpace';
+import { pageAnchor } from './pageAnchor';
 import type { ConvertResult } from './convert';
 
 const BASE = import.meta.env.BASE_URL;
@@ -120,7 +121,7 @@ export async function ocrPdfToMarkdown(
     },
   });
 
-  const pages: string[] = [];
+  const pages: Array<{ page: number; text: string }> = [];
   try {
     for (let p = 1; p <= total; p++) {
       onProgress?.({
@@ -133,7 +134,7 @@ export async function ocrPdfToMarkdown(
       canvas.width = 0;
       canvas.height = 0;
       const text = collapseCjkSpaces(res.data.text).replace(/\n{3,}/g, '\n\n').trim();
-      if (text) pages.push(text);
+      if (text) pages.push({ page: p, text });
     }
   } finally {
     await worker.terminate();
@@ -146,7 +147,10 @@ export async function ocrPdfToMarkdown(
     throw new Error('OCR 没有识别出任何文字。请确认这份 PDF 的扫描图像清晰、方向正确。');
   }
 
-  const markdown = normalizeMarkdownSpacing(pages.join('\n\n'));
+  // 每页前置页码锚点（剥离后不显示），与文本层 PDF 的坐标口径一致
+  const markdown = normalizeMarkdownSpacing(
+    pages.map((pg) => `${pageAnchor(pg.page)}\n${pg.text}`).join('\n\n')
+  );
   const warning = truncated
     ? '已识别前 ' + total + ' 页（全文 ' + doc.numPages + ' 页）。OCR 较慢，超出部分请分批处理。'
     : '文字由 OCR 识别，可能存在错字，建议导入后通读一遍。';

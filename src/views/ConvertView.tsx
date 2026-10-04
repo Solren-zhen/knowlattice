@@ -9,6 +9,7 @@ import { docxToMarkdown, pdfToMarkdown, type ConvertResult } from '../core/conve
 import { anydocErrorCode, anydocToMarkdown } from '../core/anydoc';
 import { ocrPdfToMarkdown } from '../core/ocr';
 import { netErrorHint } from '../core/netError';
+import { stripPageAnchors } from '../core/pageAnchor';
 import { toast } from '../core/feedback';
 import { IconConvert, IconClose } from './icons';
 import Loading from './Loading';
@@ -200,7 +201,7 @@ export default function ConvertView({ onSave, onClose }: Props) {
             </div>
             {showPreview ? (
               <div className="convert-preview-scroll">
-                <div className="preview" dangerouslySetInnerHTML={{ __html: md.render(markdown) }} />
+                <div className="preview" dangerouslySetInnerHTML={{ __html: md.render(stripPageAnchors(markdown)) }} />
               </div>
             ) : (
               <textarea
