@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { quizProgressReport, reviewDueReport, studySummaryReport, weakChaptersReport } from '../aiLearning';
-import { importMistakes } from '../mistakes';
+import { clearMistake, importMistakes, loadMistakes } from '../mistakes';
+import { recordCalibration } from '../qbankCalib';
 import type { QuizBank } from '../qbank';
 import type { QStat, StatsMap } from '../qbankStats';
 
@@ -21,6 +22,11 @@ function dueCard(dueIso: string) {
 afterEach(() => {
   localStorage.clear();
 });
+
+/** 清空错题本：模块缓存不随 localStorage.clear() 复位，所以显式逐条清（顺序无关） */
+function wipeMistakes() {
+  for (const p of Object.keys(loadMistakes())) clearMistake(p);
+}
 
 describe('reviewDueReport', () => {
   it('空库返回无笔记提示', () => {
@@ -70,6 +76,25 @@ describe('studySummaryReport', () => {
     }));
     expect(studySummaryReport(PATHS, DOCS)).toContain('今日到期 1 张');
   });
+
+  it('把握度校准：没样本时如实说没有，不编造自评水平', () => {
+    expect(studySummaryReport(PATHS, DOCS)).toContain('把握度校准：还没有样本');
+  });
+
+  it('把握度校准：并排给出平均自信与实际正确率', () => {
+    recordCalibration(4, true);
+    recordCalibration(4, false);
+    recordCalibration(5, true);
+    const out = studySummaryReport(PATHS, DOCS);
+    expect(out).toContain('3 次作答报了把握度');
+    expect(out).toContain('平均自信 87%、实际答对 67%');
+    expect(out).toContain('高估 20 个百分点');
+  });
+
+  it('把握度校准：自信与实际相符时给正面结论', () => {
+    for (const ok of [true, true, true, false, false]) recordCalibration(3, ok);
+    expect(studySummaryReport(PATHS, DOCS)).toContain('校准得不错');
+  });
 });
 
 describe('weakChaptersReport', () => {
@@ -87,6 +112,29 @@ describe('weakChaptersReport', () => {
     expect(out).toContain('药理学：3 次');
     expect(out).toContain('药理/洋地黄.md「洋地黄」3 次');
     expect(out).toContain('1 天前');
+  });
+
+  it('错因分布：按条数统计各档，未标注单独说明', () => {
+    wipeMistakes(); // 模块缓存不随 afterEach 的 localStorage.clear() 复位，这里显式清空
+    const now = Date.now();
+    importMistakes({
+      'a.md': { path: 'a.md', chapter: '生理学', title: 'A', count: 1, lastFailedAt: now, reason: 'knowledge' },
+      'b.md': { path: 'b.md', chapter: '生理学', title: 'B', count: 2, lastFailedAt: now, reason: 'knowledge' },
+      'c.md': { path: 'c.md', chapter: '药理学', title: 'C', count: 1, lastFailedAt: now, reason: 'confusion' },
+      'd.md': { path: 'd.md', chapter: '药理学', title: 'D', count: 1, lastFailedAt: now },
+    });
+    const out = weakChaptersReport();
+    // 计数单位是错题条数（不是失败次数）：b.md 失败 2 次但只算 1 条
+    expect(out).toContain('错因分布（已标注 3 条）：知识没记住 2、概念混淆 1、审题偏差 0、临床推理跳步 0；未标注 1 条。');
+    expect(out).toContain('a.md「A」1 次（最近 今天）（知识没记住）');
+  });
+
+  it('错因都没标注时明说，不假装有分布', () => {
+    wipeMistakes();
+    importMistakes({
+      'a.md': { path: 'a.md', chapter: '生理学', title: 'A', count: 1, lastFailedAt: Date.now() },
+    });
+    expect(weakChaptersReport()).toContain('1 条错题都还没标注错因');
   });
 });
 
