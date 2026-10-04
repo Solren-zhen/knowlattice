@@ -1,8 +1,9 @@
 /**
  * 三栏主界面（M1~M3）：章节树 | 编辑器 | 预览 + 反链面板 + Ctrl+K 快速搜索。
  */
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVault } from '../core/vault';
+import { isTauri } from '../storage/tauriEnv';
 import { noteTemplate, parseFrontmatterCached, type NoteType } from '../core/parser';
 import { appendExcerpt } from '../core/noteGen';
 import { noteStatus } from '../core/srs';
@@ -43,7 +44,7 @@ const ConvertView = lazy(() => import('./ConvertView'));
 // 历史版本面板：快照读取/恢复
 const HistoryPanel = lazy(() => import('./HistoryPanel'));
 import AiPanel from './AiPanel';
-import AiAgentPanel from './AiAgentPanel';
+import AiAgentPanel, { type QuoteSelection } from './AiAgentPanel';
 import DraftGen from './DraftGen';
 import TodoView from './TodoView';
 import TagBrowser from './TagBrowser';
@@ -89,6 +90,8 @@ export default function Workspace() {
   const [dashOpen, setDashOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  /** 编辑器「问 AI」桥接：选段暂存，面板打开后由 quote prop 交给 AiAgentPanel 消费 */
+  const [agentQuote, setAgentQuote] = useState<QuoteSelection | null>(null);
   const [draftOpen, setDraftOpen] = useState(false);
   const [draftText, setDraftText] = useState('');
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -119,6 +122,26 @@ export default function Workspace() {
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
   /** 编辑器注册的「跳转到行」实现（本页目录点击用），模式同 pathwayInsertRef */
   const outlineJumpRef = useRef<((line: number) => void) | null>(null);
+  /** 根节点：右侧 AI 面板让位时要量导航轨实际宽度（见下面的 ResizeObserver） */
+  const appRef = useRef<HTMLDivElement>(null);
+
+  /** 让位宽度要扣掉导航轨：轨宽由 Rail 自己的展开偏好决定（66 / 208px），这里直接量
+   *  实际宽度写进 --rail-w，比 :has() 选择器可靠，也不依赖浏览器对 :has 的支持。
+   *  用 useLayoutEffect：首帧绘制前就写好，避免「先按 66px 算、再跳一下」的闪烁；
+   *  必须放在加载/错误页的早返回之前（Hook 不能条件调用）。
+   *  jsdom 没有 ResizeObserver，测试环境跳过（CSS 里的 66px 兜底仍然生效）。 */
+  useLayoutEffect(() => {
+    const app = appRef.current;
+    if (!app || typeof ResizeObserver === 'undefined') return;
+    const rail = app.querySelector('.rail');
+    if (!rail) return;
+    const sync = () => app.style.setProperty('--rail-w', `${Math.round(rail.getBoundingClientRect().width)}px`);
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(rail);
+    return () => ro.disconnect();
+    // 依赖 loaded：加载页/错误页的 .app 里没有导航轨，那时早退；进入主界面后要重新挂观察
+  }, [vault.loaded]);
 
   // 稳定引用：让 saveCurrent / openNoteCore 等 useCallback 不随渲染链失效，
   // 也避免下游（如 GraphView）因回调身份变化而整个重建
@@ -555,13 +578,18 @@ export default function Workspace() {
                     : tagOpen ? 'tag'
                       : dashOpen ? 'dashboard'
                         : aiOpen ? 'ai'
-                          : draftOpen ? 'draft'
-                            : historyOpen ? 'history'
-                              : convertOpen ? 'convert'
-                                : null;
+                          : agentOpen ? 'agent'
+                            : draftOpen ? 'draft'
+                              : historyOpen ? 'history'
+                                : convertOpen ? 'convert'
+                                  : null;
+
+  // 右侧 AI 面板打开时把主区挤窄，避免面板压住笔记（见 index.css 的 .app.ai-open / .agent-open）。
+  // 面板自身是 position: fixed，不受这里的 padding 影响，只是把左侧内容让出等宽空间。
+  const sidePanelClass = agentOpen ? ' agent-open' : aiOpen ? ' ai-open' : '';
 
   return (
-    <div className="app" onKeyDown={onKeyDown} tabIndex={-1}>
+    <div className={`app${sidePanelClass}`} ref={appRef} onKeyDown={onKeyDown} tabIndex={-1}>
       {/* 左侧导航轨：功能入口 + 字体/主题切换（见 Rail.tsx） */}
       <Rail
         activeItem={activeRailItem}
@@ -580,8 +608,9 @@ export default function Workspace() {
         onTodo={() => setTodoOpen(true)}
         onTag={() => setTagOpen(true)}
         onDash={() => setDashOpen(true)}
-        onAi={() => setAiOpen((v) => !v)}
-        onAgent={() => setAgentOpen((v) => !v)}
+        // 两个右侧面板共用同一块让位空间，同时打开会互相压住，故互斥
+        onAi={() => { setAiOpen((v) => !v); setAgentOpen(false); }}
+        onAgent={() => { setAgentOpen((v) => !v); setAiOpen(false); }}
         onDraft={openDraft}
         onPdf={() => setPdfOpen(true)}
         onConvert={() => setConvertOpen(true)}
@@ -623,6 +652,9 @@ export default function Workspace() {
               onImport={(t) => vault.importBackup(t)}
               onImportMd={(files) => vault.importMdFiles(files)}
               onRepair={() => vault.repairExistingMarkdown()}
+              onMigrateFromBrowser={isTauri() ? () => vault.migrateFromBrowser() : undefined}
+              onChangeVaultFolder={isTauri() ? () => vault.changeVaultFolder() : undefined}
+              vaultDir={vault.vaultDir}
               onRemove={(paths) => {
                 if (vault.currentPath && paths.includes(vault.currentPath)) {
                   setDraft(null);
@@ -722,6 +754,12 @@ export default function Workspace() {
                   onOpenLink={handleOpenLink}
                   onAttach={(name, blob) => vault.saveAttachment(name, blob)}
                   onDraft={(text) => { setDraftText(text); setDraftOpen(true); }}
+                  onAskAi={(text) => {
+                    // 选段带上当前笔记路径：模型能知道这段话出自哪篇笔记
+                    setAgentQuote({ text, path: vault.currentPath });
+                    setAiOpen(false); // 与 AI 助手面板互斥（共用同一块让位空间）
+                    setAgentOpen(true);
+                  }}
                   onPathwayReady={(insert) => { pathwayInsertRef.current = insert; }}
                   headingLines={outline.map((o) => o.line)}
                   onActiveHeading={setActiveHeading}
@@ -895,6 +933,8 @@ export default function Workspace() {
           onOpenPath={(p) => openNote(p)}
           currentPath={vault.currentPath}
           resolveLink={vault.resolveLink}
+          quote={agentQuote}
+          onQuoteConsumed={() => setAgentQuote(null)}
         />
       )}
       {noticeOpen && <SafetyNotice onClose={() => setNoticeOpen(false)} />}
