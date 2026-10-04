@@ -16,7 +16,7 @@ import {
   DEFAULT_RULES, chapterCounts, composeQuestions, filterPool,
   type ComposeOrder, type ComposeRules, type ComposeScope,
 } from '../core/qbankCompose';
-import { bankProgress, consumeSaveFailure, initializeStats, loadStats, recordAnswer } from '../core/qbankStats';
+import { bankProgress, chapterMastery, consumeSaveFailure, initializeStats, loadStats, recordAnswer } from '../core/qbankStats';
 import { CONFIDENCE_LABELS, CONFIDENCE_VALUES, recordCalibration, type Confidence } from '../core/qbankCalib';
 import { buildChapterIndex, questionNoteLabel, resolveQuestionNote } from '../core/qbankNotes';
 import { recordMistake } from '../core/mistakes';
@@ -108,6 +108,15 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
     for (const b of banks) m.set(b.name, bankProgress(b.name, b.questions.map((x) => x.id), stats));
     return m;
   }, [banks, stats]);
+
+  /** 章节掌握度：软门控用——只在正确率低时提示「先回看」，不锁内容、不禁用任何按钮。
+   *  组题弹窗与练习中都要用，所以按「当前在看的题库」（composing 优先，其次 session）算；
+   *  按整库而不是本轮 session 算：抽题是随机的，只看本轮会低估样本量。 */
+  const mastery = useMemo(() => {
+    const name = composing?.name ?? session?.bankName;
+    const b = banks.find((x) => x.name === name);
+    return b ? chapterMastery(b, stats) : [];
+  }, [banks, stats, composing?.name, session?.bankName]);
 
   /** 题库笔记索引：题库题目的 chapter 是「学科·章节」，题库笔记路径是
    *  「题库/<源>/<学科>/<章节>.md」，两边精确对应（详见 core/qbankNotes.ts）。 */
@@ -276,6 +285,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   if (session && q) {
     const answered = results[idx] !== undefined;
     const notePath = notePathOf(q);
+    // 只认题目自带 chapter 的章节：没标章节的题归到空串，提示「未标章节」没有意义
+    const weakChapter = q.chapter ? mastery.find((m) => m.chapter === q.chapter && m.weak) : undefined;
     return (
       <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
         <DialogSurface className="panel quiz-panel" label={`${session.bankName}练习，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
@@ -391,6 +402,13 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
                 你报的是「{CONFIDENCE_LABELS[confidence]}」，这题{results[idx] ? '答对了' : '答错了'}
               </p>
             )}
+            {/* 软门控：正确率偏低时只提示「先回看」，不锁下一题、不禁用任何按钮 */}
+            {answered && weakChapter && (
+              <p className="quiz-gate" role="status">
+                这一章你做过 {weakChapter.seen} 题、答错 {weakChapter.wrong} 题（正确率 {Math.round(weakChapter.accuracy * 100)}%）
+                —— 建议先回看{notePath ? '本节笔记' : '对应章节的笔记'}再继续练。
+              </p>
+            )}
             {q.type === 'recall' && revealed && !answered && (
               <div className="quiz-actions">
                 <button className="btn-small" onClick={() => void judge(true)}>我答对了</button>
@@ -477,6 +495,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
     const pool = filterPool(b.questions, rules, stats, b.name);
     const willPick = rules.count > 0 ? Math.min(rules.count, pool.length) : pool.length;
     const chapters = chapterCounts(b.questions);
+    /** 选中的章节里正确率偏低的：组题前提示先回看，但不拦着不让练 */
+    const weakPicked = mastery.filter((m) => m.weak && rules.chapters.includes(m.chapter)).slice(0, 3);
     const toggleChapter = (c: string) =>
       setRules((r) => ({
         ...r,
@@ -539,6 +559,14 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
               <button className="chip" onClick={() => setRules((r) => ({ ...r, chapters: [] }))}>不限章节</button>
               <button className="chip" onClick={() => setRules((r) => ({ ...r, chapters: chapters.map((c) => c.chapter) }))}>全选</button>
             </div>
+
+            {/* 软门控：只提示，不禁用「开始练习」 */}
+            {weakPicked.length > 0 && (
+              <p className="quiz-gate" role="status">
+                选中的章节里 {weakPicked.map((m) => `${m.chapter}（正确率 ${Math.round(m.accuracy * 100)}%，做过 ${m.seen} 题）`).join('、')} 偏低
+                —— 建议先回看对应笔记再练。
+              </p>
+            )}
 
             <p className="muted compose-summary">
               本轮将抽 <b>{willPick}</b> 题（候选 {pool.length} 题）。答错过的题与已到期的题权重更高，会优先出现。
