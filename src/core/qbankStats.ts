@@ -18,6 +18,7 @@
  */
 import { createEmptyCard, fsrs, generatorParameters, Rating as FSRSRating, type Card } from 'ts-fsrs';
 import { getAllQuestionStats, migrateLegacyQuestionStats, putQuestionStat, removeQuestionStats, replaceQuestionStats, type StoredQuestionStat } from '../storage/qbank';
+import type { QuizBank } from './qbank';
 
 /** 一道题的逐题记录。时间都是 epoch **毫秒**（存储层再折算成分钟）。 */
 export interface QStat {
@@ -283,4 +284,54 @@ export function bankProgress(bank: string, qids: string[], stats: StatsMap = loa
     if (isDue(s, now)) due++;
   }
   return { total: qids.length, seen, wrong, due };
+}
+
+/**
+ * 章节掌握度：软门控（提示「先回看」，**不锁任何内容**）的数据来源。
+ *
+ * 按**题**统计而不是按次：一道题错过一次就算错过，反复刷同一道题不会把正确率压成 0。
+ * 没作答过的题不进样本——否则整章没练过会以 0% 出现，把「还没练」误报成「掌握差」。
+ * 样本不足（< MASTERY_MIN_SEEN）一律 weak=false：三题以内的正确率没有说服力。
+ */
+export const MASTERY_MIN_SEEN = 3;
+export const MASTERY_WEAK_ACCURACY = 0.6;
+
+export interface ChapterMastery {
+  /** 题库里的章节名；题目没写 chapter 的归到空串，调用方自行决定要不要提示 */
+  chapter: string;
+  /** 这一章有作答记录的题数 */
+  seen: number;
+  /** 其中答错过的题数 */
+  wrong: number;
+  /** (seen - wrong) / seen；seen 为 0 时记 0（配合 weak=false 不会误报） */
+  accuracy: number;
+  /** 样本够且正确率偏低 */
+  weak: boolean;
+}
+
+/** 按章节汇总掌握度，最差的排前面（正确率相同则样本多的在前） */
+export function chapterMastery(bank: QuizBank, stats: StatsMap = loadStats()): ChapterMastery[] {
+  const per = stats[bank.name] ?? {};
+  const groups = new Map<string, { seen: number; wrong: number }>();
+  for (const q of bank.questions) {
+    const s = per[q.id];
+    if (!s) continue;
+    const key = q.chapter || '';
+    const g = groups.get(key) ?? { seen: 0, wrong: 0 };
+    g.seen += 1;
+    if (s.wrong > 0) g.wrong += 1;
+    groups.set(key, g);
+  }
+  return [...groups]
+    .map(([chapter, g]) => {
+      const accuracy = g.seen ? (g.seen - g.wrong) / g.seen : 0;
+      return {
+        chapter,
+        seen: g.seen,
+        wrong: g.wrong,
+        accuracy,
+        weak: g.seen >= MASTERY_MIN_SEEN && accuracy < MASTERY_WEAK_ACCURACY,
+      };
+    })
+    .sort((a, b) => a.accuracy - b.accuracy || b.seen - a.seen);
 }

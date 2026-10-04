@@ -15,7 +15,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import QuizView from '../QuizView';
 import type { QuizQuestion } from '../../core/qbank';
 import { getAllQuestionStats, resetQbankStorageForTests } from '../../storage/qbank';
-import { loadStats, resetQbankStatsForTests } from '../../core/qbankStats';
+import { loadStats, recordAnswer, resetQbankStatsForTests } from '../../core/qbankStats';
 
 const BANK = '绿皮书·生理学';
 const CH1 = '生理学·第1章 绪论';
@@ -297,5 +297,52 @@ describe('自动组题 · 把握度校准', () => {
     fireEvent.click(screen.getByRole('button', { name: '我答对了' }));
     await waitFor(() => expect(text(container)).toContain('你报的是「很确定」，这题答对了'));
     expect(JSON.parse(localStorage.getItem('knowlattice-qcalib') ?? '{}')).toEqual({ 5: { n: 1, correct: 1 } });
+  });
+});
+
+describe('自动组题 · 软门控', () => {
+  /** 选中第 n 个章节复选框（组题弹窗里的章节列表） */
+  const pickChapter = (container: HTMLElement, i: number) => {
+    const boxes = Array.from(container.querySelectorAll<HTMLInputElement>('.compose-chapter input'));
+    fireEvent.click(boxes[i]);
+  };
+  const gate = (container: HTMLElement) => container.querySelector('.quiz-gate')?.textContent ?? '';
+
+  it('章节正确率偏低时提示先回看，但练习照常可以开始、可以继续', async () => {
+    // 第一章 3 题全错 → 样本刚好到阈值且正确率 0%
+    for (const id of ['q1-0', 'q1-1', 'q1-2']) await recordAnswer(BANK, id, false);
+    const { container } = await setup();
+    openCompose();
+    expect(gate(container)).toBe(''); // 没选章节时不提示
+
+    pickChapter(container, 0); // 第一章
+    expect(gate(container)).toContain('生理学·第1章 绪论（正确率 0%，做过 3 题）');
+    expect(gate(container)).toContain('建议先回看');
+    // 软门控：不禁用「开始练习」
+    expect((screen.getByRole('button', { name: '开始练习' }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(chip('10'));
+    fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+    // 答错一题后同样只提示、不挡路
+    fireEvent.click(screen.getByRole('button', { name: /容易结合氧/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /下一题/ })).toBeTruthy());
+    expect(gate(container)).toContain('建议先回看');
+    expect(gate(container)).toContain('这一章你做过');
+    expect((screen.getByRole('button', { name: /下一题/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('样本不足时不下结论（两题全错也不提示）', async () => {
+    await recordAnswer(BANK, 'q1-0', false);
+    await recordAnswer(BANK, 'q1-1', false);
+    const { container } = await setup();
+    openCompose();
+    pickChapter(container, 0);
+    expect(gate(container)).toBe('');
+
+    fireEvent.click(chip('10'));
+    fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+    fireEvent.click(screen.getByRole('button', { name: /容易结合氧/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /下一题/ })).toBeTruthy());
+    expect(gate(container)).toBe('');
   });
 });

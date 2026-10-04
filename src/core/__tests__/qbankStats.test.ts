@@ -2,9 +2,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAllQuestionStats, resetQbankStorageForTests } from '../../storage/qbank';
 import {
-  bankProgress, consumeSaveFailure, dropBankStats, initializeStats, isDue, loadStats,
+  bankProgress, chapterMastery, consumeSaveFailure, dropBankStats, initializeStats, isDue, loadStats,
   recordAnswer, resetQbankStatsForTests, statOf,
 } from '../qbankStats';
+import type { QuizBank } from '../qbank';
 
 const KEY = 'knowlattice-qstats';
 const BANK = '绿皮书·生理学';
@@ -144,5 +145,69 @@ describe('qbankStats · 题库级统计与清理', () => {
     const records = await getAllQuestionStats();
     expect(records).toHaveLength(N);
     expect(records.every((record) => record.tuple.length === 11)).toBe(true);
+  });
+});
+
+describe('qbankStats · 章节掌握度（软门控）', () => {
+  /** 只关心 id 与 chapter：掌握度不看题干 */
+  const mk = (rows: Array<[string, string | undefined]>): QuizBank => ({
+    name: BANK,
+    importedAt: 0,
+    questions: rows.map(([id, chapter]) => ({
+      id, type: 'recall', stem: id, options: [], answer: -1, answerText: '', chapter,
+    })),
+  });
+  const chap = (n: number, chapter: string): Array<[string, string]> =>
+    Array.from({ length: n }, (_, i) => [`${chapter}-${i}`, chapter]);
+
+  it('没作答过的章节不进样本：不会把「还没练」显示成 0%', () => {
+    expect(chapterMastery(mk(chap(3, '第一章')))).toEqual([]);
+  });
+
+  it('按题统计：同一道题错三次也只算一道错题', async () => {
+    await recordAnswer(BANK, '第一章-0', false, NOW);
+    await recordAnswer(BANK, '第一章-0', false, NOW + 1000);
+    await recordAnswer(BANK, '第一章-0', false, NOW + 2000);
+    await recordAnswer(BANK, '第一章-1', true, NOW);
+    await recordAnswer(BANK, '第一章-2', true, NOW);
+    const [m] = chapterMastery(mk(chap(3, '第一章')));
+    expect(m).toMatchObject({ chapter: '第一章', seen: 3, wrong: 1, weak: false });
+    expect(m.accuracy).toBeCloseTo(2 / 3);
+  });
+
+  it('样本不足三题不下结论（两题全错也不算 weak）', async () => {
+    await recordAnswer(BANK, '第一章-0', false, NOW);
+    await recordAnswer(BANK, '第一章-1', false, NOW);
+    expect(chapterMastery(mk(chap(2, '第一章')))[0]).toMatchObject({ seen: 2, wrong: 2, accuracy: 0, weak: false });
+  });
+
+  it('样本够且正确率低于 60% 才标 weak', async () => {
+    for (const [i, ok] of [false, false, false, true, true].entries()) {
+      await recordAnswer(BANK, `第一章-${i}`, ok, NOW);
+    }
+    const [m] = chapterMastery(mk(chap(5, '第一章')));
+    expect(m).toMatchObject({ seen: 5, wrong: 3, weak: true });
+    expect(m.accuracy).toBeCloseTo(0.4);
+  });
+
+  it('正确率正好 60% 不提示（边界是严格小于）', async () => {
+    for (const [i, ok] of [true, true, true, false, false].entries()) {
+      await recordAnswer(BANK, `第一章-${i}`, ok, NOW);
+    }
+    expect(chapterMastery(mk(chap(5, '第一章')))[0]).toMatchObject({ seen: 5, wrong: 2, weak: false });
+  });
+
+  it('多章节按正确率从差到好排序，没写 chapter 的归到空串', async () => {
+    for (let i = 0; i < 3; i++) await recordAnswer(BANK, `甲-${i}`, false, NOW);
+    for (let i = 0; i < 3; i++) await recordAnswer(BANK, `乙-${i}`, true, NOW);
+    for (const [i, ok] of [false, false, true].entries()) await recordAnswer(BANK, `无-${i}`, ok, NOW);
+    const out = chapterMastery(mk([...chap(3, '甲'), ...chap(3, '乙'), ['无-0', undefined], ['无-1', undefined], ['无-2', undefined]]));
+    expect(out.map((m) => m.chapter)).toEqual(['甲', '', '乙']);
+    expect(out.map((m) => m.weak)).toEqual([true, true, false]);
+  });
+
+  it('只统计本库：别的库里的同名题目 id 不会串进来', async () => {
+    await recordAnswer('别的库', '第一章-0', false, NOW);
+    expect(chapterMastery(mk(chap(3, '第一章')))).toEqual([]);
   });
 });
