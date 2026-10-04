@@ -24,6 +24,10 @@ export interface StorageAdapter {
   /** 该路径在存储层是否已存在。新建笔记前用它兜底查重：
    *  内存索引可能因加载失败而残缺，光看内存会把磁盘上已有的笔记当成新笔记覆盖掉。 */
   exists(path: string): Promise<boolean>;
+  /** 单路径的元信息，**不存在返回 null**（新建笔记是正常路径，不是错误）。
+   *  写盘前用它比对 mtime：磁盘上的 mtime 与我们记录的不一致，说明这个文件在应用
+   *  之外被改过（外部编辑器 / 另一个窗口 / 同步盘），此时必须先留档再覆盖。 */
+  stat(path: string): Promise<Omit<VaultFileMeta, 'path'> | null>;
   write(path: string, content: string): Promise<void>;
   remove(path: string): Promise<void>;
   /** 批量写入（可选优化）：适配器可实现为「一批一个事务」合批提交（IndexedDB 下
@@ -35,4 +39,6 @@ export interface StorageAdapter {
   readAllAttachments(): Promise<Map<string, Blob>>;
   writeAttachment(path: string, blob: Blob): Promise<void>;
   removeAttachment(path: string): Promise<void>;
+  /** 附件路径是否已存在（覆盖性导入前查重用；与 exists 的笔记版对应）。 */
+  existsAttachment(path: string): Promise<boolean>;
 }

@@ -28,6 +28,12 @@ interface Props {
   /** 导入 md 文件夹（webkitdirectory 选择目录，相对路径入库） */
   onImportMd: (files: Array<{ path: string; content: string }>) => Promise<ImportResult>;
   onRepair?: () => Promise<ImportResult>;
+  /** 桌面端：把浏览器版（IndexedDB）里的既有笔记/附件迁移到本机文件夹；浏览器版不传即隐藏入口 */
+  onMigrateFromBrowser?: () => Promise<{ notes: number; attachments: number; failed: number }>;
+  /** 桌面端：更换库文件夹（系统目录选择框）；浏览器版不传即隐藏入口 */
+  onChangeVaultFolder?: () => Promise<string | null>;
+  /** 当前库文件夹（用于菜单项提示），桌面端为默认根名或用户所选绝对路径 */
+  vaultDir?: string | null;
   /** 批量删除选中的笔记 */
   onRemove: (paths: string[]) => void;
 }
@@ -128,7 +134,7 @@ const Row = memo(function Row({
   );
 });
 
-export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExport, onExportFolder, onImport, onImportMd, onRepair, onRemove }: Props) {
+export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExport, onExportFolder, onImport, onImportMd, onRepair, onMigrateFromBrowser, onChangeVaultFolder, vaultDir, onRemove }: Props) {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
   /** 新建笔记的目标目录：点击目录行时设为该目录，可点提示取消 */
@@ -141,6 +147,7 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
   /** 备份 / 导出 / 导入 / 批量删除 收纳菜单（低频数据操作） */
   const [moreOpen, setMoreOpen] = useState(false);
   const [repairBusy, setRepairBusy] = useState(false);
+  const [migrateBusy, setMigrateBusy] = useState(false);
   const [repairReport, setRepairReport] = useState<ImportResult | null>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -375,6 +382,40 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
                 <div onClick={() => { jsonRef.current?.click(); setMoreOpen(false); }} {...clickable()}>
                   <IconRestore /> 从备份 .json 恢复
                 </div>
+                {onMigrateFromBrowser && (
+                  <div
+                    onClick={() => {
+                      if (migrateBusy || !onMigrateFromBrowser) return;
+                      setMoreOpen(false);
+                      setMigrateBusy(true);
+                      void onMigrateFromBrowser()
+                        .then((r) => {
+                          if (r.failed) toast(`迁移完成：${r.notes} 篇笔记、${r.attachments} 个附件已写入，${r.failed} 项失败`, 'err');
+                          else if (r.notes || r.attachments) toast(`已把 ${r.notes} 篇笔记、${r.attachments} 个附件写入「文档/KnowLattice」`, 'ok', 4200);
+                          else toast('没有可迁移的浏览器数据', 'info');
+                        })
+                        .catch((err: unknown) => toast(`迁移失败：${(err as Error).message}`, 'err'))
+                        .finally(() => setMigrateBusy(false));
+                    }}
+                    {...clickable(migrateBusy ? '正在迁移' : '把浏览器里已有的笔记/附件写入本机文件夹（文档/KnowLattice）')}
+                  >
+                    <IconFolder /> {migrateBusy ? '正在迁移…' : '迁移浏览器数据到本机文件夹'}
+                  </div>
+                )}
+                {onChangeVaultFolder && (
+                  <div
+                    onClick={() => {
+                      setMoreOpen(false);
+                      void onChangeVaultFolder()
+                        .then((dir) => { if (dir) toast(`库文件夹已切换：${dir}`, 'ok', 4200); })
+                        .catch((err: unknown) => toast(`切换库文件夹失败：${(err as Error).message}`, 'err'));
+                    }}
+                    {...clickable()}
+                    title={vaultDir ? `当前：${vaultDir}` : undefined}
+                  >
+                    <IconFolder /> 更换库文件夹…
+                  </div>
+                )}
                 {onRepair && <div onClick={() => {
                   if (repairBusy || !onRepair) return;
                   setMoreOpen(false);
@@ -416,6 +457,10 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
                     toast(`已恢复 ${r.ok} 篇，${r.failed} 篇写入失败——这几篇没有进库，请确认存储空间后重新导入`, 'err');
                   } else {
                     toast(`已恢复 ${r.ok} 篇笔记${r.repaired ? `，修正 ${r.repaired} 处格式` : ''}（备份里的题库 / 复习进度也已一并导入）`, 'ok');
+                  }
+                  // 审计 M2：恢复是覆盖性写，被换掉的现有文件必须亮出来
+                  if (r.overwritten?.length) {
+                    toast(`其中 ${r.overwritten.length} 篇覆盖了库中已有文件：${r.overwritten.slice(0, 3).join('、')}${r.overwritten.length > 3 ? ' 等' : ''}（原内容可到「历史版本」找回）`, 'info', 6000);
                   }
                   setRepairReport(r);
                 } catch (err) {
