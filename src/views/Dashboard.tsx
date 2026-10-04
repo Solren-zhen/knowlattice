@@ -9,6 +9,7 @@ import { buildCards } from '../core/srsCards';
 import { toast } from '../core/feedback';
 import { loadMistakes } from '../core/mistakes';
 import { loadBanks } from '../core/qbank';
+import { CONFIDENCE_LABELS, calibrationSummary } from '../core/qbankCalib';
 import { loadTodos } from '../core/todos';
 import { streak, last7 } from '../core/stats';
 import { seedDemo } from '../core/demo';
@@ -49,6 +50,20 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz }: P
   const weekLabels = ['一', '二', '三', '四', '五', '六', '日'];
   const hasNewCards = rep.r.learned < rep.r.total;
   const hasBanks = rep.bankCount > 0;
+
+  // 校准数据只在弹层打开时取一次（面板每次打开都会重新挂载，跟 rep 的重算时机一致）
+  const calib = useMemo(() => calibrationSummary(), []);
+  // 结论文案：overconfidence 是「平均自信 − 实际正确率」的比例差，×100 换算成百分点
+  const calibVerdict = useMemo(() => {
+    if (!calib.n) return '';
+    const acc = calib.correct / calib.n;
+    const mean = calib.overconfidence + acc;
+    const z = Math.round(Math.abs(calib.overconfidence) * 100);
+    const head = `平均自信 ${Math.round(mean * 100)}%，实际答对 ${Math.round(acc * 100)}% —— `;
+    // 3 个百分点以内视作「校准得不错」，避免把四舍五入的抖动说成高估/低估
+    if (z < 3) return `${head}校准得不错`;
+    return `${head}${calib.overconfidence > 0 ? '高估' : '低估'} ${z} 个百分点`;
+  }, [calib]);
 
   const cards = [
     { label: '连续打卡', value: `${rep.s} 天`, cls: 'accent' },
@@ -107,6 +122,37 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz }: P
             ))}
           </div>
         </div>
+
+        <section className="dash-calib" aria-label="元认知校准">
+          <h4>元认知校准</h4>
+          {calib.n === 0 ? (
+            <p className="dash-calib-empty muted">还没有数据：去题库练习作答前先选一个把握程度，这里就会画出你的校准曲线。</p>
+          ) : (
+            <>
+              <div className="dash-calib-rows" role="list" aria-label="各档自信度的实际正确率">
+                {calib.buckets.map((b) => {
+                  const pct = b.n ? Math.round((b.correct / b.n) * 100) : 0;
+                  return (
+                    <div
+                      key={b.confidence}
+                      className="dash-calib-row"
+                      role="listitem"
+                      aria-label={`${CONFIDENCE_LABELS[b.confidence]}：${b.n ? `${pct}%` : '暂无'}，${b.n} 次`}
+                    >
+                      <span className="dash-calib-label">{CONFIDENCE_LABELS[b.confidence]}</span>
+                      <div className="dash-calib-track">
+                        <div className="dash-calib-fill" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="dash-calib-pct">{b.n ? `${pct}%` : '暂无'}</span>
+                      <span className="dash-calib-n muted">{b.n} 次</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="dash-calib-verdict">{calibVerdict}</p>
+            </>
+          )}
+        </section>
 
         <p className="dash-tip muted">完成复习或练习后，数据将自动计入学习统计。</p>
 

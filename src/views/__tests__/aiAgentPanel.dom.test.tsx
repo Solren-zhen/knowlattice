@@ -740,6 +740,28 @@ describe('上下文预算 / 引用核验 / 面板细节', () => {
     void fetchMock;
   });
 
+  it('同一书名命中多篇时标「多处」，不假装唯一溯源', async () => {
+    const fetchMock = stubFetch([
+      async () => sseResponse(finalChunks('据“心肌收缩泵血。”〔《心脏》 P1〕可知。')),
+    ]);
+    renderPanel({
+      docs: new Map([
+        ['心脏.md', '# 心脏\n心肌收缩泵血。\n'],
+        ['解剖/心脏.md', '# 心脏\n心肌收缩泵血。\n'],
+      ]),
+    });
+
+    await sendMessage('讲讲心脏');
+    const chip = await waitFor(() => {
+      const el = document.querySelector('.agent-cite-multi');
+      if (!el) throw new Error('还没有「多处命中」的徽标');
+      return el;
+    });
+    expect(chip.textContent).toContain('· 2 处');
+    expect(chip.getAttribute('title')).toContain('出处不唯一');
+    void fetchMock;
+  });
+
   it('流式期间 agent-log 标为 busy，结束后恢复', async () => {
     const held = heldStream();
     const fetchMock = stubFetch([held.make]);
