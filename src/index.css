@@ -113,8 +113,10 @@
   --glass-shine: inset 0 1px 0 0 rgba(255, 255, 255, 0.9), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
   --glass-border: rgba(15, 23, 42, 0.08);
   --glass-blur: blur(16px) saturate(180%);
-  /* ---- 欢迎页中心柔光 ---- */
-  --hero-halo: rgba(248, 250, 252, 0.82);
+  /* ---- 欢迎页中心柔光 ----
+     0.82 的纯白柔光会把首屏网格与极光背景压成一片灰白，标题与徽标都显脏。
+     降到 0.72：正文仍是 #0f172a 压近白底（对比度 >15:1），只是让装饰背景重新透出来。 */
+  --hero-halo: rgba(248, 250, 252, 0.72);
   /* ---- 正文可读宽度 ---- */
   --read-width: 900px;
 }
@@ -206,7 +208,7 @@ body::before {
    下拉框与纯图标按钮各自跑出第三套字体（实测：input 解析为 Arial 13.3333px）。
    一次把整套字体属性交给继承，控件文字与所在上下文完全一致。 */
 button, input, select, textarea { font: inherit; letter-spacing: inherit; }
-.muted { color: var(--muted); font-size: 12px; }
+.muted { color: var(--muted); font-size: var(--fs-caption); }
 
 .loading {
   display: flex; align-items: center; justify-content: center;
@@ -224,7 +226,7 @@ button, input, select, textarea { font: inherit; letter-spacing: inherit; }
   max-width: 480px; margin: 0; padding: 10px 14px;
   border: 1px solid var(--danger-soft); border-radius: var(--r-md);
   background: var(--bg-raised); color: var(--danger-text);
-  font-size: 12px; line-height: 1.6; word-break: break-word;
+  font-size: var(--fs-caption); line-height: 1.6; word-break: break-word;
 }
 .load-error .muted { max-width: 480px; margin: 0; line-height: 1.6; }
 /* .btn-primary 默认整行宽（表单主按钮），这里收窄到内容宽度 */
@@ -288,7 +290,7 @@ button, input, select, textarea { font: inherit; letter-spacing: inherit; }
   background: var(--grad-primary);
   color: var(--accent-ink);
   border: 1px solid rgba(255, 255, 255, 0.2); border-radius: var(--r-md);
-  padding: 12px 0; font-size: 15px; font-weight: 600;
+  padding: 12px 0; font-size: var(--fs-lead); font-weight: 600;
   cursor: pointer;
   box-shadow: 0 4px 16px -2px rgba(79, 70, 229, 0.45), var(--glow-accent), inset 0 1px 0 rgba(255, 255, 255, 0.3);
   transition: color var(--t-med) var(--ease), background-color var(--t-med) var(--ease), border-color var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease), transform var(--t-med) var(--ease), opacity var(--t-med) var(--ease);
@@ -354,7 +356,7 @@ kbd {
   background: var(--grad-primary);
   border-radius: var(--r-md);
   padding: 0 13px; height: 28px;   /* 与同排的 .btn-icon 对齐 */
-  font-size: 12.5px; font-weight: 600; font-family: inherit;
+  font-size: var(--fs-control); font-weight: 600; font-family: inherit;
   white-space: nowrap;
   box-shadow: 0 2px 8px -1px rgba(79, 70, 229, 0.4), var(--glow-accent), inset 0 1px 0 rgba(255, 255, 255, 0.3);
   cursor: pointer;
@@ -387,7 +389,7 @@ kbd {
 }
 .import-menu div {
   padding: 8px 12px; border-radius: var(--r-sm);
-  font-size: 13px; cursor: pointer;
+  font-size: var(--fs-body); cursor: pointer;
   transition: background var(--t-fast) var(--ease);
 }
 .import-menu div:hover { background: var(--accent-soft); color: var(--accent); }
@@ -448,7 +450,7 @@ kbd {
 .tree-row .dir-count { margin-left: auto; font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums; background: var(--panel); padding: 0 6px; border-radius: 999px; }/* 批量操作条 */
 .tree-batchbar {
   border-top: 1px solid var(--border); padding: 8px 12px;
-  display: flex; align-items: center; gap: 8px; font-size: 12px;
+  display: flex; align-items: center; gap: 8px; font-size: var(--fs-caption);
   background: var(--panel-glass-strong);
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--shadow-sm), var(--glass-shine);
@@ -461,12 +463,12 @@ kbd {
   /* 固定行高：虚拟滚动按 26px/行 窗口化渲染（ChapterTree ROW_H） */
   height: 26px; flex-shrink: 0;
   padding: 0 10px; border-radius: var(--r-sm); cursor: pointer;
-  font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--fs-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   user-select: none;
   display: flex; align-items: center; gap: 6px;
   transition: var(--tr-interact);
 }
-.tree-row.dir { font-weight: 600; color: var(--text-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+.tree-row.dir { font-weight: 600; color: var(--text-2); font-size: var(--fs-caption); text-transform: uppercase; letter-spacing: 0.03em; }
 .tree-row.dir:hover { background: var(--accent-soft); color: var(--accent); }
 /* 文件行 = 可点的行 + 行内独立删除入口（ChapterTree 的 .tree-row-wrap）。
    删除键做成行的兄弟节点：行本身是 role="button"，里面再套 button 是嵌套可交互元素。 */
@@ -505,7 +507,7 @@ kbd {
   background: var(--accent);
   box-shadow: 0 0 8px var(--accent);
 }
-.tree-empty { padding: 16px 14px; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.tree-empty { padding: 16px 14px; color: var(--muted); font-size: var(--fs-caption); line-height: 1.8; }
 
 /* ============================================================ 主区 */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -539,7 +541,7 @@ kbd {
 .editor-toolbar .btn-icon,
 .editor-toolbar .toolbar-search { white-space: nowrap; }
 .note-path {
-  font-size: 13px; font-weight: 600; flex: 1;
+  font-size: var(--fs-body); font-weight: 600; flex: 1;
   min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   letter-spacing: -0.01em;
 }
@@ -555,7 +557,7 @@ kbd {
 @keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
 .word-count {
   font-variant-numeric: tabular-nums;
-  font-size: 11px; color: var(--muted);
+  font-size: var(--fs-micro); color: var(--muted);
   user-select: none;
   padding: 0 var(--sp-1);
 }
@@ -635,7 +637,7 @@ kbd {
 /* 标题 */
 .editor-host .lp-h1 { font-size: 21px; font-weight: 700; letter-spacing: -0.025em; }
 .editor-host .lp-h2 { font-size: 17px; font-weight: 650; letter-spacing: -0.02em; }
-.editor-host .lp-h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; }
+.editor-host .lp-h3 { font-size: var(--fs-lead); font-weight: 600; letter-spacing: -0.015em; }
 .editor-host .lp-h4 { font-size: 14px; font-weight: 600; }
 /* 项目符号 / 引用 */
 .editor-host .lp-bullet { color: var(--accent); font-weight: 700; }
@@ -762,7 +764,7 @@ kbd {
   background: var(--bg-raised);
   border-right: 1px solid var(--border);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 /* 选中文字后的右键格式菜单：与功能面板同一套玻璃外壳，位置由视口坐标给定 */
@@ -796,10 +798,16 @@ kbd {
   font-size: var(--fs-micro); color: var(--muted);
   font-family: var(--font-mono);
 }
+/* 「问 AI」入口：主题色强调，与普通格式项区分开 */
+.cm-ctx-item.cm-ctx-askai {
+  color: var(--accent); font-weight: var(--fw-title);
+}
+.cm-ctx-item.cm-ctx-askai kbd { color: var(--accent); opacity: 0.75; }
+.cm-ctx-item.cm-ctx-askai:hover { background: var(--accent-soft); border-color: var(--border-accent); }
 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .backlink-item {
-  font-size: 13px; padding: 8px 10px;
+  font-size: var(--fs-body); padding: 8px 10px;
   border-radius: var(--r-md); cursor: pointer;
   border: 1px solid transparent;
   transition: var(--tr-interact);
@@ -809,7 +817,7 @@ kbd {
   border-color: var(--border-accent);
   transform: translateX(2px);
 }
-.backlink-item span { word-break: break-all; font-size: 11px; }
+.backlink-item span { word-break: break-all; font-size: var(--fs-micro); }
 /* 关联面板：本篇学习状态（复习 / 错题 / 真题） */
 .learning-panel { margin-bottom: var(--sp-2); }
 .lp-status {
@@ -821,9 +829,9 @@ kbd {
 }
 .lp-status-row {
   display: flex; align-items: center; gap: 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
-.lp-status-row b { font-weight: 600; color: var(--muted); font-size: 11px; min-width: 28px; }
+.lp-status-row b { font-weight: 600; color: var(--muted); font-size: var(--fs-micro); min-width: 28px; }
 .lp-status-row span { word-break: break-all; }
 .badge-bad { color: var(--danger); }
 .badge-exam { color: var(--accent); }
@@ -895,13 +903,13 @@ kbd {
   box-shadow: var(--shadow-sm);
 }
 .teach-step kbd {
-  font-size: 12px; padding: 3px 10px;
+  font-size: var(--fs-caption); padding: 3px 10px;
   color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--accent);
 }
 
-.markdown-body { font-size: 14.5px; color: var(--text); }
+.markdown-body { font-size: var(--fs-title); color: var(--text); }
 .markdown-body h1 {
   font-size: 23px; font-weight: 650; letter-spacing: -0.015em;
   border-bottom: 1px solid var(--border);
@@ -912,7 +920,7 @@ kbd {
   margin: 1.7em 0 0.6em;
 }
 .markdown-body h3, .markdown-body h4 {
-  font-size: 15px; font-weight: 600;
+  font-size: var(--fs-lead); font-weight: 600;
   margin: 1.5em 0 0.5em;
 }
 .markdown-body p { margin: 10px 0; line-height: 1.9; }
@@ -920,7 +928,7 @@ kbd {
 .markdown-body li { margin: 5px 0; line-height: 1.85; }
 .markdown-body li > ul, .markdown-body li > ol { margin: 4px 0; }
 .markdown-body li::marker { color: var(--accent); font-size: 10px; }
-.markdown-body ol li::marker { font-size: 12px; font-variant-numeric: tabular-nums; }
+.markdown-body ol li::marker { font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
 .markdown-body blockquote {
   margin: 12px 0; padding: 12px 18px;
   /* 细线 + 淡底，不再用 3px 实心彩条（厚侧边条是 AI 生成界面的最强指纹；
@@ -973,10 +981,10 @@ kbd {
   border: 1px solid var(--border);
   margin: 10px 0;
 }
-.markdown-body pre code { background: none; padding: 0; font-size: 13px; }
+.markdown-body pre code { background: none; padding: 0; font-size: var(--fs-body); }
 .markdown-body code {
   background: var(--panel); padding: 2px 6px;
-  border-radius: var(--r-xs); font-size: 13px;
+  border-radius: var(--r-xs); font-size: var(--fs-body);
   font-family: var(--font-mono);
 }
 .markdown-body a:not(.wikilink) {
@@ -1200,7 +1208,7 @@ a.wikilink.missing::after {
 .prop-keys {
   display: flex; gap: 6px; flex-wrap: wrap;
   margin: 18px 0; align-items: center;
-  font-size: 13px; color: var(--muted);
+  font-size: var(--fs-body); color: var(--muted);
 }
 .mnemonic-hint {
   background: var(--warn-bg);
@@ -1437,7 +1445,7 @@ a.wikilink.missing::after {
 .anatomy-note-card__body .markdown-body h1 {
   font-size: 16px; border-bottom: none; padding-bottom: 0; margin: 0 0 var(--sp-2);
 }
-.anatomy-note-card__body .markdown-body h2 { font-size: 15px; margin: 1.1em 0 0.4em; }
+.anatomy-note-card__body .markdown-body h2 { font-size: var(--fs-lead); margin: 1.1em 0 0.4em; }
 .anatomy-note-card__body .markdown-body h3,
 .anatomy-note-card__body .markdown-body h4 { font-size: var(--fs-body); margin: 1em 0 0.3em; }
 .anatomy-note-card__body .markdown-body p { margin: 6px 0; line-height: 1.75; }
@@ -2389,7 +2397,7 @@ a.wikilink.missing::after {
    同特异性时后者胜。所以下面的选择器一律带上 .map-container 提一级，
    否则根节点会保持库默认的 25px 巨字、主分支 padding 25px，且不报任何错。 */
 .mindmap-elixir .map-container .me-tpc {
-  font-size: 13px; line-height: 1.45;
+  font-size: var(--fs-body); line-height: 1.45;
   background: var(--bg-raised);
   color: var(--text);
   border: 1px solid var(--border);
@@ -2399,7 +2407,7 @@ a.wikilink.missing::after {
 
 /* 根节点：主色实心 + 辉光，是整张图的视觉锚点 */
 .mindmap-elixir .map-container .me-root > .me-tpc {
-  font-size: 15px; font-weight: 600; letter-spacing: 0.01em;
+  font-size: var(--fs-lead); font-weight: 600; letter-spacing: 0.01em;
   padding: 9px 18px;
   border-radius: var(--r-lg);
   border-color: transparent;
@@ -2414,7 +2422,7 @@ a.wikilink.missing::after {
 .mindmap-elixir .map-container .me-nodes > .me-main > .me-wrapper > .me-parent > .me-tpc {
   padding: 7px 14px;
   border-radius: var(--r-md);
-  font-size: 13px; font-weight: 500;
+  font-size: var(--fs-body); font-weight: 500;
   color: var(--text);
   background: var(--bg-raised);
   box-shadow: var(--shadow-sm);
@@ -2425,7 +2433,7 @@ a.wikilink.missing::after {
 .mindmap-elixir .map-container .me-children .me-parent > .me-tpc {
   padding: 3px 7px;
   border-radius: var(--r-sm);
-  font-size: 12.5px;
+  font-size: var(--fs-control);
   color: var(--text-2);
   background: transparent;
   border-color: transparent;
@@ -2469,7 +2477,7 @@ a.wikilink.missing::after {
   color: var(--text);
   box-shadow: var(--shadow-lg);
   padding: 4px;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .mindmap-elixir .context-menu .menu-list li {
   border-radius: var(--r-sm);
@@ -2479,7 +2487,7 @@ a.wikilink.missing::after {
 }
 .mindmap-elixir .context-menu .menu-list li:hover { background: var(--accent-soft); }
 .mindmap-elixir .context-menu .menu-list li .key {
-  color: var(--muted); font-size: 11px;
+  color: var(--muted); font-size: var(--fs-micro);
   font-family: var(--font-mono, ui-monospace, monospace);
 }
 
@@ -2504,7 +2512,7 @@ a.wikilink.missing::after {
   border-radius: var(--r-sm);
   background: var(--text);
   color: var(--bg-raised);
-  font-size: 12px; padding: 4px 9px;
+  font-size: var(--fs-caption); padding: 4px 9px;
 }
 
 /* ---- 框选矩形 ---- */
@@ -2523,7 +2531,7 @@ a.wikilink.missing::after {
 }
 .mindmap-hint kbd, .mindmap-hint b {
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11px; font-weight: 600;
+  font-size: var(--fs-micro); font-weight: 600;
   color: var(--text);
   background: var(--panel-deep);
   border: 1px solid var(--border);
@@ -2562,7 +2570,7 @@ a.wikilink.missing::after {
 }
 .graph-legend .lg-item {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 11px; color: var(--text-2);
+  font-size: var(--fs-micro); color: var(--text-2);
   background: var(--panel-glass-strong);
   backdrop-filter: blur(6px);
   padding: 3px 10px; border-radius: 999px;
@@ -2902,7 +2910,7 @@ a.wikilink.missing::after {
 }
 .quiz-help pre {
   margin: 8px 0 0;
-  font-size: 12px; line-height: 1.7;
+  font-size: var(--fs-caption); line-height: 1.7;
   font-family: var(--font-mono);
   white-space: pre-wrap;
   color: var(--text-2);
@@ -3107,7 +3115,7 @@ a.wikilink.missing::after {
   border-bottom: 1px solid var(--border);
   min-height: 44px;
 }
-.pdf-file { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
+.pdf-file { font-size: var(--fs-body); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
 /* 书架：顶栏的书名即切换入口，点开是书目下拉 */
 .pdf-shelf { position: relative; min-width: 0; }
 .pdf-shelf__btn {
@@ -3116,7 +3124,7 @@ a.wikilink.missing::after {
   padding: 5px 10px;
   background: var(--bg-raised);
   border: 1px solid var(--border-strong); border-radius: var(--r-md);
-  color: var(--text-1); font-size: 13px; font-weight: 600;
+  color: var(--text-1); font-size: var(--fs-body); font-weight: 600;
   cursor: pointer;
 }
 .pdf-shelf__btn:disabled { opacity: .6; cursor: default; }
@@ -3284,7 +3292,7 @@ a.wikilink.missing::after {
 .pdf-tab {
   border: 1px solid var(--border); background: var(--bg-raised);
   color: var(--text-2); border-radius: 999px;
-  padding: 5px 14px; font-size: 12.5px; font-family: inherit; cursor: pointer;
+  padding: 5px 14px; font-size: var(--fs-control); font-family: inherit; cursor: pointer;
   transition: var(--tr-interact);
 }
 .pdf-tab:hover { border-color: var(--accent); color: var(--accent); }
@@ -3311,7 +3319,7 @@ a.wikilink.missing::after {
   font-size: var(--fs-micro); color: var(--accent); background: var(--accent-soft);
   padding: 1px 8px; border-radius: 999px;
 }
-.excerpt-text { margin: 2px 0; font-size: 12px; }
+.excerpt-text { margin: 2px 0; font-size: var(--fs-caption); }
 
 /* ============================================================ AI 助手侧栏 */
 .ai-panel {
@@ -3329,6 +3337,14 @@ a.wikilink.missing::after {
   padding: var(--sp-3) var(--sp-4);
   border-bottom: 1px solid var(--border);
 }
+/* 面板品牌行：极光圆点给侧栏一个可识别的身份锚点 */
+.agent-brand { display: flex; align-items: center; gap: 7px; flex: none; }
+.agent-brand-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--grad-primary);
+  box-shadow: 0 0 8px var(--accent-ring);
+}
+.agent-brand-name { font-size: var(--fs-title); font-weight: var(--fw-title); }
 .ai-title { font-size: var(--fs-title); font-weight: var(--fw-title); flex: 1; }
 .ai-sources {
   display: flex; flex-wrap: wrap; gap: 5px;
@@ -3349,37 +3365,56 @@ a.wikilink.missing::after {
 /* ============================================================ AI 笔记助手（agent 侧栏） */
 .agent-panel {
   position: fixed; top: 0; right: 0; bottom: 0;
-  width: min(520px, 94vw);
+  width: min(560px, 96vw);
   z-index: 84;
   background: var(--bg-raised);
-  border-left: 1px solid var(--border);
-  box-shadow: -12px 0 48px rgba(15, 23, 42, 0.12);
+  border-left: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column;
   animation: slide-left var(--t-slow) var(--ease);
 }
 .agent-log {
   flex: 1; min-height: 0; overflow-y: auto;
-  padding: var(--sp-3) var(--sp-4);
-  display: flex; flex-direction: column; gap: 10px;
+  padding: var(--sp-4);
+  display: flex; flex-direction: column; gap: 12px;
 }
-.agent-empty { margin: auto 0; padding: 0 var(--sp-2); line-height: 1.7; }
-.agent-empty p { margin: 6px 0; }
+.agent-empty { margin: auto; padding: var(--sp-4); max-width: 420px; text-align: center; line-height: 1.7; }
+.agent-empty p { margin: 8px 0; }
+.agent-empty-title { margin: 0 0 8px; font-size: 17px; font-weight: var(--fw-title); color: var(--text); }
+.agent-empty .muted { font-size: var(--fs-caption); }
+.agent-suggestions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 16px 0; text-align: left; }
+.agent-starter {
+  display: flex; flex-direction: column; gap: 2px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--panel); padding: 10px 12px; cursor: pointer;
+  transition: var(--tr-interact);
+}
+.agent-starter:hover {
+  border-color: var(--border-accent); background: var(--accent-soft);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--accent-soft);
+}
+.agent-starter-label { font-size: var(--fs-caption); font-weight: var(--fw-title); color: var(--text); }
+.agent-starter-desc { font-size: var(--fs-micro); color: var(--muted); }
 .agent-msg {
-  max-width: 92%;
-  padding: 8px 12px;
-  border-radius: 12px;
-  font-size: var(--fs-body); line-height: 1.65;
+  max-width: 88%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: var(--fs-body); line-height: 1.7;
   white-space: pre-wrap; overflow-wrap: anywhere;
+  animation: fade-in var(--t-fast) var(--ease);
 }
 .agent-msg.user {
   align-self: flex-end;
-  background: var(--accent); color: var(--accent-ink);
-  border-bottom-right-radius: 4px;
+  background: var(--grad-primary); color: var(--accent-ink);
+  border-bottom-right-radius: 5px;
+  box-shadow: 0 2px 10px var(--accent-soft);
 }
 .agent-msg.assistant {
   align-self: flex-start;
   background: var(--panel); border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
+  box-shadow: var(--shadow-xs);
 }
 .agent-msg.streaming::after { content: '▍'; opacity: 0.55; animation: agent-caret 1s steps(2) infinite; }
 @keyframes agent-caret { 50% { opacity: 0; } }
@@ -3390,7 +3425,16 @@ a.wikilink.missing::after {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 10px; padding: 5px 10px;
 }
-.agent-tool summary { cursor: pointer; user-select: none; }
+/* details 的默认三角换成主题化的「+ / ×」标记，悬停给出可展开反馈 */
+.agent-tool summary, .agent-thinking summary { cursor: pointer; user-select: none; list-style: none; }
+.agent-tool summary::-webkit-details-marker, .agent-thinking summary::-webkit-details-marker { display: none; }
+.agent-tool summary::before, .agent-thinking summary::before {
+  content: '+'; display: inline-block; width: 1em; margin-right: 2px;
+  color: var(--muted); text-align: center;
+  transition: transform var(--t-fast) var(--ease);
+}
+.agent-tool[open] summary::before, .agent-thinking[open] summary::before { transform: rotate(45deg); }
+.agent-tool summary:hover { color: var(--text); }
 .agent-tool-detail {
   margin: 6px 0 2px;
   font-size: var(--fs-micro); line-height: 1.55; color: var(--muted);
@@ -3400,27 +3444,27 @@ a.wikilink.missing::after {
 /* 写入提案卡：diff + 应用/拒绝 */
 .agent-proposal {
   align-self: stretch;
-  border: 1px solid var(--border-strong); border-radius: 12px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-lg);
   background: var(--bg-raised); box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 .agent-proposal-head {
   display: flex; align-items: center; gap: 6px;
-  padding: 7px 12px;
+  padding: 9px 14px;
   font-size: var(--fs-caption); font-weight: var(--fw-title);
   background: var(--panel); border-bottom: 1px solid var(--border);
   overflow-wrap: anywhere;
 }
-.agent-proposal-head code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.agent-proposal-head code { font-family: var(--font-mono); }
 .agent-diff {
-  margin: 0; padding: 8px 12px;
+  margin: 0; padding: 10px 14px;
   max-height: 300px; overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: var(--fs-caption); line-height: 1.55;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
-.agent-diff-add { color: var(--success); background: rgba(16, 185, 129, 0.08); }
-.agent-diff-del { color: var(--danger); background: rgba(220, 38, 38, 0.07); }
+.agent-diff-add { color: var(--success-text); background: rgba(16, 185, 129, 0.09); border-radius: 4px; padding: 1px 6px; }
+.agent-diff-del { color: var(--danger-text); background: rgba(220, 38, 38, 0.08); border-radius: 4px; padding: 1px 6px; }
 .agent-diff-same { color: var(--muted); }
 .agent-diff-gap {
   color: var(--muted); text-align: center;
@@ -3439,13 +3483,13 @@ a.wikilink.missing::after {
   font-size: var(--fs-caption);
   border-top: 1px solid var(--border); background: var(--panel);
 }
-.agent-proposal-applied { color: var(--success); }
+.agent-proposal-applied { color: var(--success-text); }
 .agent-proposal-rejected, .agent-proposal-stale { color: var(--muted); }
-.agent-proposal-failed { color: var(--danger); overflow-wrap: anywhere; }
+.agent-proposal-failed { color: var(--danger-text); overflow-wrap: anywhere; }
 .agent-error {
   align-self: flex-start; max-width: 92%;
   font-size: var(--fs-caption); line-height: 1.55;
-  color: var(--danger); background: var(--danger-soft);
+  color: var(--danger-text); background: var(--danger-soft);
   padding: 6px 10px; border-radius: 10px;
   overflow-wrap: anywhere;
 }
@@ -3455,13 +3499,22 @@ a.wikilink.missing::after {
 }
 .agent-input textarea {
   flex: 1; min-width: 0; resize: none;
-  border: 1px solid var(--border-strong); border-radius: 10px;
-  padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 14px;
+  padding: 10px 14px;
   font-family: inherit; font-size: var(--fs-body); line-height: 1.5;
+  background: var(--panel);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
 }
-.agent-input textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); outline: none; }
+.agent-input textarea:hover { border-color: var(--border-strong); }
+.agent-input textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); outline: none; background: var(--bg-raised); }
 .agent-input .agent-send, .agent-input .agent-stop { flex: none; }
-.agent-input .agent-stop { color: var(--danger); border-color: var(--danger); }
+.agent-input .agent-send {
+  background: var(--grad-primary); border-color: transparent; color: var(--accent-ink);
+  box-shadow: 0 2px 8px var(--accent-soft);
+}
+.agent-input .agent-send:hover { filter: brightness(1.06); box-shadow: 0 3px 12px var(--accent-soft); }
+.agent-input .agent-stop { color: var(--danger-text); border-color: var(--danger); }
+.agent-input .agent-stop:hover { background: var(--danger-soft); }
 /* 全局 .btn-primary 是 width:100% 的块级按钮；侧栏里统一收成自适应宽度 */
 .agent-panel .btn-primary { width: auto; padding: 8px 18px; font-size: var(--fs-body); }
 /* 会话切换：头部一行放下 select + 四个按钮 */
@@ -3477,6 +3530,81 @@ a.wikilink.missing::after {
 .agent-msg .preview > :last-child { margin-bottom: 0; }
 .agent-msg .preview li { margin: 2px 0; }
 .agent-msg .preview p { margin: 5px 0; line-height: 1.7; }
+/* 流式阶段的 markdown 直渲染：去掉气泡的 pre-wrap，交给 markdown-body 排版 */
+.agent-msg.markdown-body { white-space: normal; }
+.agent-msg.markdown-body > :first-child { margin-top: 0; }
+.agent-msg.markdown-body > :last-child { margin-bottom: 0; }
+
+/* ── 「问 AI」选段引用卡 ─────────────────────────────────── */
+/* 输入框上方的待发送引用：图标 + 来源 + 选段预览 + 移除 */
+.agent-quote-chip {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-accent);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  animation: fade-in var(--t-fast) var(--ease);
+}
+.agent-quote-chip-icon {
+  flex: none;
+  color: var(--accent);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+}
+.agent-quote-chip-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.agent-quote-chip-path {
+  font-size: var(--fs-micro); font-weight: var(--fw-title); color: var(--accent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.agent-quote-chip-text {
+  font-size: var(--fs-caption); line-height: 1.55; color: var(--text-2);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.agent-quote-chip-x {
+  flex: none; width: 22px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 6px;
+  background: transparent; color: var(--muted);
+  font-size: var(--fs-lead); line-height: 1;
+  cursor: pointer; transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.agent-quote-chip-x:hover { background: var(--accent-soft); color: var(--text); }
+.agent-quote-chip-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* 发出去的消息里的引用块：包在用户气泡里，透明卡底（气泡自带渐变底色） */
+.agent-msg .agent-quote-in-msg {
+  margin: 0 0 6px; padding: 7px 9px;
+  border-left: 2px solid currentcolor;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: var(--fs-caption); line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.agent-msg .agent-quote-in-msg .agent-quote-chip-path {
+  display: block; margin-bottom: 2px;
+  color: inherit; opacity: 0.85;
+  font-size: var(--fs-micro);
+}
+.agent-msg .agent-quote-in-msg-text { opacity: 0.92; }
+/* 引用核验徽标：助手回答里 “…”〔…〕 与库内原文逐字比对的结果 */
+.agent-cites {
+  display: flex; flex-wrap: wrap; gap: 4px 6px;
+  margin-top: 6px; padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.agent-cite {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 1px 6px; border-radius: 6px;
+  font-size: var(--fs-micro); line-height: 1.5;
+  border: 1px solid var(--border); color: var(--text-2);
+}
+.agent-cite-exact { color: #1a7f37; border-color: #1a7f3740; background: #1a7f3710; }
+.agent-cite-partial { color: #9a6700; border-color: #9a670040; background: #9a670010; }
+.agent-cite-fabricated { color: #cf222e; border-color: #cf222e40; background: #cf222e10; }
+.agent-cite-not_found { color: var(--muted); }
 /* 应用前的覆盖确认：提案期间笔记被用户改过 */
 .agent-drift {
   margin: 8px 12px 0;
@@ -3543,7 +3671,6 @@ a.wikilink.missing::after {
   font-size: var(--fs-caption); color: var(--muted);
   padding: 5px 10px;
 }
-.agent-thinking summary { cursor: pointer; user-select: none; }
 .agent-thinking-body {
   margin-top: 6px;
   max-height: 200px; overflow-y: auto;
@@ -3552,8 +3679,8 @@ a.wikilink.missing::after {
 }
 /* 测试连接结果 */
 .agent-test-result { margin: 0; font-size: var(--fs-micro); line-height: 1.5; overflow-wrap: anywhere; }
-.agent-test-result.ok { color: var(--success); }
-.agent-test-result.bad { color: var(--danger); }
+.agent-test-result.ok { color: var(--success-text); }
+.agent-test-result.bad { color: var(--danger-text); }
 .agent-panel .ai-header .btn-small[aria-expanded='true'] {
   color: var(--accent); border-color: var(--accent-ring); background: var(--accent-soft);
 }
@@ -3568,10 +3695,30 @@ a.wikilink.missing::after {
 .agent-field input {
   border: 1px solid var(--border-strong); border-radius: var(--r-sm);
   padding: 6px 10px; font-size: var(--fs-control); font-family: inherit;
+  background: var(--bg-raised);
 }
 .agent-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); outline: none; }
 .agent-settings-hint { margin: 0; font-size: var(--fs-micro); line-height: 1.5; }
 .agent-settings-actions { display: flex; gap: 8px; }
+/* 医学教材库：本机索引的导入 / 清单 / 删除 */
+.agent-medbooks-actions { display: flex; align-items: center; gap: 8px; }
+.agent-medbooks-actions .muted { font-size: var(--fs-micro); }
+.agent-medbooks-list {
+  list-style: none; margin: 4px 0 0; padding: 0;
+  max-height: 160px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.agent-medbooks-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px; font-size: var(--fs-micro);
+}
+.agent-medbooks-list li + li { border-top: 1px solid var(--border); }
+.agent-medbooks-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-medbooks-del {
+  border: none; background: none; cursor: pointer; color: var(--muted);
+  padding: 2px 6px; border-radius: var(--r-sm); font-size: var(--fs-micro);
+}
+.agent-medbooks-del:hover { color: var(--danger, #cf222e); background: var(--hover); }
 .ai-frame {
   flex: 1; min-height: 0;
   border: none; border-top: 1px solid var(--border);
@@ -3711,7 +3858,41 @@ a.wikilink.missing::after {
 /* ============================================================ 全局框架：左侧导航轨 + 悬浮卡片工作台
    布局重构（方案 A）：顶栏被取消，导航收进 66px 图标轨；
    正文变成三张悬浮卡片（目录 / 编辑 / 关联）漂在背景之上。 */
-.app { height: 100%; display: flex; flex-direction: row; }
+.app {
+  height: 100%; display: flex; flex-direction: row;
+  /* 右侧 AI 面板打开时让位用（见下方 .app.agent-open / .ai-open） */
+  --rail-w: 66px;
+  transition: padding-right var(--t-slow) var(--ease);
+}
+/* 展开态导航轨占 208px，让位计算要扣掉。这个值由 Workspace 的 useLayoutEffect 实测后
+ * 写在 .app 的行内样式上（见 Workspace.tsx「让位宽度要扣掉导航轨」）——首帧绘制前就量好，
+ * 所以不依赖 :has() 选择器。这里的 66px 只是测量前的兜底（轨默认收起态）。 */
+/*
+ * .deck 里三列可独立开关：目录 248px / 关联 236px 固定，编辑器占剩余（正常约 600px）。
+ * 让位时至少给 .deck 留下「编辑器 400px + 当前实际打开的列」，否则编辑器会被挤成一条缝。
+ * 下面按列组合给出下限（三列同时开的规则特异度更高，自动胜出）。
+ */
+.app { --deck-min: 430px; }                        /* 仅编辑器 */
+.app:has(.c-insp) { --deck-min: 680px; }           /* + 关联 */
+.app:has(.c-tree) { --deck-min: 690px; }           /* + 目录 */
+.app:has(.c-tree):has(.c-insp) { --deck-min: 940px; } /* + 目录 + 关联 */
+
+/*
+ * 右侧 AI 面板（AI 笔记助手 / AI 助手）是 position: fixed 的覆盖层，打开时会压住编辑器右半边。
+ * 这里让它同时「挤窄主区」：给 .app 撑出等宽的右内边距，flex 布局自动把 .deck 收窄；
+ * 面板是 fixed，不受 padding 影响，视觉上仍贴右滑入。
+ *
+ * 关键是不能让位过头 —— 把「让位宽度」和「面板宽度」绑到同一个 --side-w，并用 clamp 兜底：
+ * 至少给 .deck 留 --deck-min（见上方按列组合算出的下限），否则编辑器会被挤成一条缝。
+ * 窄屏（≤1040px，与导航轨抽屉同一断点）放不下并排，继续用覆盖层，故只在宽屏启用。
+ */
+@media (min-width: 1041px) {
+  .app.agent-open { --side-w: clamp(320px, calc(100% - var(--rail-w) - var(--deck-min)), 560px); }
+  .app.ai-open { --side-w: clamp(320px, calc(100% - var(--rail-w) - var(--deck-min)), 480px); }
+  .app.agent-open, .app.ai-open { padding-right: var(--side-w); }
+  .app.agent-open > .agent-panel { width: var(--side-w); }
+  .app.ai-open > .ai-panel { width: var(--side-w); }
+}
 
 /* ---------- 导航轨 ---------- */
 .rail {
@@ -3837,7 +4018,7 @@ a.wikilink.missing::after {
   background: var(--accent);
   box-shadow: 0 0 12px var(--accent);
 }
-.rail-font-glyph { font-size: 13px; font-weight: 800; letter-spacing: -0.02em; }
+.rail-font-glyph { font-size: var(--fs-body); font-weight: 800; letter-spacing: -0.02em; }
 .rail-font-wrap { position: relative; }
 .rail-flyout {
   position: absolute; left: calc(100% + 12px); bottom: 0; z-index: 80;
@@ -3911,12 +4092,12 @@ a.wikilink.missing::after {
   display: flex; align-items: center; gap: 8px;
   padding: 0 14px; border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 100%), var(--bg-raised);
-  font-size: 13px; font-weight: 650;
+  font-size: var(--fs-body); font-weight: 650;
   letter-spacing: -0.015em;
 }
 .card-head .spacer { flex: 1; }
 .card-head-note {
-  font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-micro); font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums;
   background: var(--panel-deep); border: 1px solid var(--border);
   padding: 2px 8px; border-radius: 999px;
 }
@@ -3928,7 +4109,7 @@ a.wikilink.missing::after {
   height: 28px; padding: 0 10px;
   border: 1px solid var(--border); border-radius: 999px;
   background: var(--bg-raised); color: var(--muted);
-  font-size: 12px; font-family: inherit; font-weight: 500;
+  font-size: var(--fs-caption); font-family: inherit; font-weight: 500;
   cursor: pointer; flex-shrink: 0;
   box-shadow: var(--shadow-xs), var(--glass-shine);
   transition: var(--tr-interact);
@@ -3997,19 +4178,28 @@ a.wikilink.missing::after {
   pointer-events: none; z-index: -1;
 }
 .preview.placeholder .hero-badge {
-  font-size: 11px; font-weight: 650; color: var(--accent);
-  background: linear-gradient(135deg, var(--accent-soft) 0%, rgba(168, 85, 247, 0.08) 100%);
-  border: 1px solid var(--border-accent);
-  padding: 4px 16px; border-radius: 999px; letter-spacing: 0.08em;
-  box-shadow: 0 0 20px -2px var(--accent-soft), var(--glass-shine);
-  backdrop-filter: blur(12px);
+  font-size: var(--fs-micro); font-weight: 650; color: var(--accent-ink);
+  /* 实底靛紫胶囊：此前是 8% 淡底 + 描边，首屏柔光一冲就没了存在感。
+     渐变两端按 AA 反推：白字压 #6366f1 只有 4.46:1（11px 文字不够），
+     起点压到 #5b5ff0（4.79:1），终点 #7c3aed（5.67:1）。 */
+  background: linear-gradient(135deg, #5b5ff0 0%, #7c3aed 100%);
+  border: 1px solid transparent;
+  padding: 5px 16px; border-radius: 999px; letter-spacing: 0.08em;
+  box-shadow: 0 4px 18px -4px rgba(79, 70, 229, 0.55), var(--glass-shine);
   display: inline-flex; align-items: center; gap: 8px;
   text-transform: uppercase;
 }
+/* 深色下深墨字压上面那支深靛渐变只有 3.5~4.5:1；换成与主按钮同源的浅靛渐变
+   （#a5b4fc → #818cf8，深墨字实测约 10:1 / 7.4:1）。 */
+[data-theme='dark'] .preview.placeholder .hero-badge {
+  background: var(--grad-primary);
+  box-shadow: 0 4px 18px -4px rgba(129, 140, 248, 0.5), var(--glass-shine);
+}
 .preview.placeholder .hero-badge::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
+  /* 徽标改成实底胶囊后，原先的 --accent 圆点（靛蓝压靛蓝）会糊掉；
+     用 currentColor 跟随徽标文字色（浅色=白、深色=深墨），两主题都清晰。 */
+  background: currentColor;
 }
 .preview.placeholder .hero-title {
   /* 实色主文字：渐变文字是装饰而非信息（且暗色端对比不足）。标题层级靠字号+字重 */
@@ -4367,7 +4557,7 @@ a.wikilink.missing::after {
 }
 .welcome-stage > .preview.placeholder .teach-step.format-hint span { white-space: nowrap; }
 .preview.placeholder .teach-step {
-  padding: 8px 14px; gap: 10px; font-size: 13px;
+  padding: 8px 14px; gap: 10px; font-size: var(--fs-body);
   background: var(--panel-glass-strong);
   backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
@@ -4402,7 +4592,7 @@ a.wikilink.missing::after {
   .preview.placeholder .teach-step { flex-wrap: wrap; }
   .preview.placeholder .teach-step kbd { flex: 0 0 auto; white-space: nowrap; }
   .preview.placeholder .hero-proof { gap: 5px; }
-  .preview.placeholder .hero-proof span { padding-inline: 7px; font-size: 11px; }
+  .preview.placeholder .hero-proof span { padding-inline: 7px; font-size: var(--fs-micro); }
 }
 
 /* ---- 3. 浮层头部统一：一个高度 / 一个内距 / 一个底面 ----
@@ -4475,7 +4665,7 @@ a.wikilink.missing::after {
 .pdf-empty > p:first-child,
 .pdf-draft-empty > p:first-child {
   margin: 0;
-  font-size: 15px; font-weight: 600;
+  font-size: var(--fs-lead); font-weight: 600;
   color: var(--text-2); letter-spacing: -0.01em;
 }
 /* 空态里的动作按钮：从标题堆里脱开一点，不要和说明文字黏在一起 */
@@ -4579,7 +4769,7 @@ a.wikilink.missing::after {
   fill: var(--pw-gc, currentColor);
   fill: color-mix(in srgb, var(--pw-gc, currentColor) 70%, var(--text));
 }
-.pw-svg .pw-group-note { fill: var(--muted); font-size: 11px; }
+.pw-svg .pw-group-note { fill: var(--muted); font-size: var(--fs-micro); }
 .pw-svg .pw-lines path { fill: none; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .pw-svg .pw-edge { opacity: .98; }
 .pw-svg .pw-edge-label { fill: var(--pw-enzyme); font-size: 11.5px; font-style: italic; paint-order: stroke; stroke: var(--panel); stroke-width: 3.4px; stroke-linejoin: round; }
