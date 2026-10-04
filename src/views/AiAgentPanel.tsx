@@ -997,12 +997,14 @@ export default function AiAgentPanel({
                 ? [
                     { insert: `/出题 ${currentPath}`, label: '出题自测', desc: '3-5 道题，先答后评' },
                     { insert: `/费曼 ${currentPath}`, label: '费曼检验', desc: '你讲我挑错，讲透为止' },
+                    { insert: `/追问 ${currentPath}`, label: '追问检验', desc: '为什么/怎么解释，答完才纠偏' },
                     { insert: `/串联 ${currentPath}`, label: '串联双链', desc: '找出该连未连的笔记' },
                   ]
                 : [
                     { insert: '/出题 ', label: '出题自测', desc: '围绕任意主题出题' },
                     { insert: '/费曼 ', label: '费曼检验', desc: '用自己的话讲一遍' },
-                    { insert: '/错题归因 ', label: '错题归因', desc: '归纳共性薄弱点' },
+                    { insert: '/追问 ', label: '追问检验', desc: '先答追问，再看标准说法' },
+                    { insert: '/错题归因 ', label: '错题归因', desc: '按错因分派补救动作' },
                     { insert: '今天我该先复习什么？', label: '今日计划', desc: '按到期卡给建议' },
                   ]
               ).map((s) => (

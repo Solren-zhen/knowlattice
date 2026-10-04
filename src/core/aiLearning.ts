@@ -1,8 +1,8 @@
 /**
- * 学习状态感知：给 AI 笔记助手的两个只读工具。
+ * 学习状态感知：给 AI 笔记助手的四个只读工具。
  * - get_review_due：今天的复习队列（到期卡、最紧的几张、新卡数量）
- * - get_study_summary：打卡连续天数、近 7 天趋势、复习卡总量/已学/到期
- * - get_weak_chapters：错题本薄弱章节与最需要回看的笔记
+ * - get_study_summary：打卡连续天数、近 7 天趋势、复习卡总量/已学/到期、把握度校准
+ * - get_weak_chapters：错题本薄弱章节、错因分布与最需要回看的笔记
  * - get_quiz_progress：题库练习进度（已作答/答错/今日待复习，最薄弱的题库）
  * 数据全部来自 srs / srsCards / stats / mistakes / qbankStats 的既有纯函数——
  * 没有新存储，也不写任何东西。面板直接传自己的 docs 即可，无需从 Workspace 多接一条数据线。
@@ -13,7 +13,8 @@ import { bankProgress, type StatsMap } from './qbankStats';
 import { last7, streak } from './stats';
 import { loadCards, scheduleOf, srsStats } from './srs';
 import { buildCards, type ReviewCard } from './srsCards';
-import { chapterHeat, loadMistakes } from './mistakes';
+import { chapterHeat, loadMistakes, MISTAKE_REASON_LABELS, reasonCounts } from './mistakes';
+import { calibrationSummary } from './qbankCalib';
 
 export const LEARNING_TOOLS: AgentToolDef[] = [
   {
@@ -23,12 +24,12 @@ export const LEARNING_TOOLS: AgentToolDef[] = [
   },
   {
     name: 'get_study_summary',
-    description: '查看学习概况：连续打卡天数、今天与近 7 天的学习次数、复习卡总量/已学/今日到期。',
+    description: '查看学习概况：连续打卡天数、今天与近 7 天的学习次数、复习卡总量/已学/今日到期，以及把握度校准（作答时报的自信 vs 实际正确率）。',
     parameters: { type: 'object', properties: {} },
   },
   {
     name: 'get_weak_chapters',
-    description: '查看错题本：复习中「忘了」的薄弱章节与最需要回看的笔记（含失败次数与最近失败时间）。',
+    description: '查看错题本：复习中「忘了」的薄弱章节、错因分布（知识没记住/概念混淆/审题偏差/临床推理跳步）与最需要回看的笔记（含失败次数与最近失败时间）。',
     parameters: { type: 'object', properties: {} },
   },
   {
@@ -71,7 +72,23 @@ export function reviewDueReport(paths: string[], docs: Map<string, string>, now 
   ].join('\n');
 }
 
-/** 学习概况报告：打卡（复习/做题行为）＋复习卡调度总览 */
+/**
+ * 把握度校准一句话：只报事实（平均自信 vs 实际答对），让模型自己决定怎么提醒。
+ * 样本为 0 时明说「还没有样本」，避免模型凭空推断用户的自我评估水平。
+ */
+function calibrationLine(): string {
+  const cal = calibrationSummary();
+  if (!cal.n) return '把握度校准：还没有样本（在题库作答前选一个把握程度就会开始记录）。';
+  const mean = cal.buckets.reduce((a, b) => a + b.confidence * b.n, 0) / cal.n / 5;
+  const acc = cal.correct / cal.n;
+  const diff = cal.overconfidence * 100;
+  const verdict = Math.abs(diff) < 3
+    ? '校准得不错'
+    : diff > 0 ? `高估 ${Math.round(diff)} 个百分点` : `低估 ${Math.round(-diff)} 个百分点`;
+  return `把握度校准：${cal.n} 次作答报了把握度，平均自信 ${Math.round(mean * 100)}%、实际答对 ${Math.round(acc * 100)}% —— ${verdict}。`;
+}
+
+/** 学习概况报告：打卡（复习/做题行为）＋复习卡调度总览＋把握度校准 */
 export function studySummaryReport(paths: string[], docs: Map<string, string>, now = Date.now()): string {
   const days = last7();
   const total7 = days.reduce((acc, d) => acc + d.count, 0);
@@ -81,10 +98,11 @@ export function studySummaryReport(paths: string[], docs: Map<string, string>, n
   return [
     `连续打卡 ${streak()} 天；今天学习 ${today} 次，近 7 天共 ${total7} 次。`,
     `复习卡：共 ${st.total} 张，已进入调度 ${st.learned} 张，今日到期 ${st.dueNow} 张。`,
+    calibrationLine(),
   ].join('\n');
 }
 
-/** 错题本报告：薄弱章节 + 最需要回看的笔记——agent 可据此 read_note 后补提示键或出题 */
+/** 错题本报告：薄弱章节 + 错因分布 + 最需要回看的笔记——agent 可据此 read_note 后补提示键或出题 */
 export function weakChaptersReport(now = Date.now()): string {
   const mistakes = loadMistakes();
   const records = Object.values(mistakes);
@@ -92,17 +110,26 @@ export function weakChaptersReport(now = Date.now()): string {
   const total = records.reduce((a, r) => a + r.count, 0);
   const heat = chapterHeat(mistakes);
   const shownChapters = heat.slice(0, 6).map((h) => `- ${h.chapter}：${h.count} 次`);
+  // 错因分布：按条数（一条错题一个错因），与错题本面板上的分布条同源；都未标注时如实说明
+  const reasons = reasonCounts();
+  const labeled = reasons.reduce((a, r) => a + r.count, 0);
+  const unlabeled = reasons[0]?.unlabeled ?? 0;
+  const reasonLine = labeled
+    ? `错因分布（已标注 ${labeled} 条）：${reasons.map((r) => `${MISTAKE_REASON_LABELS[r.reason]} ${r.count}`).join('、')}${unlabeled ? `；未标注 ${unlabeled} 条` : ''}。`
+    : `错因分布：${records.length} 条错题都还没标注错因（错题本里每条可标 知识没记住 / 概念混淆 / 审题偏差 / 临床推理跳步）。`;
   const notes = [...records].sort((a, b) => b.count - a.count || b.lastFailedAt - a.lastFailedAt);
   const shownNotes = notes.slice(0, 8).map((r) => {
     const days = Math.floor((now - r.lastFailedAt) / DAY_MS);
     const ago = days <= 0 ? '今天' : `${days} 天前`;
-    return `- ${r.path}「${r.title}」${r.count} 次（最近 ${ago}）`;
+    const reason = r.reason && MISTAKE_REASON_LABELS[r.reason] ? `（${MISTAKE_REASON_LABELS[r.reason]}）` : '';
+    return `- ${r.path}「${r.title}」${r.count} 次（最近 ${ago}）${reason}`;
   });
   const rest = notes.length - shownNotes.length;
   return [
     `错题共 ${records.length} 处（累计 ${total} 次），集中在 ${heat.length} 个章节。`,
     '最薄弱的章节：',
     ...shownChapters,
+    reasonLine,
     '最需要回看的笔记：',
     ...shownNotes,
     ...(rest > 0 ? [`…（其余 ${rest} 条省略）`] : []),

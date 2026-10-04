@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AiAgentPanel from '../AiAgentPanel';
 import type { WireMessage } from '../../core/aiAgent';
+import { clearMistake, importMistakes } from '../../core/mistakes';
+import { recordCalibration } from '../../core/qbankCalib';
 
 /** 面板在 pi 引擎包加载失败时回退内置引擎。默认走真实 pi 路径，
  *  需要覆盖「内置引擎」时才把开关打开（两者对半截回答的处理不同）。 */
@@ -759,6 +761,42 @@ describe('上下文预算 / 引用核验 / 面板细节', () => {
     });
     expect(chip.textContent).toContain('· 2 处');
     expect(chip.getAttribute('title')).toContain('出处不唯一');
+    void fetchMock;
+  });
+
+  it('学习状态工具：模型拿到的是带错因分布与把握度校准的真实报告', async () => {
+    piSwitch.fail = true; // 内置引擎：工具结果直接进 messages，便于断言模型可见载荷
+    importMistakes({
+      '解剖/心脏.md': {
+        path: '解剖/心脏.md', chapter: '生理学', title: '心脏', count: 2, lastFailedAt: Date.now(), reason: 'confusion',
+      },
+    });
+    recordCalibration(4, true);
+    recordCalibration(4, false);
+    const bodies: Array<{ messages: Array<{ role: string; content?: string }> }> = [];
+    const toolCalls = [
+      { index: 0, id: 'r1', function: { name: 'get_weak_chapters', arguments: '{}' } },
+      { index: 1, id: 'r2', function: { name: 'get_study_summary', arguments: '{}' } },
+    ];
+    const fetchMock = stubFetch([
+      async () => sseResponse([dataLine({ choices: [{ delta: { tool_calls: toolCalls } }] })]),
+      async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return sseResponse(finalChunks('看完了。'));
+      },
+    ]);
+    renderPanel();
+
+    await sendMessage('我错在哪、状态如何');
+    await waitFor(() => expect(bodies).toHaveLength(1));
+
+    const tools = bodies[0].messages.filter((m) => m.role === 'tool');
+    const weak = tools.find((m) => m.content?.includes('错因分布'));
+    const summary = tools.find((m) => m.content?.includes('把握度校准'));
+    expect(weak?.content).toContain('错因分布（已标注 1 条）：知识没记住 0、概念混淆 1');
+    expect(summary?.content).toContain('平均自信 80%、实际答对 50%');
+    clearMistake('解剖/心脏.md');
+    localStorage.removeItem('knowlattice-qcalib');
     void fetchMock;
   });
 
