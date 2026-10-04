@@ -1,6 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as pageAnchorModule from '../pageAnchor';
 import { buildChunks, buildDocChunks, LONG_NOTE } from '../docIndex';
 import { pageAnchor } from '../pageAnchor';
+
+/** 统计切分时读取页码锚点的次数：命中切分缓存就不该再切一遍 */
+const anchorScans = vi.hoisted(() => ({ n: 0 }));
+
+vi.mock('../pageAnchor', async (importOriginal) => {
+  const actual = (await importOriginal()) as typeof pageAnchorModule;
+  return {
+    ...actual,
+    pageAnchors: (src: string) => {
+      anchorScans.n += 1;
+      return actual.pageAnchors(src);
+    },
+  };
+});
 
 const para = (n: number, t: string) => (t + '。').repeat(n);
 
@@ -64,5 +79,41 @@ describe('buildChunks', () => {
       ['img.png', '乙'],
     ]);
     expect([...buildDocChunks(docs).keys()]).toEqual(['a.md']);
+  });
+});
+
+describe('切分缓存', () => {
+  it('同一 (path, content) 只切一次，重复调用不再重算', () => {
+    const content = longNote();
+    const path = '教材/缓存命中.md';
+    anchorScans.n = 0;
+    const first = buildChunks(content, path);
+    expect(anchorScans.n).toBe(1); // 长笔记切分读一次页码锚点
+    const second = buildChunks(content, path);
+    expect(anchorScans.n).toBe(1); // 命中缓存，不再切分
+    expect(second).toEqual(first);
+    expect(second).not.toBe(first); // 返回数组浅拷贝：调用方 sort/push 不污染缓存
+    expect(second[0]).toBe(first[0]); // 单元对象复用（调用方只读）
+  });
+
+  it('内容变更后缓存不脏', () => {
+    const path = '教材/缓存失效.md';
+    expect(buildChunks('短笔记正文。', path)[0].text).toBe('短笔记正文。');
+    expect(buildChunks('改写后的正文。', path)[0].text).toBe('改写后的正文。');
+  });
+
+  it('buildDocChunks 复用同一批切分结果', () => {
+    const docs = new Map([
+      ['教材/缓存批量甲.md', longNote()],
+      ['教材/缓存批量乙.md', longNote()],
+    ]);
+    anchorScans.n = 0;
+    const first = buildDocChunks(docs);
+    expect(anchorScans.n).toBe(2); // 两篇各切一次
+    buildDocChunks(docs);
+    expect(anchorScans.n).toBe(2); // 全部命中缓存，不再切分
+    const again = buildDocChunks(docs);
+    expect([...again.keys()]).toEqual([...first.keys()]);
+    expect(again.get('教材/缓存批量甲.md')).toEqual(first.get('教材/缓存批量甲.md'));
   });
 });

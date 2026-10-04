@@ -30,6 +30,10 @@ export interface CitationResult extends Citation {
   status: CiteStatus;
   /** 命中的来源笔记路径；not_found 或未解析到来源时为 null */
   sourcePath: string | null;
+  /** 逐字命中（status === 'exact'）的笔记篇数：0 = 没有一篇逐字对上 */
+  hits: number;
+  /** 多处逐字命中（hits > 1）：结论仍是 exact，但出处不唯一，无法唯一溯源 */
+  ambiguous: boolean;
 }
 
 const CITE_RE = /〔([^〕]+)〕/g;
@@ -76,6 +80,26 @@ function sourcePrep(source: string): SourcePrep {
     SOURCE_PREP_CACHE.delete(oldest);
   }
   return prep;
+}
+
+/** 剥离页码锚点的结果缓存：同一份原文（原始 content 串为键）只剥一次。
+ *  核验是「每条引用 × 每篇笔记」逐个剥锚点，不缓存时同一篇会被剥 N 次；
+ *  预算与逐出策略与 sourcePrep 同口径（SOURCE_PREP_MAX_CHARS、逐出最旧），防内存膨胀。 */
+const STRIPPED_CACHE = new Map<string, string>();
+let strippedChars = 0;
+
+function strippedSource(content: string): string {
+  const hit = STRIPPED_CACHE.get(content);
+  if (hit !== undefined) return hit;
+  const out = stripPageAnchors(content);
+  strippedChars += content.length + out.length;
+  STRIPPED_CACHE.set(content, out);
+  while (STRIPPED_CACHE.size > 1 && strippedChars > SOURCE_PREP_MAX_CHARS) {
+    const oldest = STRIPPED_CACHE.keys().next().value!;
+    strippedChars -= oldest.length + STRIPPED_CACHE.get(oldest)!.length;
+    STRIPPED_CACHE.delete(oldest);
+  }
+  return out;
 }
 
 /** 最长的、能在原文中找到的引文前缀长度（不足 MIN_PROBE 记 0）。
@@ -167,7 +191,7 @@ export function lookupQuote(
   for (const [p, content] of docs) {
     if (!p.endsWith('.md')) continue;
     if (path && p !== path) continue;
-    const status = verifyQuote(quote, stripPageAnchors(content));
+    const status = verifyQuote(quote, strippedSource(content));
     if (RANK[status] > RANK[best]) { best = status; bestPath = p; }
   }
   return { status: best, sourcePath: bestPath };
@@ -186,24 +210,45 @@ function bookMatches(base: string, wanted: string, path: string): boolean {
   return n.includes(q) || q.includes(n) || path.toLowerCase().includes(q);
 }
 
+/** 核验结果缓存：同一份 docs（Map 实例）下，同一 (书名, 引文) 只扫一遍库。
+ *  面板每次保存都会换新 Map 实例，旧实例随 WeakMap 一起回收；
+ *  流式重渲 / 同一答案重复渲染因此不再「每条引用 × 每篇笔记」重扫全库。
+ *  注意：以 Map 实例为界——同一实例被就地改写（set/delete）不会失效，调用方应换新 Map。 */
+const VERIFY_CACHE = new WeakMap<Map<string, string>, Map<string, CitationResult>>();
+
+/** 结果缓存的键：书名 + 引文（页码/原文标记不属于核验输入，命中后按当前引用回填） */
+const citeKey = (c: Citation): string => `${c.book ?? ''}\u0000${c.quote}`;
+
 /**
  * 逐条核验回答里的引用：在库内（有书名则限定同名笔记）找最佳命中来源。
  * 无引文的标记（quote 为空）状态记 not_found，由调用方决定是否展示。
+ * 另统计 exact 命中篇数 hits；hits > 1 记 ambiguous（出处不唯一）。
  */
 export function verifyCitations(answer: string, docs: Map<string, string>): CitationResult[] {
+  let cache = VERIFY_CACHE.get(docs);
+  if (!cache) { cache = new Map<string, CitationResult>(); VERIFY_CACHE.set(docs, cache); }
+  const bucket = cache;
   return parseCitations(answer).map((c) => {
+    const cached = bucket.get(citeKey(c));
+    // 缓存只存核验结论；页码/原始标记随当前引用回填（同 quote 同书名的两条引用页码可能不同）
+    if (cached) return { ...cached, book: c.book, page: c.page, quote: c.quote, raw: c.raw };
+
     let best: CiteStatus = 'not_found';
     let bestPath: string | null = null;
+    let hits = 0;
     for (const [path, content] of docs) {
       if (!path.endsWith('.md')) continue;
       const base = baseName(path);
       if (c.book && !bookMatches(base, c.book, path)) {
         continue;
       }
-      const status = c.quote ? verifyQuote(c.quote, stripPageAnchors(content)) : 'not_found';
+      const status = c.quote ? verifyQuote(c.quote, strippedSource(content)) : 'not_found';
+      if (status === 'exact') hits++;
       if (RANK[status] > RANK[best]) { best = status; bestPath = path; }
     }
-    return { ...c, status: best, sourcePath: bestPath };
+    const result: CitationResult = { ...c, status: best, sourcePath: bestPath, hits, ambiguous: hits > 1 };
+    bucket.set(citeKey(c), result);
+    return { ...result };
   });
 }
 

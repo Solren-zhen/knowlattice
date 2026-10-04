@@ -28,11 +28,36 @@ export interface EvidenceUnit {
   text: string;
 }
 
+/** 切分缓存：检索与引用核验会反复切分同一批长笔记，同一篇（路径 + 内容）只算一次。
+ *  预算与逐出策略与 citeVerify 的 SOURCE_PREP_CACHE 同口径（8M 字符、逐出最旧），防内存膨胀。 */
+const CHUNK_CACHE = new Map<string, EvidenceUnit[]>();
+const CHUNK_CACHE_MAX_CHARS = 8_000_000;
+let chunkCacheChars = 0;
+
 /**
  * 把一篇笔记切成证据单元：以空行为段落边界，每段继承上方最近的标题与页码。
  * content 传原文（含锚点）；单元 text 已剥离锚点，可直接用于匹配与展示。
+ * 结果按 (path, content) 缓存：命中时返回数组浅拷贝，调用方 sort/push 不会污染缓存
+ * （单元对象本身复用，调用方只读）。
  */
 export function buildChunks(content: string, path: string): EvidenceUnit[] {
+  const key = `${path}\u0000${content}`;
+  const hit = CHUNK_CACHE.get(key);
+  if (hit) return hit.slice();
+
+  const units = buildChunksUncached(content, path);
+  chunkCacheChars += key.length;
+  CHUNK_CACHE.set(key, units);
+  while (CHUNK_CACHE.size > 1 && chunkCacheChars > CHUNK_CACHE_MAX_CHARS) {
+    const oldest = CHUNK_CACHE.keys().next().value!;
+    chunkCacheChars -= oldest.length;
+    CHUNK_CACHE.delete(oldest);
+  }
+  return units.slice();
+}
+
+/** buildChunks 的实际切分逻辑（不缓存） */
+function buildChunksUncached(content: string, path: string): EvidenceUnit[] {
   const anchors = pageAnchors(content);
   if (content.length < LONG_NOTE) {
     return [{
