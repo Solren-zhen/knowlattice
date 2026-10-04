@@ -929,7 +929,18 @@ export default function Workspace() {
         <AiAgentPanel
           onClose={() => setAgentOpen(false)}
           docs={vault.docs}
-          onSave={(path, content) => vault.save(path, content)}
+          onSave={async (path, content) => {
+            await vault.save(path, content);
+            // AI 改的就是当前打开的这篇：编辑器缓冲必须跟着换。
+            // 不换的后果实测过（浏览器里可复现）：编辑器仍显示旧正文，用户随后随便敲一个字，
+            // 0.8s 的自动保存就把 AI 刚写进去的整段改动顶回旧内容——AI 的版本只能去「历史版本」里找。
+            // 缓冲是脏的（用户正在手打）就不动它：那是用户正在写的东西，改成提示一句，
+            // 让他自己决定是丢掉手改还是先另存（AI 的版本已经在历史版本里）。
+            const cur = editRef.current;
+            if (cur.vault.currentPath !== path) return;
+            if (!cur.dirty) setDraft(content);
+            else toast('这篇笔记刚被 AI 改写；编辑器里还有未保存的手改，保存后会覆盖 AI 的版本（可在「历史版本」找回）', 'info');
+          }}
           onOpenPath={(p) => openNote(p)}
           currentPath={vault.currentPath}
           resolveLink={vault.resolveLink}
