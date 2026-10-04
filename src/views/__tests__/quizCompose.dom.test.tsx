@@ -74,6 +74,13 @@ function openCompose() {
 const chip = (name: string) => screen.getByRole('button', { name });
 const text = (c: HTMLElement) => c.textContent ?? '';
 
+/** 打开组题弹窗 → 选题量 → 开始练习 */
+function startRun(count: number) {
+  openCompose();
+  fireEvent.click(chip(String(count)));
+  fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+}
+
 describe('自动组题 · 弹窗', () => {
   it('默认收起导入细节，用户需要时再展开', async () => {
     const { container } = await setup();
@@ -206,5 +213,89 @@ describe('自动组题 · 作答落盘', () => {
     expect(text(again.container)).toContain('候选 11 题');
     fireEvent.click(chip('今日待复习'));
     expect(text(again.container)).toContain('候选 0 题');
+  });
+});
+
+describe('自动组题 · 按章节交错', () => {
+  it('组题弹窗提供「按章节交错」选项，默认仍是乱序', async () => {
+    await setup();
+    openCompose();
+    const shuffle = screen.getByRole('button', { name: '乱序' });
+    const interleave = screen.getByRole('button', { name: /按章节交错/ });
+    expect(shuffle.className).toContain('on');
+    expect(interleave.className).not.toContain('on');
+    expect(interleave.textContent).toContain('（推荐：混着练更能分辨相似知识点）');
+
+    fireEvent.click(interleave);
+    expect(interleave.className).toContain('on');
+    expect(shuffle.className).not.toContain('on');
+  });
+
+  it('选了交错后，相邻两题来自不同章节', async () => {
+    const { container } = await setup();
+    openCompose();
+    fireEvent.click(chip('10'));
+    fireEvent.click(screen.getByRole('button', { name: /按章节交错/ }));
+    fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+
+    const chapterNow = () => container.querySelector('.quiz-chapter')?.textContent ?? '';
+    const first = chapterNow();
+    expect(first).not.toBe('');
+    // 正确答案是第 1 个选项，点第 2 个 → 答错
+    fireEvent.click(screen.getByRole('button', { name: /容易结合氧/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /下一题/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /下一题/ }));
+    expect(chapterNow()).not.toBe(first);
+  });
+});
+
+describe('自动组题 · 把握度校准', () => {
+  it('不报把握度也能作答，且不产生校准样本、不显示对照', async () => {
+    const { container } = await setup();
+    startRun(10);
+    fireEvent.click(screen.getByRole('button', { name: /容易结合氧/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /下一题/ })).toBeTruthy());
+    expect(localStorage.getItem('knowlattice-qcalib')).toBeNull();
+    expect(text(container)).not.toContain('你报的是');
+  });
+
+  it('报了把握度再作答：记录样本并显示一行对照', async () => {
+    const { container } = await setup();
+    startRun(10);
+    fireEvent.click(screen.getByRole('button', { name: '4 比较有把握' }));
+    fireEvent.click(screen.getByRole('button', { name: /容易结合氧/ })); // 答错
+    await waitFor(() => expect(text(container)).toContain('你报的是「比较有把握」，这题答错了'));
+    expect(JSON.parse(localStorage.getItem('knowlattice-qcalib') ?? '{}')).toEqual({ 4: { n: 1, correct: 0 } });
+  });
+
+  it('切换题目时清空已选把握度', async () => {
+    await setup();
+    startRun(10);
+    fireEvent.click(screen.getByRole('button', { name: '3 一半一半' }));
+    expect(screen.getByRole('button', { name: '3 一半一半' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: /容易结合氧/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /下一题/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /下一题/ }));
+    expect(screen.getByRole('button', { name: '3 一半一半' }).getAttribute('aria-pressed')).toBe('false');
+    expect((screen.getByRole('button', { name: '3 一半一半' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('简答题（无选项）同样能报把握度并记录', async () => {
+    localStorage.setItem('knowlattice-qbanks', JSON.stringify([
+      {
+        name: BANK, importedAt: Date.now(), questions: [
+          { id: 'r1', type: 'recall', stem: '简述氧解离曲线右移的意义', options: [], answer: 0, answerText: '利于向组织放氧', chapter: CH1 },
+        ],
+      },
+    ]));
+    await resetQbankStorageForTests();
+    const { container } = await setup();
+    openCompose();
+    fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+    fireEvent.click(screen.getByRole('button', { name: '5 很确定' }));
+    fireEvent.click(screen.getByRole('button', { name: '显示答案' }));
+    fireEvent.click(screen.getByRole('button', { name: '我答对了' }));
+    await waitFor(() => expect(text(container)).toContain('你报的是「很确定」，这题答对了'));
+    expect(JSON.parse(localStorage.getItem('knowlattice-qcalib') ?? '{}')).toEqual({ 5: { n: 1, correct: 1 } });
   });
 });

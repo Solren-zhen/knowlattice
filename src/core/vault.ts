@@ -22,6 +22,7 @@ import { rebuildLinkIndex, updateLinksForPath, backlinks, type LinkIndex } from 
 import { exportSrsState, importSrsState } from './srs';
 import { exportQbanks, importQbanks } from './qbank';
 import { exportQuestionStats, importQuestionStats } from './qbankStats';
+import { exportCalibration, importCalibration } from './qbankCalib';
 import { loadMistakes, importMistakes } from './mistakes';
 import { exportTodos, importTodos } from './todos';
 import { exportCardEdits, importCardEdits } from './cardEdits';
@@ -632,6 +633,8 @@ export function useVault() {
       // v3 起补上待办与打卡：这两样此前只活在 localStorage 里，备份不到、换设备即丢
       todos: exportTodos(),
       days: exportDays(),
+      // 元认知校准桶：与 days 同属 localStorage 小数据，不随备份走就会丢；旧备份无此字段时导入自动跳过
+      calibration: exportCalibration(),
       // v4 起补上卡片自定义（改写正/背面、删卡）：和待办同一类问题，不随备份走就会丢
       cardEdits: exportCardEdits(),
       // v5 起补上专注周期专注记录：工作台的「今日/累计/趋势」全靠它，丢了就等于白专注
@@ -662,6 +665,7 @@ export function useVault() {
       mistakes?: unknown;
       todos?: unknown;
       days?: unknown;
+      calibration?: unknown;
       cardEdits?: unknown;
       pomodoros?: unknown;
       pathwayTemplates?: unknown;
@@ -719,6 +723,7 @@ export function useVault() {
     if (data.mistakes) importMistakes(data.mistakes);
     if (data.todos) importTodos(data.todos);
     if (data.days) importDays(data.days);
+    if (data.calibration) importCalibration(data.calibration);
     if (data.cardEdits) importCardEdits(data.cardEdits);
     if (data.pomodoros) importPomodoros(data.pomodoros);
     if (data.pathwayTemplates) await importPathwayTemplates(data.pathwayTemplates);
