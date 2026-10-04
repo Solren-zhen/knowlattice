@@ -11,6 +11,7 @@ import {
   estimateTokens, isAbortError,
   type AgentSettings, type RunAgentOptions, type RunAgentResult, type WireMessage,
 } from './aiAgent';
+import { TOOL_RESULT_TOTAL_LIMIT, capToolResult } from './aiBudget';
 
 type AssistantWire = Extract<WireMessage, { role: 'assistant' }>;
 type AgentTool = import('@earendil-works/pi-agent-core').AgentTool;
@@ -22,6 +23,9 @@ type AssistantMessageEventStream = import('@earendil-works/pi-ai').AssistantMess
 type Model = import('@earendil-works/pi-ai').Model<'openai-completions'>;
 type ToolCall = import('@earendil-works/pi-ai').ToolCall;
 type TSchema = import('@earendil-works/pi-ai').TSchema;
+/** pi transcript 里的工具结果消息与其文本块（从 AgentMessage 派生，不额外引入包依赖） */
+type PiToolResult = Extract<AgentMessage, { role: 'toolResult' }>;
+type PiTextBlock = Extract<PiToolResult['content'][number], { type: 'text' }>;
 
 const PROVIDER_ID = 'knowlattice-relay';
 
@@ -145,6 +149,59 @@ export function toPiMessages(messages: WireMessage[], tools?: AgentTool[]): Agen
     else list.unshift({ role: 'system', content: '', toolsAdded: tools, timestamp: Date.now() });
   }
   return list;
+}
+
+/**
+ * 累计预算边界那一条至少要留这么长，否则直接换成占位说明（留几百字没意义）；
+ * 与 aiBudget 内部的 MIN_KEEP 同口径。
+ */
+const PI_TRIM_MIN_KEEP = 600;
+
+function isPiTextBlock(b: unknown): b is PiTextBlock {
+  return !!b && typeof b === 'object'
+    && (b as PiTextBlock).type === 'text' && typeof (b as PiTextBlock).text === 'string';
+}
+
+/**
+ * pi 的整轮上下文预算：与内置引擎 aiBudget.trimToolResults 同一口径。
+ * 从最新往回累加工具结果的文本长度，超预算的更早结果换成占位说明（模型可重新调用工具取回）。
+ *
+ * 两道闸：单条上限在工具结果回填 transcript 前生效（见 runPiAgent 的工具包装），
+ * 累计上限在每次请求模型前生效（runPiAgent 把它接在 transformContext 上）。
+ *
+ * 纯函数：不修改入参；畸形消息（role 不认识 / content 不是数组 / 块不是文本）一律跳过，不抛异常。
+ */
+export function trimPiToolResults(
+  messages: AgentMessage[],
+  totalLimit = TOOL_RESULT_TOTAL_LIMIT,
+): AgentMessage[] {
+  let used = 0;
+  const out = messages.slice();
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i] as Partial<PiToolResult> | undefined;
+    if (!m || typeof m !== 'object' || m.role !== 'toolResult' || !Array.isArray(m.content)) continue;
+    const blocks = m.content;
+    let size = 0;
+    for (const b of blocks) if (isPiTextBlock(b)) size += b.text.length;
+    if (used + size <= totalLimit) {
+      used += size;
+      continue;
+    }
+    const room = totalLimit - used;
+    const text = room >= PI_TRIM_MIN_KEEP
+      ? capToolResult(blocks.filter(isPiTextBlock).map((b) => b.text).join('\n'), room)
+      : `【较早的工具结果已省略：原 ${size} 字，超出本轮上下文预算。需要时请重新调用工具取回。】`;
+    // 多个文本块合并成一条；图片等非文本块原样保留
+    let placed = false;
+    const next: PiToolResult['content'] = [];
+    for (const b of blocks) {
+      if (!isPiTextBlock(b)) { next.push(b); continue; }
+      if (!placed) { next.push({ type: 'text', text }); placed = true; }
+    }
+    used = totalLimit;
+    out[i] = { ...(out[i] as PiToolResult), content: next };
+  }
+  return out;
 }
 
 /** pi 助手消息 → 面板渲染用的 wire 助手消息 */
@@ -287,7 +344,9 @@ export async function runPiAgent(o: RunAgentOptions, deps: PiAgentDeps = {}): Pr
     parameters: Type.Unsafe(t.parameters as TSchema),
     execute: async (_toolCallId, params, toolSignal) => {
       const text = await o.executeTool(t.name, JSON.stringify(params ?? {}), toolSignal ?? signal);
-      return { content: [{ type: 'text', text }], details: {} };
+      // 单条上限（与内置引擎同口径）：长笔记 / 多段教材原文在回填 transcript 前先截断，
+      // 免得一次工具调用就把上下文撑爆；累计上限由 transformContext 在每次请求前兜底。
+      return { content: [{ type: 'text', text: capToolResult(text) }], details: {} };
     },
   }));
 
@@ -313,6 +372,15 @@ export async function runPiAgent(o: RunAgentOptions, deps: PiAgentDeps = {}): Pr
     initialState: { model, tools: piTools, messages: tailIsUser ? all.slice(0, -1) : all },
     streamFn,
     toolExecution: 'sequential',
+    // 累计上限（与内置引擎同口径）：每次请求模型前把更早的工具结果换成占位说明。
+    // pi 契约要求该钩子不得抛出，故整段 try/catch，任何异常都原样返回 messages。
+    transformContext: async (messages) => {
+      try {
+        return trimPiToolResults(messages);
+      } catch {
+        return messages;
+      }
+    },
     beforeToolCall: async () => {
       if (toolRounds < maxSteps) return undefined;
       capHit = true;

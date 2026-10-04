@@ -11,6 +11,7 @@ import { BUILTIN_AI_COMMANDS } from './aiCommands';
 import { expandQuery } from './medSynonyms';
 import { buildChunks } from './docIndex';
 import { stripPageAnchors } from './pageAnchor';
+import { capToolResult, trimToolResults } from './aiBudget';
 
 export interface AgentSettings {
   /** [OI] 兼容根地址，如 https://open.bigmodel.cn/api/paas/v4（不含 /chat/completions） */
@@ -266,12 +267,15 @@ export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
   const maxSteps = o.maxSteps ?? 16;
 
   for (let step = 0; step < maxSteps; step++) {
-    const { message: assistant, usage } = await chatOnce(o, working);
+    // 每次请求模型前裁掉超预算的更早工具结果（单条上限在回填时已生效）：
+    // 同一轮里模型可能连读十几篇长笔记/教材段落，不裁会把上下文推到几十万字符。
+    const wire = trimToolResults(working);
+    const { message: assistant, usage } = await chatOnce(o, wire);
     if (usage) {
       o.onUsage?.({ promptTokens: usage.prompt_tokens, completionTokens: usage.completion_tokens, estimated: false });
     } else {
       // 服务商没报 usage（如 Ollama）：按请求消息 + 产出内容估个大概，界面标注 ≈
-      const promptChars = working.map((m) => {
+      const promptChars = wire.map((m) => {
         if (m.role === 'assistant') {
           return (m.content ?? '') + (m.tool_calls ?? []).map((c) => c.function.arguments).join('');
         }
@@ -297,7 +301,7 @@ export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
         if (isAbortError(e)) throw e; // 用户中止：整个任务停掉，不再回填继续跑
         result = `工具执行出错：${e instanceof Error ? e.message : String(e)}`;
       }
-      working.push({ role: 'tool', tool_call_id: call.id, content: result });
+      working.push({ role: 'tool', tool_call_id: call.id, content: capToolResult(result) });
     }
   }
   throw new Error(`已连续调用工具 ${maxSteps} 轮仍未完成，已停止。请把任务拆小一点再试。`);
