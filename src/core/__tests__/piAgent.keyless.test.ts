@@ -3,8 +3,8 @@
  *
  * 背景：pi-ai 的 openai-completions 在缺 key 时直接抛
  * `No API key for provider: ...`，而本项目的设置面板明确写着「本地服务可留空」
- * （Ollama / vLLM 这类无需鉴权的端点）。旧实现把空 key 原样透传（`|| undefined`），
- * 于是这类端点连一次请求都发不出去——工具调用自然全部不可用。
+ * （Ollama / vLLM 这类无需鉴权的端点）。所以空 key 必须原样透传（不能写成
+ * `|| undefined`），否则这类端点连一次请求都发不出去，工具调用全部不可用。
  * 面板的回退只在 PiUnavailableError（包加载失败）时触发，救不了这条路径。
  *
  * 这里起一个真实 HTTP 端点，断言请求确实到达；顺带断言没被前置拦截。

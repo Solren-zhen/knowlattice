@@ -53,7 +53,7 @@ describe('Workspace 布局冒烟', () => {
     render(<Workspace />);
     await waitFor(() => expect(screen.getByLabelText('回到主界面')).toBeTruthy());
     for (const name of ['目录', '搜索', '历史版本', '解剖图谱', '知识图谱', '间隔复习', '错题本',
-      '题库练习', '待办清单', '标签', '学习统计', 'AI 助手', '智能草稿', 'PDF 对照', '格式转换', '切换主题']) {
+      '题库练习', '待办清单', '标签', '学习统计', 'AI 问答', 'AI 笔记', '智能草稿', 'PDF 对照', '格式转换', '切换主题']) {
       expect(screen.getByLabelText(name), `缺少 rail 入口：${name}`).toBeTruthy();
     }
     cleanup();

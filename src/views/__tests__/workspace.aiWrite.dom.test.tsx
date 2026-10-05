@@ -77,8 +77,8 @@ describe('AI 改写当前打开的笔记', () => {
     fireEvent.click([...container.querySelectorAll('.tree-row.file')].find((r) => r.textContent?.includes('心脏')) as HTMLElement);
     await waitFor(() => expect(container.querySelector('.cm-content')?.textContent).toContain('心肌收缩泵血'), { timeout: 8000 });
 
-    fireEvent.click(screen.getByLabelText('AI 笔记助手'));
-    const ta = await screen.findByLabelText('对 AI 笔记助手说点什么');
+    fireEvent.click(screen.getByLabelText('AI 笔记'));
+    const ta = await screen.findByLabelText('对 AI 笔记说点什么');
     fireEvent.change(ta, { target: { value: '改一下心肌那句', selectionStart: 8, selectionEnd: 8 } });
     const send = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;
     await waitFor(() => expect(send.disabled).toBe(false));

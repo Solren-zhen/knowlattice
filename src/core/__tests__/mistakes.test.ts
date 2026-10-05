@@ -94,9 +94,9 @@ chapter: 生理学
 });
 
 /**
- * 引用语义回归测试（2026-09-20 修复）。
- * 旧实现里 loadMistakes() 返回模块级 cache 本身、clearMistake 就地删除后返回同一个引用，
- * 于是 MistakeBook 的 `setMistakes(clearMistake(path))` 拿到同一对象，React 直接 bail out：
+ * 引用语义回归。
+ * loadMistakes() 返回的若是模块级 cache 本身，clearMistake 就地删除后返回的还是同一个引用，
+ * MistakeBook 的 `setMistakes(clearMistake(path))` 拿到同一对象，React 直接 bail out：
  * 记录从 localStorage 删了，但行还在、计数不变、热力条不变，用户以为按钮坏了。
  */
 describe('返回新对象（保证 setState 能触发重渲染）', () => {

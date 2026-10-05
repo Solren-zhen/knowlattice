@@ -101,8 +101,8 @@ const INDEX: Map<string, string[]> = (() => {
 export const SYNONYM_TERM_COUNT = INDEX.size;
 
 /** 按长度降序排好的键：包含式命中要长词优先（否则"心梗"会被更短的键抢走）。
- *  在模块级算一次——它以前在 expandQuery 里每次调用都排一遍，
- *  而搜索面板每敲一个键就要对 20 条结果各展开一次。 */
+ *  在模块级算一次：搜索面板每敲一个键就要对 20 条结果各展开一次，
+ *  若在 expandQuery 里现排会重复付出排序成本。 */
 const KEYS_BY_LEN: string[] = [...INDEX.keys()].sort((a, b) => b.length - a.length);
 
 /** 展开结果的上限：词表命中过多时只取前若干个，避免一次查询召回被稀释成噪声 */

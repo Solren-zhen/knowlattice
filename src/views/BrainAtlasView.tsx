@@ -92,8 +92,8 @@ export default function BrainAtlasView({ onClose }: Props) {
         await nv.loadVolumes(list);
         if ((st.alive as boolean) === false) return;
         nv.setSliceType(nv.sliceTypeMultiplanar);
-        // scene.crosshairPos 是**分数坐标**（0~1），不是毫米。原来直接写 [0,-18,18]
-        // 把交叉线丢到了体积之外，交互和读数都失效。用库自己的 mm2frac 换算，
+        // scene.crosshairPos 是**分数坐标**（0~1），不是毫米。直接写 [0,-18,18]
+        // 会把交叉线丢到体积之外，交互和读数都失效。用库自己的 mm2frac 换算，
         // 并与 createOnLocationChange 内部 frac2mm(..., true) 的约定保持一致。
         nv.scene.crosshairPos = nv.mm2frac([0, -18, 18], 0, true);
         nv.drawScene();

@@ -7,7 +7,7 @@
  *
  * 纯函数，不碰 DOM（落位只吃矩形数值），由 views/AnatomyNoteCard 消费。
  */
-import type { ManifestOrgan } from './anatomy';
+import { sideOf, type ManifestOrgan } from './anatomy';
 
 export interface CardSize {
   width: number;
@@ -33,15 +33,30 @@ const CURSOR_GAP = 16;
 const DOCK = { left: PAD, top: 56 };
 
 /**
- * 结构 → 可用于接回笔记的名称，按优先级排列：英文名 → 中文名 → 结构 ID。
+ * 结构 → 可用于接回笔记的名称，按优先级排列：
+ * 本侧精确名（英文/中文，接旧分侧笔记）→ 共享名（无侧别英文/中文，接共享篇）→ 结构 ID。
  * 去重且丢弃空白项（中文词典缺失时 zhName 为 null）。
+ *
+ * 成对结构（名字带 `(left)`/`(right)`）的共享名排在分侧名之后：库里已有分侧笔记时
+ * 打开分侧那篇（尊重旧数据），否则打开共享篇（另一侧建的「踇展肌」）；
+ * 两者都不存在时由 Workspace 按共享语义新建（标题不带侧别）。
  */
 export function anatomyNoteCandidates(organ: ManifestOrgan, zhName?: string | null): string[] {
   const out: string[] = [];
-  for (const raw of [organ.name_en, zhName, organ.organ_id]) {
+  const push = (raw?: string | null) => {
     const name = (raw ?? '').trim();
     if (name && !out.includes(name)) out.push(name);
+  };
+  const side = sideOf(organ.name_en);
+  push(organ.name_en);
+  push(zhName);
+  if (side) {
+    // 共享名排在分侧精确名之后:有分侧旧笔记时优先分侧,否则落到共享篇
+    push(side.base);
+    const zhBase = zhName ? zhName.replace(/（[左右]）$/, '') : null;
+    push(zhBase);
   }
+  push(organ.organ_id);
   return out;
 }
 

@@ -5,7 +5,7 @@
  *
  * 安全策略：markdown-it 关闭 html 选项，用户笔记里的原始 HTML 一律按纯文本显示；
  * 属性键加粗与 wikilink 通过「占位标记 → 渲染后替换」实现，点击走事件委托，
- * 不再注入内联 onclick 和 window 全局函数。
+ * 不注入内联 onclick 和 window 全局函数。
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { renderMarkdown } from '../core/markdown';
@@ -151,7 +151,7 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
 
   if (content === null) {
     // 首页文案纪律：一行只说一件事，每条 ≤ 10 个字（断言在 previewHero.dom.test.tsx，
-    // 长度按词计数、忽略分隔符）。原来最长的两条各 40+ 字，在两列网格里被撑成三行、
+    // 长度按词计数、忽略分隔符）。40+ 字的文案在两列网格里会被撑成三行、
     // 右边缘参差，首屏被拉长。设计理由（为什么这四个键要挤在左手）属于 README，不属于首屏。
     return (
       <div className="preview placeholder">

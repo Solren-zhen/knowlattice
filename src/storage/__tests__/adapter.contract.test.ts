@@ -106,7 +106,7 @@ describe('TauriAdapter 安全与原子写', () => {
     expect(metas.map((m) => m.path)).toEqual(['01/a.md']);
   });
 
-  // 回归守卫（2026-10-04 审计 H1）：目录「存在但读不动」绝不能被伪装成空库，
+  // 回归守卫：目录「存在但读不动」绝不能被伪装成空库，
   // 否则迁移守卫失效，IndexedDB 快照会覆盖用户磁盘上的真实笔记。
   it('readDir 失败时 readAll/listAll 抛错而不是返回空（目录存在但读不动）', async () => {
     await a.write('01/a.md', '# A\n');

@@ -74,7 +74,7 @@ tags: [生理]
 
   it('回归：定位到**完整查询**，而不是查询的第一个字符', () => {
     const s = buildSnippet(doc, '氧解离曲线');
-    // 旧实现会定位到开头那个「氧」；正确结果必须落在真正的命中处
+    // 必须定位到**完整查询**本身，而不是查询的第一个字符（比如开头那个「氧」）
     expect(s.text).toContain('氧解离曲线');
     expect(s.hits.length).toBeGreaterThan(0);
     for (const h of s.hits) expect(s.text.slice(h.start, h.end)).toBe('氧解离曲线');

@@ -253,7 +253,7 @@ describe('qbankCompose · 按章节交错', () => {
     expect(hasAdjacentSameChapter(picked)).toBe(false);
   });
 
-  it('默认 order 仍是 shuffle（交错要显式选，不悄悄改旧行为）', () => {
+  it('默认 order 仍是 shuffle（交错要显式选，不能悄悄替用户改默认）', () => {
     expect(DEFAULT_RULES.order).toBe('shuffle');
   });
 });

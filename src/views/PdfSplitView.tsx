@@ -354,7 +354,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
       breakPages: true,
       ignoreWidth: false,
     }).then(() => {
-      // 审计 M1：docx-preview 不校验 a[href] 协议，Word 里的 javascript:/file: 链接
+      // docx-preview 不校验 a[href] 协议，Word 里的 javascript:/file: 链接
       // 会原样落 DOM。渲染完成后做一遍清洗（只动属性，不破坏排版）。
       const n = sanitizeRenderedHyperlinks(docRenderRef.current);
       if (n > 0) console.warn(`docx 内 ${n} 个非安全协议链接已禁用`);

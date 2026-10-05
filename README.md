@@ -76,6 +76,7 @@ npm run dev
 npm run build        # 构建静态网页
 npm run preview      # 预览构建结果
 npm run pack         # 生成离线便携包
+npm run bench        # 性能基线（5000 篇量级核心路径耗时，只测量不断言）
 ~~~
 
 ## 数据位置

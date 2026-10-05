@@ -7,13 +7,13 @@
  *   npm run pack -- --data <文件># 指定某一份备份 .json（例如你刚在应用里导出的那份）
  *   npm run pack -- --data <文件> --private-data # 经授权后才可把题库放入非公开离线包
  *
- * 曾经有个 `--lite`（精简包）：去掉 OCR 组件与冗余字体。**已撤销**，原因是实测数据不支持它：
- * 它省下的 7.3 MB 里 6.73 MB 是 OCR（tesseract 三个 core 变体各 1.01 MB + 两个语言包 3.53 MB），
- * 去掉它 = 「扫描版 PDF」这个功能直接报错；剩下的 KaTeX woff/ttf 只有 0.58 MB，单独去掉省不到
- * 2%，不值得多出一个少功能的产物。而且三个 core 变体是 tesseract.js 按浏览器能力**挑一个**加载的
+ * 不支持 `--lite`（精简包）：去掉 OCR 组件与冗余字体省下的 7.3 MB 里 6.73 MB 是 OCR
+ * （tesseract 三个 core 变体各 1.01 MB + 两个语言包 3.53 MB），去掉它 = 「扫描版 PDF」
+ * 这个功能直接报错；剩下的 KaTeX woff/ttf 只有 0.58 MB，单独去掉省不到 2%，不值得多出
+ * 一个少功能的产物。而且三个 core 变体是 tesseract.js 按浏览器能力**挑一个**加载的
  * （getCore.js 里只有 if/else，没有任何回退），分别对应 2024+ / 2021-2024 / 更老的浏览器，
- * 少任何一个都会让那一类浏览器的 OCR 直接失败——所以也不能「只留一个」。
- * 传 --lite 现在会直接报错退出，避免再产出不能 OCR 的包。
+ * 少任何一个都会让那一类浏览器的 OCR 直接失败，所以也不能「只留一个」。
+ * 传 --lite 会直接报错退出，避免产出不能 OCR 的包。
  *
  * 产物：仓库根目录 KnowLattice-离线版-YYYY-MM-DD.zip（已在 .gitignore 中忽略）
  * 包内全部用 ASCII 名称，避免不同解压工具把中文条目解成乱码；说明文本用 UTF-8 BOM，记事本可直接读。
@@ -170,9 +170,9 @@ const qCount = qbanks.reduce((n, q) => n + ((q && q.questions && q.questions.len
 //     2026-09-20 踩过两次，都是同一个错误假设「一个系统一个文件」：
 //       · nervous_male.glb 一直不存在（git 基线 2026-09-14 就只有那 12 个 glb），点开神经系统
 //         必然报错，直到打包时才发现；该文件已于同日从上游 Anatria-3D 补齐。
-//       · digestive / endocrine / respiratory 的 organs 还引用 visceral_male.glb（13 个结构），
-//         而旧闸门只看 <system>_male.glb，所以它**不会**发现这个文件缺失。
-//     现在闸门直接按 manifest 的 mesh_file 逐个查，与应用 systemMeshFiles() 的取值口径一致。
+//       · digestive / endocrine / respiratory 的 organs 引用 visceral_male.glb（13 个结构），
+//         只按 <system>_male.glb 查不会发现这个文件缺失。
+//     闸门按 manifest 的 mesh_file 逐个查，与应用 systemMeshFiles() 的取值口径一致。
 //  ② 文件对不对：GLB 里的节点名要能覆盖 manifest 中「归属这个文件」的结构的 `node` 字段——
 //     点击命中靠名字匹配，补一个名字对不上的模型等于没修（点了没反应，比报错更糟）。
 //     必须带上「归属这个文件」这个约束：visceral_male.glb 与主文件大量同名（digestive 47 个
@@ -325,7 +325,7 @@ for (const f of ['package.json', 'package-lock.json', 'vite.config.ts', 'vitest.
 copyTree(join(repo, 'scripts', 'pack', 'source-README.txt'), join(srcRoot, 'README.txt'));
 log(`已随包附上源代码:${srcRoot}`);
 
-// ---------- 3c. 公开守卫（2026-10-04 审计 S1）----------
+// ---------- 3c. 公开守卫 ----------
 // 构建产物要过 assert-public-dist，但 pack 真正分发的是暂存树：--data 塞进来的
 // notes-and-qbanks.json、staging 里的源码副本、README……这些 dist 守卫都看不到。
 // 压缩前直接对暂存树整体跑一遍同一套规则（含 --private-data 的授权路径也要过：
@@ -456,7 +456,7 @@ if (!ok) {
 {
   const zipEntries = () => {
     // 不用外部 tar：node 在 Windows 上把 'tar.exe' 解析到 Git 自带的 GNU tar（读不了 zip，
-    // 之前对账因此被静默跳过）。改用 .NET ZipFile 枚举，Windows 10+ 自带，无歧义。
+    // 对账会因此被静默跳过）。改用 .NET ZipFile 枚举，Windows 10+ 自带，无歧义。
     try {
       const out = execFileSync(
         'powershell.exe',

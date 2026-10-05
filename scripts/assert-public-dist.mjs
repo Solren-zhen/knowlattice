@@ -3,10 +3,10 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * 公开发布守卫（2026-10-04 审计 S2 扩展）：
+ * 公开发布守卫：
  *  - 内容扫描扩展名白名单补齐 md/svg/webmanifest（这些格式同样能藏备份片段/密钥/绝对路径）；
  *  - 新增 sk-/Bearer Token/用户绝对路径三类泄密内容规则；
- *  - 支持传入目标目录（缺省 dist）。pack.mjs 会对暂存包再跑一遍本守卫（审计 S1）。
+ *  - 支持传入目标目录（缺省 dist）。pack.mjs 会对暂存包再跑一遍本守卫。
  *
  * 用法：node scripts/assert-public-dist.mjs [目录]
  */
@@ -40,13 +40,13 @@ const forbiddenPath = /(?:knowlattice-导入-|knowlattice-题库|题库)/i;
 const forbiddenPackDataPath = /(?:^|\/)notes-and-qbanks\.json$/i;
 // 备份文件「带了用户数据」才算泄漏：按**非空载荷**判定，不能只看 {"app":"knowlattice","version":…}
 // 这个头部——pack 在没有 --data 时也会写一份空模板（files/questions/mistakes/todos 全为空数组），
-// 那种文件里没有任何用户内容，按头部判定会把默认的 `npm run pack` 直接拦下（2026-10-04 实测踩到）。
+// 那种文件里没有任何用户内容，按头部判定会把默认的 `npm run pack` 直接拦下（实测踩到）。
 const forbiddenContent = /"files"\s*:\s*\[\s*\{|"questions"\s*:\s*\[\s*\{\s*"id"|"(?:mistakes|todos)"\s*:\s*\[\s*\{|"(?:srs|days|cardEdits)"\s*:\s*\{\s*"/;
 // 签名/私钥材料绝不能进公开产物（泄露=任何人可推假更新）：按文件名与内容各查一遍。
 // 注意：src-tauri/tauri.conf.json 里的 updater pubkey 是公开公钥，不匹配下列内容模式。
 const forbiddenSecretPath = /(?:^|\/)(?:private\.key|.*\.pem|.*\.p12|.*\.pfx)$/i;
 const forbiddenSecretContent = /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----|minisign (?:encrypted )?secret key/i;
-// 审计 S2 新增：三类通用泄密内容。
+// 三类通用泄密内容。
 //  - 云厂商密钥前缀（OpenAI/Anthropic/DeepSeek 等常见 sk- 形态，长度卡 20+ 降噪）；
 //  - Authorization 头常见的 Bearer Token；
 //  - 构建者本机绝对路径（Windows 盘符与 macOS /Users/<name>、Linux /home/<name>）。

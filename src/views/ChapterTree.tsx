@@ -458,7 +458,7 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
                   } else {
                     toast(`已恢复 ${r.ok} 篇笔记${r.repaired ? `，修正 ${r.repaired} 处格式` : ''}（备份里的题库 / 复习进度也已一并导入）`, 'ok');
                   }
-                  // 审计 M2：恢复是覆盖性写，被换掉的现有文件必须亮出来
+                  // 恢复是覆盖性写，被换掉的现有文件必须亮出来
                   if (r.overwritten?.length) {
                     toast(`其中 ${r.overwritten.length} 篇覆盖了库中已有文件：${r.overwritten.slice(0, 3).join('、')}${r.overwritten.length > 3 ? ' 等' : ''}（原内容可到「历史版本」找回）`, 'info', 6000);
                   }

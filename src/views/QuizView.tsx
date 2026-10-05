@@ -206,7 +206,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose }: Pro
   };
 
   // ---------- 练习 ----------
-  /** 开一轮练习。rules 为 null 时按旧行为整库洗牌（「全部」入口） */
+  /** 开一轮练习。rules 为 null 时整库洗牌（「全部」入口） */
   const start = (bank: QuizBank, rules: ComposeRules | null) => {
     const qs = rules ? composeQuestions(bank, rules, loadStats()) : pickQuestions(bank);
     setSession({ bankName: bank.name, questions: qs, rules });

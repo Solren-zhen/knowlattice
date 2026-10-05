@@ -1,9 +1,9 @@
 /**
  * 桌面版更新检查（Tauri updater 插件；网页版所有函数安全返回 null/false）。
  *
- * 策略（2026-10-04 审计 M3 后收紧）：启动时只**检查并提示**，绝不静默下载安装——
- * 自动换掉正在运行的应用属于用户不知情的变更；安装动作一律由用户在
- * 「关于与许可」面板手动触发（仍走 minisign 签名校验，被篡改的安装包装不上）。
+ * 策略：启动时只检查并提示，不静默下载安装。自动换掉正在运行的应用属于用户
+ * 不知情的变更；安装动作一律由用户在「关于与许可」面板手动触发（仍走 minisign
+ * 签名校验，被篡改的安装包装不上）。
  *
  * 发布新版本（开发者操作，详见 scripts/make-update-manifest.mjs 注释）：
  *   npm run tauri build → node scripts/make-update-manifest.mjs
@@ -62,10 +62,7 @@ export async function checkForUpdate(): Promise<PdfUpdate | null> {
   }
 }
 
-/** 启动后只检查并提示，不自动安装（2026-10-04 审计 M3）。
- *  旧实现会静默下载并重启应用——更新窗口期正好打断用户、且用户对「应用自己换了
- *  一个版本」没有知情/选择权。现在改为：发现新版本只弹提示，安装动作留给用户
- *  在「关于与许可」面板手动触发（签名校验与手动路径完全一致）。 */
+/** 启动后延迟检查一次更新，发现新版本只弹提示，不自动安装。 */
 export function autoUpdateOnStartup(delayMs = 8000): void {
   if (!isDesktopApp()) return;
   window.setTimeout(() => {

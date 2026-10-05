@@ -14,6 +14,7 @@ import { getMistake } from '../core/mistakes';
 import {
   loadAnatomyManifest,
   loadZhDict,
+  sideOf,
   zhOrganName,
   type ManifestOrgan,
   type AnatomyManifest,
@@ -180,8 +181,8 @@ export default function Workspace() {
   }, []);
 
   /** 立即保存当前笔记；manual=false 时不弹「已保存」反馈（自动保存用）。两条纪律：
-   *  ①写失败就不清脏点、不显示「已保存」——旧写法在写失败时照样清脏点、显示已保存，
-   *    用户是在「应用说存住了」的前提下丢稿的；②只清「这次真正写下去的那一份」的脏标记：
+   *  ①写失败就不清脏点、不显示「已保存」：若写失败仍清脏点并报「已保存」，
+   *    用户会在「应用说存住了」的前提下丢稿；②只清「这次真正写下去的那一份」的脏标记：
    *    await 期间用户切了笔记或又输入了新内容，就不能替它们清脏。 */
   const saveCurrent = useCallback(async (manual = true) => {
     const { vault: v, draft: d } = editRef.current;
@@ -411,16 +412,36 @@ export default function Workspace() {
       const dir = `08-解剖学/${zh}`;
       // 先落盘当前笔记：下面 createNote 会把 currentPath 切到新笔记（内部 setCurrentPath），
       // 而自动保存窗口有 800ms——不先 flush，用户在这段时间里的改动会既不落盘、又可能被
-      // 当成新笔记的草稿写进去。openNoteCore 走的是 flushDraft，这条创建分支此前漏了。
+      // 当成新笔记的草稿写进去。openNoteCore 走的是 flushDraft，这条创建分支同样要先 flushDraft。
       flushDraft();
       // 汉化：笔记标题/文件名优先用中文结构名（词典缺失或与已有笔记重名时回退英文）
       const zhDict = await loadZhDict();
       const zhName = zhOrganName(organ.name_en, zhDict.organs);
-      const title =
-        zhName && !vault.docs.has(`${dir}/${zhName}.md`) ? zhName : organ.name_en;
+      // 成对结构（左右对称）共享一篇笔记：标题用无侧别名（「踇展肌」而非「踇展肌(左)」），
+      // 3D 两侧都挂到这一篇。单侧结构行为不变。
+      const side = sideOf(organ.name_en);
+      const otherOrgan = side
+        ? { nameEn: side.other, zhName: zhOrganName(side.other, zhDict.organs) }
+        : null;
+      const sharedTitleZh = side && zhName ? zhName.replace(/（[左右]）$/, '') : null;
+      const sharedTitleEn = side ? side.base : null;
+      // 共享标题优先；被占用（如已有一篇恰好同名的其它笔记）则退回本侧精确名
+      const sharedTitle = sharedTitleZh ?? sharedTitleEn;
+      const sharedFree = sharedTitle != null && !vault.docs.has(`${dir}/${sharedTitle}.md`);
+      const title = sharedFree
+        ? sharedTitle!
+        : zhName && !vault.docs.has(`${dir}/${zhName}.md`) ? zhName : organ.name_en;
+      // aliases 只收无侧别英文名:分侧精确名（本侧/对侧英文、双侧中文）不能进共享篇的
+      // aliases——nameIndex 先到先得，共享篇一旦占用 'Abductor hallucis (left)'，
+      // 之后建的（或既有的）分侧笔记就会被它抢走解析，破坏「分侧笔记优先」。
+      // 中文共享名靠文件名命中（zhBase 候选），无需 alias。
+      const aliases = side ? [side.base] : [organ.name_en];
+      const layerLabel = side
+        ? `${organ.path.join(' > ') || '(系统根结构)'}（左右对称，本篇共享：${sharedFree ? '左右' : '本篇为 ' + title}）`
+        : organ.path.join(' > ') || '(系统根结构)';
       const lines = [
         '---',
-        `aliases: [${organ.name_en}]`,
+        `aliases: [${aliases.join(', ')}]`,
         'tags: [解剖]',
         `chapter: 解剖学/${zh}`,
         `source: Anatria-3D ${organ.mesh_file}`,
@@ -429,10 +450,10 @@ export default function Workspace() {
         '',
         `# ${title}`,
         '',
-        `- 层级: ${organ.path.join(' > ') || '(系统根结构)'}`,
+        `- 层级: ${layerLabel}`,
         `- 系统: ${zh} (${organ.system})`,
-        `- 结构ID: ${organ.organ_id}`,
-        `- 英文名: ${organ.name_en}`,
+        `- 结构ID: ${organ.organ_id}${otherOrgan ? ` / ${side!.other}` : ''}`,
+        `- 英文名: ${organ.name_en}${otherOrgan?.zhName ? ` / ${otherOrgan.zhName}` : ''}`,
         '',
         '- 定义: ',
         '- 临床意义: ',
@@ -520,7 +541,7 @@ export default function Workspace() {
   );
 
   // 复习状态按「卡」看：一篇笔记可能切成多节，这里显示最紧的那张 + 已排程节数。
-  // 必须 memo：这段原本每次渲染都跑，而编辑器每敲一个字就渲染一次；它读的是 vault.docs
+  // 必须 memo：编辑器每敲一个字就渲染一次；它读的是 vault.docs
   // （已落盘内容）而不是草稿，所以按键根本不会改变结果，按保存/切换重算就够了。
   // 位置必须在这里——下面还有「未加载」「加载失败」两处提前 return，hook 不能放在其后。
   const activePath = vault.currentPath;

@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build && node scripts/assert-public-dist.mjs",
     "lint": "oxlint",
     "test": "vitest run",
+    "bench": "vitest bench --run",
     "preview": "vite preview",
     "pack": "node scripts/pack.mjs",
     "predev": "node scripts/copy-pdf-worker.mjs",

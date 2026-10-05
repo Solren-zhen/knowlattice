@@ -266,8 +266,8 @@ for (const src of SOURCES) {
     const chapter = cleanChapter(basename(f));
     const body = readFileSync(f, 'utf8');
     // 关联笔记路径：**只在这里算一次**，题库题目与笔记两边共用同一个值。
-    // 原先两边各写一遍同样的字符串，而题库那侧的字段白名单里根本没有 note——
-    // 于是「答错自动进错题本」在全部 111,548 道题上静默失效（不报错，只是永不收录）。
+    // 题库那侧的字段白名单里没有 note，两边分开写会让「答错自动进错题本」在全部
+    // 111,548 道题上静默失效（不报错，只是永不收录）。
     const notePath = questionNotePath(src.noteRoot, subject, chapter);
     const qs = parseFile(body, subject, chapter, src.label).map((q) => ({ ...q, subject, note: notePath }));
     const markers = countMarkers(body);

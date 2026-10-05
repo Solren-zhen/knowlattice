@@ -18,7 +18,7 @@ import { loadMistakes } from '../core/mistakes';
 import type { LinkIndex } from '../core/linkIndex';
 
 /** 章节色板：与全局 Aurora Indigo 同族（统一的 600 号饱和度/明度带），色相均布且相邻可辨。
- *  此前是土棕/暗蓝/暖灰的 90 年代混合，压在极光底上像另一套系统。
+ *  与极光底同色系；土棕/暗蓝/暖灰那种混合压在极光底上像另一套系统。
  *  全部颜色在浅底（--bg #f8f9fb）与深底（--bg #08090d）上都 ≥3:1（WCAG 1.4.11 图形件），
  *  因此两主题共用一套，无需分别维护。#标签 仍独占琥珀（TAG_COLOR），错题热力独占红。 */
 const PALETTE = ['#4f46e5', '#0891b2', '#e11d48', '#059669', '#7c3aed', '#ea580c', '#2563eb', '#c026d3', '#0d9488', '#db2777'];

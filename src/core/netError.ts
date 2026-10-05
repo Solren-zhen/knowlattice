@@ -6,8 +6,8 @@
  *   Chrome  ：Failed to fetch
  *   Safari  ：Load failed
  *   Firefox ：NetworkError when attempting to fetch resource
- * ——全英文，而且一个字都没提「去看看那个黑窗口」。这些原文此前被 setError / toast
- * 直接显示给用户（解剖、脑图谱、PDF 三处视图共 8 个位置）。
+ * ——全英文，而且一个字都没提「去看看那个黑窗口」，直接显示给用户没有可操作性
+ * （解剖、脑图谱、PDF 三处视图共 8 个位置都会碰到）。
  *
  * 注意 AbortError 不算网络故障：那是主动取消（切面板、组件卸载、AbortController.abort），
  * 报「连不上本地服务」会把用户带向完全错误的方向。

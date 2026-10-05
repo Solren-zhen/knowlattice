@@ -102,6 +102,27 @@ export function zhOrganName(nameEn: string, organs: Map<string, string>): string
   return organs.get(nameEn) ?? null;
 }
 
+// ---------- 左右侧别 ----------
+
+export type AnatomySide = { base: string; side: 'left' | 'right'; other: string };
+
+/**
+ * 解析英文名的侧别:`Abductor hallucis (left)` → 基础名 + 侧别 + 对侧英文名。
+ * 只认尾随 `(left)`/`(right)` 后缀;`Right testicular artery` 这类前缀式单侧命名
+ * 没有「同结构对侧」,返回 null(笔记不共享,行为与从前一致)。
+ */
+export function sideOf(nameEn: string): AnatomySide | null {
+  const m = /^(.*) \((left|right)\)$/i.exec(nameEn.trim());
+  if (!m || !m[1]) return null;
+  const base = m[1];
+  const left = m[2].toLowerCase() === 'left';
+  return {
+    base,
+    side: left ? 'left' : 'right',
+    other: `${base} (${left ? 'right' : 'left'})`,
+  };
+}
+
 // ---------- manifest 派生信息 ----------
 
 /**
@@ -110,8 +131,8 @@ export function zhOrganName(nameEn: string, organs: Map<string, string>): string
  * 不能假设「一个系统一个文件」。manifest 里有 3 个系统（digestive / endocrine /
  * respiratory）的 organs 指向**两个** mesh_file：主文件 + `visceral_male.glb`（内脏器官）。
  * 例如 endocrine 的 10 个结构里只有 4 个在 `endocrine_male.glb`，另外 6 个（垂体、松果体、
- * 甲状腺、肾上腺…）都在 `visceral_male.glb`。以前只取「该系统第一条 organ 的 mesh_file」，
- * 于是这 13 个结构在列表里点得到、3D 里永远不显示。
+ * 甲状腺、肾上腺…）都在 `visceral_male.glb`。只取「该系统第一条 organ 的 mesh_file」的话，
+ * 这 13 个结构会在列表里点得到、3D 里永远不显示，所以要收集该系统用到的全部文件。
  *
  * 顺序保持 manifest 中出现顺序：第一个是该系统的主文件（加载失败才算整个系统失败）。
  */
@@ -134,8 +155,8 @@ export function systemMeshFiles(manifest: AnatomyManifest, system: string): stri
  *   「是缺文件」也不知道「别的系统没事、结构列表还能用」，所以要说清楚；
  * - 其它（连不上本地服务等）交给 netErrorHint。
  *
- * 触发场景不再是「nervous_male.glb 没提交」（2026-09-20 已从上游补回并加了打包闸门），
- * 而是任何一次包不完整 / 服务没起来——包括 `visceral_male.glb` 这类**附加**文件缺失。
+ * 触发场景是任何一次包不完整 / 服务没起来（`nervous_male.glb` 已随上游提供并有打包闸门兜底），
+ * 也包括 `visceral_male.glb` 这类**附加**文件缺失。
  */
 export function modelLoadHint(err: unknown, file: string): string {
   // three.js 的 HttpError 带 response 字段（class HttpError { this.response = response }），

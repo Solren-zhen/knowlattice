@@ -114,12 +114,12 @@ async function clickSend() {
     return;
   }
   // 运行中按钮显示“停止”，回车仍会把输入追加到队列。
-  const ta = screen.getByLabelText('对 AI 笔记助手说点什么');
+  const ta = screen.getByLabelText('对 AI 笔记说点什么');
   fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter', shiftKey: false });
 }
 
 async function sendMessage(text: string) {
-  const ta = screen.getByLabelText('对 AI 笔记助手说点什么') as HTMLTextAreaElement;
+  const ta = screen.getByLabelText('对 AI 笔记说点什么') as HTMLTextAreaElement;
   fireEvent.change(ta, { target: { value: text, selectionStart: text.length, selectionEnd: text.length } });
   await clickSend();
   await waitFor(() => expect(screen.getByRole('button', { name: '停止' })).toBeTruthy(), { timeout: 3000 }).catch(() => {});
@@ -346,7 +346,7 @@ describe('AI patch 宽容匹配与写入可见化', () => {
 describe('Claudian 式交互', () => {
   /** 输入文本（带光标位置，触发 @ / 斜杠补全） */
   function typeInput(text: string) {
-    const ta = screen.getByLabelText('对 AI 笔记助手说点什么') as HTMLTextAreaElement;
+    const ta = screen.getByLabelText('对 AI 笔记说点什么') as HTMLTextAreaElement;
     fireEvent.change(ta, { target: { value: text, selectionStart: text.length, selectionEnd: text.length } });
     return ta;
   }
@@ -363,7 +363,7 @@ describe('Claudian 式交互', () => {
 
     typeInput('@心');
     fireEvent.mouseDown(await screen.findByRole('option', { name: '@ 解剖/心脏.md' }));
-    expect((screen.getByLabelText('对 AI 笔记助手说点什么') as HTMLTextAreaElement).value).toBe('@解剖/心脏.md ');
+    expect((screen.getByLabelText('对 AI 笔记说点什么') as HTMLTextAreaElement).value).toBe('@解剖/心脏.md ');
     await clickSend();
 
     await waitFor(() => expect(screen.getByText('好的，看到了。')).toBeTruthy());
@@ -495,7 +495,7 @@ describe('Claudian 式交互', () => {
   it('空状态建议 chip：点击填入输入框并聚焦', async () => {
     renderPanel();
     fireEvent.click(await screen.findByRole('button', { name: '费曼检验' }));
-    const ta = screen.getByLabelText('对 AI 笔记助手说点什么') as HTMLTextAreaElement;
+    const ta = screen.getByLabelText('对 AI 笔记说点什么') as HTMLTextAreaElement;
     expect(ta.value).toBe('/费曼 ');
     expect(document.activeElement).toBe(ta);
   });
@@ -618,7 +618,7 @@ describe('Claudian 式交互', () => {
 
     // 队列清空，且消息没有丢：退回输入框等用户自己决定
     expect(document.querySelector('.agent-queued')).toBeNull();
-    expect((screen.getByLabelText('对 AI 笔记助手说点什么') as HTMLTextAreaElement).value).toBe('第二条');
+    expect((screen.getByLabelText('对 AI 笔记说点什么') as HTMLTextAreaElement).value).toBe('第二条');
 
     resolveFirst(sseResponse(finalChunks('第一条完成。')));
     await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeTruthy());

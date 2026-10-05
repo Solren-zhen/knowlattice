@@ -22,8 +22,8 @@ export const KEEP_PER_PATH = 10;
 /** 全库快照总量上限（超过后从最旧开始清理） */
 export const GLOBAL_CAP = 600;
 
-/** 连接缓存：openDB 每次都会发起一次 indexedDB.open，原来每次保存/列快照
- *  都开新连接（旧连接等 GC）。模块级单例即可——fake-indexeddb 与 jsdom 下同样成立。 */
+/** 连接缓存：openDB 每次都会发起一次 indexedDB.open，逐次保存/列快照都开新连接
+ *  会累积等 GC 的旧连接。模块级单例即可——fake-indexeddb 与 jsdom 下同样成立。 */
 let dbPromise: Promise<IDBPDatabase> | null = null;
 function db() {
   if (!dbPromise) {
@@ -68,29 +68,28 @@ export function pruneGlobal(recs: Snapshot[], cap = GLOBAL_CAP): Array<[string, 
 
 /**
  * 该篇最新一条快照：path 索引 + 倒序游标的第一条（主键 [path, at] 同 path 内按
- * at 升序，倒序即最新）。只物化 1 条记录——原来 getAll(path) 把该篇全部快照的
- * 完整正文都读出来，只为看最新那一条。
+ * at 升序，倒序即最新）。只物化 1 条记录，不必把该篇全部快照的完整正文读出来。
  */
 async function latestSnapshot(d: IDBPDatabase, path: string): Promise<Snapshot | undefined> {
   const cursor = await d.transaction(STORE, 'readonly').store.index('path').openCursor(path, 'prev');
   return cursor?.value as Snapshot | undefined;
 }
 
-/** 删指定的快照主键（单事务批量提交，替代原来逐条 await 的串行事务） */
+/** 删指定的快照主键（单事务批量提交，避免逐条 await 的串行事务） */
 async function deleteKeys(d: IDBPDatabase, keys: Array<[string, number]>): Promise<void> {
   if (!keys.length) return;
   const tx = d.transaction(STORE, 'readwrite');
   for (const key of keys) void tx.store.delete(key);
-  await tx.done.catch(() => { /* 单条失败静默，与旧行为一致 */ });
+  await tx.done.catch(() => { /* 单条失败静默 */ });
 }
 
 /**
  * 保存成功后调用：内容与最新快照相同则跳过；fire-and-forget，不阻塞保存。
  *
- * 清理策略与旧版等价（单篇保留最近 keep 条 / 全库超上限删最旧），但判定全部
- * 改为 O(1) 的 count：只有真正超限（真正要删东西）时才走游标收集待删键——
- * 键游标（openKeyCursor）不物化记录正文。旧版在「该篇不足 keep 条」这一常态
- * 分支里 getAll 整个快照库（最多 600 条完整正文）到主线程，只为算出「没超上限」。
+ * 清理策略：单篇保留最近 keep 条 / 全库超上限删最旧。判定全部走 O(1) 的 count，
+ * 只有真正超限（真正要删东西）时才走游标收集待删键——键游标（openKeyCursor）
+ * 不物化记录正文。常态的「该篇不足 keep 条」分支不读整库，避免把最多 600 条
+ * 完整正文拉到主线程只为算出「没超上限」。
  */
 export async function pushSnapshot(path: string, content: string): Promise<void> {
   try {
@@ -144,7 +143,7 @@ export async function listSnapshotPaths(): Promise<Map<string, number>> {
   try {
     const d = await db();
     const counts = new Map<string, number>();
-    // 键游标只取索引键（路径），不物化记录正文——旧版 getAll 全库只为数个数
+    // 键游标只取索引键（路径），不物化记录正文；数个数无需读整库
     let cursor = await d.transaction(STORE, 'readonly').store.index('path').openKeyCursor();
     while (cursor) {
       const p = cursor.key as string;

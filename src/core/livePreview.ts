@@ -57,9 +57,9 @@ class HrWidget extends WidgetType {
  * 行内标记的零宽部件：只吃掉「首尾标记符」本身（`**` / `==` / `` ` ``），
  * 中间内容保持原文本、只是加一层样式。
  *
- * 关键差异：以前是「整段 replace」——内容变成原子的，光标进不去，只能靠「光标行显示源码」
- * 让人看得见、改得动，于是 `**` 就露出来了。现在标记符单独吃掉、内容不原子，
- * 光标可以自由落进加粗文字里继续改字，标记符在任何行（含光标行）都不显示。
+ * 标记符单独吃掉、内容不原子：光标可以自由落进加粗文字里继续改字，标记符在任何行
+ * （含光标行）都不显示。整段 replace 会把内容变成原子的，光标进不去，只能靠
+ * 「光标行显示源码」让人看得见、改得动，`**` 就露出来了。
  */
 class ZeroWidget extends WidgetType {
   eq() { return true; }
@@ -97,13 +97,13 @@ const ATOMIC: ReadonlySet<InlineKind> = new Set<InlineKind>(['embed', 'img', 'wi
  *
  * 加粗的内容为什么不是 `\*\*([^*]+)\*\*`：那种写法遇到「内容里带单个星号」（`**a*b**`）
  * 或「三星号粗斜体」（`***x***`）就匹配不上，星号会裸露在正文里——而 `***…***` 正是
- * Word 转换器（convert.ts）会产出的写法。这里改成「非星号字符 或 单个星号（后面不跟
+ * Word 转换器（convert.ts）会产出的写法。这里用「非星号字符 或 单个星号（后面不跟
  * 星号）」的内容式，并在开闭处用 `(?<!\*)` / `(?!\*)` 卡住边界：三星号整段交给 tri，
  * `**a*b**` 交给 bold，两边都不再漏标记符。
  */
 /**
  * 行内扫描规则（模块级共享）：正则字面量每次求值都会新建 RegExp 对象，
- * 原来定义在函数体内意味着每扫一行分配 9 个正则——叠加「每次按键全文档重扫」
+ * 放在函数体内意味着每扫一行分配 9 个正则——叠加「每次按键全文档重扫」
  * 是可观的 GC 压力。matchAll 内部克隆正则、不动共享实例的 lastIndex，共享安全。
  */
 const INLINE_RULES: ReadonlyArray<readonly [RegExp, number, InlineKind]> = [
@@ -489,7 +489,7 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
         const nt = doc.line(end + 1).text;
         end += 1;
         // 闭合围栏行：纳入替换范围后结束（否则会被当成新的开围栏吞掉后文）
-        // 同类字符、长度不小于开围栏（原来是按 ch/len 动态 new RegExp，每块一次分配）
+        // 同类字符、长度不小于开围栏（按 ch/len 动态 new RegExp 的话每块一次分配）
         const close = FENCE_CLOSE_RE.test(nt) ? nt.trim() : '';
         if (close.length >= len && close[0] === ch) break;
         codeLines.push(nt);
@@ -605,7 +605,7 @@ export function livePreview(getReadFile?: () => ReadFileFn | undefined): Extensi
       if (!tr.state.field(livePreviewOn)) return Decoration.none;
       // 文档没变、活动行号也没变（同行内移动光标/框选）：buildSet 的输出只由
       // 「文档 + head 所在行号」决定，重建结果必然相同 → 直接复用旧值。
-      // 方向键逐字移动、同行点击是编辑里的高频动作，原来每次都全篇重扫。
+      // 方向键逐字移动、同行点击是编辑里的高频动作，逐次全篇重扫代价大。
       // 跨行移动仍然重建（活动行渲染规则不同）；docChanged 也重建（内容变了）。
       if (!toggled && !tr.docChanged
         && tr.startState.doc.lineAt(tr.startState.selection.main.head).number

@@ -148,7 +148,7 @@ describe('整包备份：专注记录不丢', () => {
     await expect(h.written.get('_attachments/img.png')!.text()).resolves.toBe('hello');
   });
 
-  it('导入会报告 overwritten 清单：覆盖已有笔记与附件前先查 exists（审计 M2）', async () => {
+  it('导入会报告 overwritten 清单：覆盖已有笔记与附件前先查 exists', async () => {
     // 库里已有同路径笔记与附件
     h.readAll = async () => new Map([['旧笔记.md', '# 旧内容\n']]);
     h.attachments = async () => new Map([['_attachments/old.png', new Blob(['old'])]]);
