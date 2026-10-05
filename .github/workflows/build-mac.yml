@@ -1,0 +1,61 @@
+name: 构建 macOS 安装包
+
+on:
+  # 推送到 work 分支时自动构建
+  push:
+    branches: [work]
+    paths-ignore:
+      - '**.md'
+  # 也支持手动触发（Actions 页面右上角 Run workflow）
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 目标架构（M 系列 Mac 用 aarch64，老 Intel Mac 用 x86_64，两者兼容用 universal）
+        type: choice
+        default: aarch64-apple-darwin
+        options:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - universal-apple-darwin
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装 Rust（含目标架构工具链）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.target || 'aarch64-apple-darwin' }}
+
+      - name: Rust 编译缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建 macOS 应用
+        # CI 上没有更新签名私钥（private.key 不进 git），这里关闭更新器产物，不影响 .app/.dmg 生成
+        run: >
+          npx tauri build
+          --target ${{ inputs.target || 'aarch64-apple-darwin' }}
+          --bundles app,dmg
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: KnowLattice-macOS-${{ inputs.target || 'aarch64-apple-darwin' }}
+          path: |
+            src-tauri/target/*/release/bundle/dmg/*.dmg
+            src-tauri/target/*/release/bundle/macos/*.app
+          if-no-files-found: error
+          retention-days: 30
