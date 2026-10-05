@@ -1,6 +1,6 @@
 [package]
 name = "knowlattice"
-version = "0.1.1"
+version = "0.2.0"
 description = "晶格 · KnowLattice - 本地优先个人知识笔记"
 authors = ["jophy"]
 edition = "2021"
