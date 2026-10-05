@@ -28,7 +28,7 @@ describe('loadCards', () => {
     expect(await loadSrs().then((m) => m.loadCards())).toEqual({});
   });
 
-  it('丢弃旧版/残缺数据（无 stability 等字段）', async () => {
+  it('丢弃残缺数据（无 stability 等字段）', async () => {
     seed({ good: state(1, 1), bad: { due: 'x' } });
     const srs = await loadSrs();
     expect(Object.keys(srs.loadCards())).toEqual(['good']);

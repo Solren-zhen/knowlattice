@@ -7,7 +7,7 @@
  * - 启动时只登记文档（引用比对，近零成本），不打断首屏；
  *   空闲时 warm() 预构建，或首次搜索时才构建。
  * - 之后每次保存/删除只增量处理变化的篇目（O(变化篇数)），
- *   替代旧版「每次保存全库重新分词」的做法。
+ *   不做全库重新分词。
  * - 只索引 .md 笔记；附件（_attachments dataURL）不进入索引。
  */
 import MiniSearch, { type SearchResult } from 'minisearch';
@@ -169,8 +169,8 @@ export class VaultSearch {
 
   /** 全文搜索：索引未就绪时返回空数组（调用方负责显示构建中状态），绝不同步构建阻塞 UI。
    *
-   *  查询先做语义近似展开（词表 + 原查询），再交给 MiniSearch。**不再手工预分词**：
-   *  旧写法 `bigramTokenize(query).join(' ')` 交给 MiniSearch 后会被**再切一次**，
+   *  查询先做语义近似展开（词表 + 原查询），再交给 MiniSearch。**不手工预分词**：
+   *  `bigramTokenize(query).join(' ')` 交给 MiniSearch 后会被**再切一次**，
    *  于是"氧解离曲线"多出「解解 / 离离 / 曲曲」这类跨词垃圾二元组（匹配不到东西，
    *  纯属白算）。直接传原串，MiniSearch 用同一个 tokenize 切一次就是对的。 */
   search(query: string): SearchResult[] {

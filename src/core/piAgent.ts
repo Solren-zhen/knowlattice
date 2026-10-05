@@ -30,8 +30,8 @@ type PiTextBlock = Extract<PiToolResult['content'][number], { type: 'text' }>;
 const PROVIDER_ID = 'knowlattice-relay';
 
 /**
- * 连接阶段失败最多重试 2 次（429/5xx/网络错误），与旧引擎 chatOnce 同一套口径；
- * 已开始收流后不再重试（重放会重复内容）。旧引擎有这层保护，pi 路径不能丢。
+ * 连接阶段失败最多重试 2 次（429/5xx/网络错误）；
+ * 已开始收流后不再重试（重放会重复内容）。
  */
 const RETRY_DELAYS_MS = [1_000, 3_000];
 
@@ -120,7 +120,7 @@ export function toPiMessages(messages: WireMessage[], tools?: AgentTool[]): Agen
   const list: AgentMessage[] = messages.map((m) => {
     if (m.role === 'system') return { role: 'system', content: m.content, timestamp: Date.now() };
     if (m.role === 'user') {
-      // 用户消息保持字符串：openai-completions 会原样发送，wire 形状与旧引擎一致
+      // 用户消息保持字符串：openai-completions 会原样发送，content 保持字符串
       return { role: 'user', content: m.content, timestamp: Date.now() };
     }
     if (m.role === 'assistant') {
@@ -292,14 +292,14 @@ async function streamWithRetry(
 export interface PiAgentDeps {
   /** 测试注入假流；默认动态加载 pi-ai 的 openai-completions（官方 openai SDK 单独分包） */
   streamFn?: StreamFn;
-  /** 连接阶段重试的退避间隔（ms），测试可传 [0, 0] 收窄；默认与旧引擎一致 */
+  /** 连接阶段重试的退避间隔（ms），测试可传 [0, 0] 收窄 */
   retryDelays?: readonly number[];
 }
 
 /**
  * 与 aiAgent.runAgent 等价的 pi 引擎实现：
  * 每次 send 构造一个 pi Agent（无状态），continue/prompt 驱动循环，
- * 事件流映射回旧引擎的回调（onDelta / onThinking / onAssistantMessage / onUsage）。
+ * 事件流映射到 onDelta / onThinking / onAssistantMessage / onUsage 回调。
  */
 export async function runPiAgent(o: RunAgentOptions, deps: PiAgentDeps = {}): Promise<RunAgentResult> {
   type PiCore = typeof import('@earendil-works/pi-agent-core');
@@ -442,7 +442,7 @@ export async function runPiAgent(o: RunAgentOptions, deps: PiAgentDeps = {}): Pr
   });
 
   try {
-    // 尾部 user 消息以字符串内容直接 prompt：wire 形状与旧引擎一致（content 为字符串）
+    // 尾部 user 消息以字符串内容直接 prompt：content 为字符串
     if (tailIsUser && tail) await agent.prompt(tail);
     else await agent.continue();
   } finally {

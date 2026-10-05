@@ -4,6 +4,7 @@ import {
   loadZhDict,
   modelLoadHint,
   systemMeshFiles,
+  sideOf,
   zhOrganName,
   type AnatomyManifest,
   type ManifestOrgan,
@@ -85,6 +86,33 @@ describe('zhOrganName', () => {
   });
 });
 
+describe('sideOf · 侧别解析', () => {
+  it('left/right 后缀拆出基础名、侧别与对侧英文名', () => {
+    expect(sideOf('Abductor hallucis (left)')).toEqual({
+      base: 'Abductor hallucis',
+      side: 'left',
+      other: 'Abductor hallucis (right)',
+    });
+    expect(sideOf('Femur (RIGHT)')).toEqual({
+      base: 'Femur',
+      side: 'right',
+      other: 'Femur (left)',
+    });
+  });
+
+  it('无侧别后缀返回 null', () => {
+    expect(sideOf('Femur')).toBeNull();
+  });
+
+  it('前缀式单侧命名（Right …）没有对侧，返回 null', () => {
+    expect(sideOf('Right testicular artery')).toBeNull();
+  });
+
+  it('空基础名（只有括号）不算成对结构', () => {
+    expect(sideOf('(left)')).toBeNull();
+  });
+});
+
 describe('modelLoadHint · 模型取不到时说什么', () => {
   // three.js 0.185 的 FileLoader 在非 2xx 时抛 HttpError，并把 Response 挂在 .response 上
   const httpError = (status: number, url: string) => {
@@ -143,8 +171,8 @@ describe('systemMeshFiles · 一个系统要用几个模型文件', () => {
     expect(systemMeshFiles(m, 'skeletal')).toEqual(['skeletal_male.glb']);
   });
 
-  // 这条是 2026-09-20 那个缺陷的回归测试：digestive/endocrine/respiratory 各有两个文件，
-  // 以前只取「第一条 organ 的 mesh_file」，visceral_male.glb 里的 13 个结构永远加载不到。
+  // 多文件系统的回归点：digestive/endocrine/respiratory 各有两个文件，
+  // 若只认「第一条 organ 的 mesh_file」，visceral_male.glb 里的 13 个结构永远加载不到。
   it('多文件系统：全部返回、去重，且主文件排在最前（它失败才算整个系统失败）', () => {
     const m = man([
       organ('endocrine', 'endocrine_male.glb', 'A'),
@@ -160,7 +188,7 @@ describe('systemMeshFiles · 一个系统要用几个模型文件', () => {
     expect(systemMeshFiles(m, 'renal')).toEqual(['renal_male.glb']);
   });
 
-  it('manifest 里没有该系统时回退到 <system>_male.glb（与旧行为一致）', () => {
+  it('manifest 里没有该系统时回退到 <system>_male.glb', () => {
     expect(systemMeshFiles(man([]), 'nervous')).toEqual(['nervous_male.glb']);
   });
 

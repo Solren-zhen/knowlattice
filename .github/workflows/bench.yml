@@ -1,0 +1,23 @@
+name: 性能基线
+
+# 性能基线：手动触发，量 5000 篇量级下核心路径的耗时。
+# 不挂在 push 流程里：bench 只测量不设阈值，CI 机器上跑出来的数字没有判定力。
+on:
+  workflow_dispatch:
+  # 每周一 03:00 UTC：留一条时间序列，便于事后看什么时候开始变慢
+  schedule:
+    - cron: '0 3 * * 1'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 性能基线（仅测量，不断言）
+        run: npm run bench

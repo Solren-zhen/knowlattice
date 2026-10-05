@@ -112,17 +112,13 @@ export default function Rail(p: Props) {
       {/* 上组：窗口变矮时只有这一组在内部滚动。
           下组（AI / 草稿 / PDF / 转换 / 字体 / 主题）钉在底部、不参与滚动——
           这样字体飞出菜单仍留在不滚动的容器里，.rail 的 overflow:visible 不必动。
-          此前整条轨靠 .rail-spacer 撑开：轨内容固定要 963px，窗口低于这个高度时下组
-          直接溢出到视口外，而 overflow:visible 没有滚动条，那几个入口永远够不着。 */}
+          整条轨内容固定要 963px，窗口低于这个高度时下组会直接溢出到视口外，
+          而 overflow:visible 没有滚动条，那几个入口就够不着；所以上组单独滚动。 */}
       <div className="rail-scroll">
         <button className="rail-home" data-tip="回到主界面" aria-label="回到主界面" onClick={p.onHome}>
           <IconLogo /><span className="rail-label">知识首页</span>
         </button>
         <div className="rail-section-label" aria-hidden={!expanded}>工作区</div>
-        <button className={`rail-btn${p.activeItem === 'pathway' ? ' on' : ''}`} aria-current={p.activeItem === 'pathway' ? 'page' : undefined} data-tip="医学通路：拖动节点绘制并复用通路图" aria-label="医学通路" onClick={() => p.onPathway?.()}>
-          <IconPathway />
-          <span className="rail-label">医学通路</span>
-        </button>
         <button
           className={`rail-btn ${p.treeOpen ? 'on' : ''}`}
           data-tip="目录：折叠 / 展开章节树"
@@ -153,6 +149,10 @@ export default function Rail(p: Props) {
           <IconGraph />
           <span className="rail-label">知识图谱</span>
         </button>
+        <button className={`rail-btn${p.activeItem === 'pathway' ? ' on' : ''}`} aria-current={p.activeItem === 'pathway' ? 'page' : undefined} data-tip="医学通路：拖动节点绘制并复用通路图" aria-label="医学通路" onClick={() => p.onPathway?.()}>
+          <IconPathway />
+          <span className="rail-label">医学通路</span>
+        </button>
         <div className="rail-group-divider"><span>学习</span></div>
         <button className={`rail-btn${p.activeItem === 'review' ? ' on' : ''}`} aria-current={p.activeItem === 'review' ? 'page' : undefined} data-tip="间隔复习（遗忘曲线）" aria-label="间隔复习" onClick={p.onReview}>
           <IconCards />
@@ -181,13 +181,13 @@ export default function Rail(p: Props) {
       </div>
       <div className="rail-sep" />
       <div className="rail-section-label rail-section-label--bottom" aria-hidden={!expanded}>工具</div>
-      <button className={`rail-btn${p.activeItem === 'ai' ? ' on' : ''}`} aria-current={p.activeItem === 'ai' ? 'page' : undefined} data-tip="AI 助手：内嵌网页问答" aria-label="AI 助手" onClick={p.onAi}>
+      <button className={`rail-btn${p.activeItem === 'ai' ? ' on' : ''}`} aria-current={p.activeItem === 'ai' ? 'page' : undefined} data-tip="AI 问答：内嵌网页问答" aria-label="AI 问答" onClick={p.onAi}>
         <IconAi />
-        <span className="rail-label">AI 助手</span>
+        <span className="rail-label">AI 问答</span>
       </button>
-      <button className={`rail-btn${p.activeItem === 'agent' ? ' on' : ''}`} aria-current={p.activeItem === 'agent' ? 'page' : undefined} data-tip="AI 笔记助手：对话式检索与修改笔记（先预览后写入）" aria-label="AI 笔记助手" onClick={p.onAgent}>
+      <button className={`rail-btn${p.activeItem === 'agent' ? ' on' : ''}`} aria-current={p.activeItem === 'agent' ? 'page' : undefined} data-tip="AI 笔记：对话式检索与修改笔记（先预览后写入）" aria-label="AI 笔记" onClick={p.onAgent}>
         <IconAgent />
-        <span className="rail-label">AI 笔记助手</span>
+        <span className="rail-label">AI 笔记</span>
       </button>
       <button className={`rail-btn${p.activeItem === 'draft' ? ' on' : ''}`} aria-current={p.activeItem === 'draft' ? 'page' : undefined} data-tip="智能草稿：讲义 / PDF 一键成笔记" aria-label="智能草稿" onClick={p.onDraft}>
         <IconWand />

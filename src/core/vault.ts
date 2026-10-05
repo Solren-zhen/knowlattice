@@ -53,7 +53,7 @@ export interface ImportResult {
   repairedFiles?: MarkdownRepairFile[];
   /** 本次导入覆盖掉的已存在路径（笔记与附件分列）。
    *  供调用方弹「已覆盖 N 篇现有笔记」确认——恢复备份是覆盖性写，
-   *  用户应当知道哪些现有文件被换掉了（审计 M2）。 */
+   *  用户应当知道哪些现有文件被换掉了。 */
   overwritten?: string[];
 }
 
@@ -517,7 +517,7 @@ export function useVault() {
     void syncDiskMtime(currentPath);
   }, [currentPath, syncDiskMtime]);
 
-  /** 写盘前的外部改动检测（审计 H2-2）。
+  /** 写盘前的外部改动检测。
    *  mtime 与基线不一致 = 这个文件在应用之外被改过（外部编辑器 / 另一个窗口 / 同步盘）。
    *  mtime 只是廉价闸门，真正判定用内容：`touch` 改 mtime 不改内容、以及我们自己刚写过的
    *  那一版，磁盘内容都会与内存里的上一版相同，不该留档。只有磁盘内容既不是我们要写的、
@@ -525,7 +525,7 @@ export function useVault() {
    *  然后照常落盘——用户的应用内编辑不被打断，别人的改动也不会被静默吃掉。 */
   const keepExternalEdit = useCallback(async (path: string, incoming: string) => {
     const known = diskMtimesRef.current.get(path);
-    if (known === undefined) return; // 本次会话没打开也没写过 → 没有基线，按旧行为写
+    if (known === undefined) return; // 本次会话没打开也没写过 → 没有基线，直接写
     const meta = await adapter.stat(path).catch(() => null);
     if (!meta || meta.mtime === known) return;
     const onDisk = await adapter.read(path).catch(() => null);
@@ -534,11 +534,11 @@ export function useVault() {
     await pushSnapshot(path, onDisk);
   }, []);
 
-  /** 保存：**先落盘、再更新内存**。写失败会抛出，调用方据此提示。
-   *  旧写法是「先乐观更新内存、catch 里只 console.error」，于是 IndexedDB 写失败时
-   *  界面照样显示「已保存 ✓」、脏点也消失——用户是在「应用说存住了」的前提下丢稿的。
-   *  同一路径的写通过 enqueueWrite 串行落盘（见 writeQueues 注释），杜绝「先发后到」
-   *  的 rename 覆盖；内存更新仍在各自的 Promise 里按序进行。 */
+  /** 保存：先落盘、再更新内存。写失败会抛出，调用方据此提示——不能乐观更新内存，
+   *  否则 IndexedDB 写失败时界面照样显示「已保存 ✓」、脏点也消失，用户会在
+   *  「应用说存住了」的前提下丢稿。同一路径的写通过 enqueueWrite 串行落盘（见
+   *  writeQueues 注释），杜绝「先发后到」的 rename 覆盖；内存更新仍在各自的 Promise
+   *  里按序进行。 */
   const save = useCallback(async (path: string, content: string) => {
     const safePath = safeVaultPath(path);
     if (!safePath) throw new Error('文件路径不安全');
@@ -685,7 +685,7 @@ export function useVault() {
     const repaired = repairEntries(notes);
     const legacyAttachments = valid.filter((f) => f.path.startsWith('_attachments/'));
 
-    // 审计 M2：先记录哪些路径会被覆盖（写之前查 exists），恢复完成时随结果返回。
+    // 先记录哪些路径会被覆盖（写之前查 exists），恢复完成时随结果返回。
     // 恢复是覆盖性写，调用方需要把「哪些现有文件被换掉」亮给用户。
     const overwritten: string[] = [];
     for (const f of repaired.entries) {

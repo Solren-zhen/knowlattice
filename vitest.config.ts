@@ -17,5 +17,10 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['src/__tests__/setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // benchmark 默认 include 是 **/*.bench.ts，会把 .pack-staging/ 里的源码副本也扫进来，
+    // 同一份基准跑两遍。收窄到 src 下。
+    benchmark: {
+      include: ['src/**/*.bench.ts'],
+    },
   },
 });

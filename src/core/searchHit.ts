@@ -5,9 +5,8 @@
  * 但**没有** `includeMatches`，拿不到字符偏移（已核对 dist/es/index.js 与
  * index.d.ts，零命中）。所以片段定位与高亮必须自己来。
  *
- * 顺带修掉原来的定位 bug：旧 snippet() 用 `body.indexOf(q[0])` 定位，
- * 只拿查询的**第一个字符**去找——搜「氧解离曲线」时会在正文里找第一个「氧」，
- * 于是片段经常定位到完全无关的位置。
+ * 定位不能用 `body.indexOf(q[0])`：只拿查询的**第一个字符**去找，搜「氧解离曲线」
+ * 时会在正文里找第一个「氧」，片段经常落到完全无关的位置。
  */
 import { expandQuery } from './medSynonyms';
 
@@ -97,7 +96,7 @@ const flatten = (s: string): string => s.replace(/\n/g, ' ');
 
 /**
  * 从正文提取命中片段，并给出**相对片段**的高亮区间。
- * 找不到命中时退化为开头一段（与旧行为一致，只是不再错误定位）。
+ * 找不到命中时退化为开头一段，不错误定位。
  */
 export function buildSnippet(content: string, query: string, len = 60): Snippet {
   const body = bodyOf(content);
@@ -105,8 +104,8 @@ export function buildSnippet(content: string, query: string, len = 60): Snippet 
   const head = (): Snippet => ({ text: flatten(body.slice(0, len)), hits: [] });
   if (!terms.length) return head();
 
-  // 第一处命中（定位片段用）：每词只扫到第一处就停，取最早——原来全量收集
-  // 所有词条在全文的全部命中，只为用 all[0] 定位
+  // 第一处命中（定位片段用）：每词只扫到第一处就停，取最早——无需收集
+  // 所有词条在全文的全部命中
   let first = -1;
   for (const raw of terms) {
     const t = raw.trim();

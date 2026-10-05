@@ -53,8 +53,8 @@ export class WebAdapter implements StorageAdapter {
     return all.map(({ path, mtime, size }) => ({ path, mtime, size }));
   }
 
-  /** 单遍读出全部笔记：getAll 本来就会反序列化整条记录，
-   *  直接复用 content，避免旧版「listAll + 逐条 read」把全库读两遍。 */
+  /** 单遍读出全部笔记：getAll 本来就会反序列化整条记录，直接复用 content，
+   *  不必再走「listAll + 逐条 read」把全库读两遍。 */
   async readAll(): Promise<Map<string, string>> {
     const db = await this.getDB();
     const all: FileRecord[] = await db.getAll('files');
@@ -89,8 +89,8 @@ export class WebAdapter implements StorageAdapter {
     await db.put('files', rec);
   }
 
-  /** 一批一个事务：导入/恢复几千篇时，原来每篇一个独立事务（每次都走完整的
-   *  事务提交协议），这是「导入转圈」时间的主要成分。事务失败整体抛出，
+  /** 一批一个事务：导入/恢复几千篇时，逐篇独立事务每篇都要走完整的
+   *  事务提交协议，这是「导入转圈」时间的主要成分。事务失败整体抛出，
    *  由调用方退回逐条重写以精确定位失败文件。 */
   async writeMany(entries: Array<{ path: string; content: string }>): Promise<void> {
     const db = await this.getDB();

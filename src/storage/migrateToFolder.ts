@@ -11,7 +11,7 @@
  *   任何一步失败都不写 done，下次启动自动重试。
  *
  * 迁移内容：笔记写 <vault>/*.md（保留目录结构），附件写 <vault>/_attachments/**，
- * 旧版把 dataURL 附件塞在 files store 里的数据转成真实二进制。
+ * files store 里以 dataURL 存放的附件转成真实二进制。
  * 源数据（IndexedDB）迁移后原样保留，作为兜底备份，不做删除。
  */
 import type { StorageAdapter } from './adapter';
@@ -82,7 +82,7 @@ export async function migrateIndexedDbToFolder(target: StorageAdapter): Promise<
   const attachmentMap = await src.readAllAttachments();
 
   const notes: Array<{ path: string; content: string }> = [];
-  /** 旧版（v1）把 dataURL 附件塞在 files store 里，转成真实二进制再写 */
+  /** files store 里以 dataURL 存放的附件，转成真实二进制再写 */
   const legacyAttachments: Array<{ path: string; content: string }> = [];
   for (const [rawPath, content] of fileMap) {
     if (!isSafeRelPath(rawPath)) continue;
@@ -123,7 +123,7 @@ export async function migrateIndexedDbToFolder(target: StorageAdapter): Promise<
         await target.writeAttachment(a.path, blob);
         attachOk++;
       } else {
-        // 转不成 Blob 的旧数据按原文写回，至少不丢
+        // 转不成 Blob 的按原文写回，至少不丢
         await target.write(a.path, a.content);
       }
     } catch (e) {
@@ -138,7 +138,7 @@ export async function migrateIndexedDbToFolder(target: StorageAdapter): Promise<
   return { notes: notes.length, attachments: attachOk, failed: 0, skipped: false };
 }
 
-/** 旧版 dataURL 附件 → Blob（与 vault.ts 的启动迁移同逻辑；此处独立实现避免循环依赖） */
+/** dataURL 附件 → Blob（与 vault.ts 的启动迁移同逻辑；此处独立实现避免循环依赖） */
 function dataUrlToBlob(dataUrl: string): Blob | null {
   const m = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl);
   if (!m) return null;

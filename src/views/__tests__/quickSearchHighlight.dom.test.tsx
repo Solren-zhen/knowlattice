@@ -57,7 +57,7 @@ describe('QuickSearch 内容高亮', () => {
     const marks = await screen.findAllByText('氧解离曲线', { selector: 'mark' });
     expect(marks.length).toBeGreaterThanOrEqual(2);
 
-    // 片段里必须出现完整命中，并且带着后面的上下文——旧实现会截在开头那段
+    // 片段里必须出现完整命中，并且带着后面的上下文（不能截在开头那段就收尾）
     const snip = document.querySelector('.qs-snippet')!;
     expect(snip.textContent).toContain('氧解离曲线');
     expect(snip.textContent).toContain('右移');

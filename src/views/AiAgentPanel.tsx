@@ -930,7 +930,7 @@ export default function AiAgentPanel({
       <div className="ai-header agent-header">
         <div className="agent-brand">
           <span className="agent-brand-dot" aria-hidden="true" />
-          <span className="agent-brand-name">学习助手</span>
+          <span className="agent-brand-name">AI 笔记</span>
         </div>
         <select
           className="agent-session-select"
@@ -980,7 +980,7 @@ export default function AiAgentPanel({
         role="log"
         aria-live="polite"
         aria-busy={running}
-        aria-label="AI 笔记助手对话"
+        aria-label="AI 笔记对话"
         onScroll={(e) => {
           const el = e.currentTarget;
           pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
@@ -1217,7 +1217,7 @@ export default function AiAgentPanel({
           }}
           placeholder={settingsValid ? '让 AI 帮你查找或整理笔记…（@ 引用笔记，/ 用命令）' : '先在「设置」里配置模型服务…'}
           rows={3}
-          aria-label="对 AI 笔记助手说点什么"
+          aria-label="对 AI 笔记说点什么"
         />
         {running ? (
           <button className="btn-small agent-stop" onClick={stop}>停止</button>

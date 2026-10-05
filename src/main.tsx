@@ -13,8 +13,8 @@ initTooltips()
 initTheme()
 initFont()
 
-// 注销早期版本注册的 Service Worker：旧版 SW 会缓存旧资源、让浏览器一直读到旧版本。
-// 只保留这次注销；新版不再注册 SW（要部署到 GitHub Pages 想离线/可安装时再开下面那段）。
+// 注销已注册的 Service Worker：它会缓存旧资源、让浏览器一直读到旧版本。
+// 这里只做注销，不注册 SW（要部署到 GitHub Pages 想离线/可安装时再开下面那段）。
 if ('serviceWorker' in navigator) {
   void navigator.serviceWorker.getRegistrations().then((regs) => {
     regs.forEach((r) => void r.unregister());

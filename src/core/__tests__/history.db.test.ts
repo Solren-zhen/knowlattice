@@ -3,8 +3,8 @@
  * 纯函数（pruneByPath/pruneGlobal）见 history.test.ts；这里覆盖重写后的存取路径：
  * 去重（同内容不重复推）、单篇保留 10 条、全库 600 上限、路径计数。
  *
- * 主键是 [path, at] 而 at = Date.now()：连续快照会落进同一毫秒互相覆盖（新旧实现
- * 行为一致），所以只 mock Date.now（不假造定时器——fake-indexeddb 内部依赖真实调度）。
+ * 主键是 [path, at] 而 at = Date.now()：连续快照会落进同一毫秒互相覆盖，
+ * 所以只 mock Date.now（不假造定时器——fake-indexeddb 内部依赖真实调度）。
  * 真实使用中保存有 800ms 防抖，不会踩到同毫秒覆盖。
  *
  * 注意：fake-indexeddb 的 getAll 没有真实浏览器的结构化克隆开销，
@@ -84,8 +84,7 @@ describe('pushSnapshot（IndexedDB 路径）', () => {
   });
 
   it('快照数 <10 的常态保存不误删（行为等价性）', async () => {
-    // 旧实现在此分支 getAll 整库；新实现 count + 游标。行为必须一致：
-    // 没超上限时不删任何东西
+    // getAll 与 count 两条路径必须一致：没超上限时不删任何东西
     const restore = tickClock();
     await pushSnapshot('c.md', 'v1');
     await pushSnapshot('d.md', 'w1');

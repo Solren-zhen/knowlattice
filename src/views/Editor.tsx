@@ -306,7 +306,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               const linkEl = target.closest?.('.lp-link') as HTMLElement | null;
               if (linkEl) {
                 const url = linkEl.getAttribute('data-lp-url');
-                // 审计 L1：白名单协议才开窗（javascript:/file:/自定义协议一律拒绝）
+                // 白名单协议才开窗（javascript:/file:/自定义协议一律拒绝）
                 const safe = url ? safeExternalUrl(url) : null;
                 if (safe) {
                   e.preventDefault();
@@ -350,7 +350,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               while ((m = linkRe.exec(line.text))) {
                 if (col >= m.index && col <= m.index + m[0].length) {
                   e.preventDefault();
-                  // 审计 L1：源码模式兜底同样过白名单（这里抓的是原文 URL，更要把不可信协议拦下）
+                  // 源码模式兜底同样过白名单（这里抓的是原文 URL，更要把不可信协议拦下）
                   const safe = safeExternalUrl(m[2]);
                   if (safe) {
                     window.open(safe, '_blank', 'noopener');
@@ -406,7 +406,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
           EditorView.updateListener.of((u) => {
             if (u.docChanged && !applyingRef.current) onChangeRef.current(u.state.doc.toString());
             // 表格面板打开时同步选区，供「转成表格」入口使用：渲染期不再直接读 viewRef，
-            // 面板打开后选区变化也能即时刷新（旧写法读的是上一次渲染时的旧选区）。
+            // 面板打开后选区变化也能即时刷新（闭包里读不到本次渲染的选区）。
             if (u.selectionSet && tableOpenRef.current) {
               const s = u.state.selection.main;
               const text = s.empty ? '' : u.state.sliceDoc(s.from, s.to);

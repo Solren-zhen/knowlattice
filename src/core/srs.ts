@@ -1,10 +1,10 @@
 /**
  * M6 · 间隔复习（SRS）：改用 ts-fsrs（MIT，FSRS 算法）。
  * 调度状态存 localStorage（轻量、无需后端）；笔记内容本身仍在 vault。
- * 对外保持旧 API 形状（applyReview/dueQueue/srsStats/export/import），
+ * 对外 API：applyReview/dueQueue/srsStats/export/import，
  * 底层 Card 为 ts-fsrs 类型（含 stability/difficulty/state 等）。
  *
- * M6+ · 粒度改成「按小节」：调度键不再是笔记路径，而是 core/srsCards.ts 建出来的卡键
+ * M6+ · 卡片粒度按小节：调度键是 core/srsCards.ts 建出来的卡键
  * （`<path>#<小节标题>`）。旧数据是「一篇一卡」的 `<path>` 键，两种键在同一张表里共存：
  * 没有小节的笔记仍用 `<path>`（同键，零迁移）；有小节的笔记由首张卡继承旧调度
  * （见 scheduleOf / applyReview），不会因为改粒度而把进度清零。

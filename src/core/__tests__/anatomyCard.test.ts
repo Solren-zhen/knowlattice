@@ -34,6 +34,31 @@ describe('anatomyNoteCandidates', () => {
   it('空白候选被丢弃', () => {
     expect(anatomyNoteCandidates({ ...organ, name_en: '  ', organ_id: '' }, '  ')).toEqual([]);
   });
+
+  it('成对结构：分侧精确名在前（接旧分侧笔记），共享名随后，结构 ID 收尾', () => {
+    const left: ManifestOrgan = { ...organ, name_en: 'Abductor hallucis (left)', organ_id: 'ah_l' };
+    expect(anatomyNoteCandidates(left, '踇展肌（左）')).toEqual([
+      'Abductor hallucis (left)',
+      '踇展肌（左）',
+      'Abductor hallucis', // 共享英文
+      '踇展肌',            // 共享中文
+      'ah_l',
+    ]);
+  });
+
+  it('成对结构且词典缺失：共享中文名不产生空候选', () => {
+    const left: ManifestOrgan = { ...organ, name_en: 'Abductor hallucis (left)', organ_id: 'ah_l' };
+    expect(anatomyNoteCandidates(left, null)).toEqual([
+      'Abductor hallucis (left)',
+      'Abductor hallucis',
+      'ah_l',
+    ]);
+  });
+
+  it('单侧结构（前缀式命名，无对侧）不产生共享候选', () => {
+    const oneSide: ManifestOrgan = { ...organ, name_en: 'Right testicular artery', organ_id: 'rta' };
+    expect(anatomyNoteCandidates(oneSide, '睾丸动脉')).toEqual(['Right testicular artery', '睾丸动脉', 'rta']);
+  });
 });
 
 describe('resolveAnatomyNotePath', () => {
@@ -54,6 +79,27 @@ describe('resolveAnatomyNotePath', () => {
 
   it('一个都接不上返回 null', () => {
     expect(resolveAnatomyNotePath(() => null, organ, '股骨')).toBeNull();
+  });
+
+  it('成对结构：本侧分侧笔记存在时优先打开它（尊重旧数据）', () => {
+    const left: ManifestOrgan = { ...organ, name_en: 'Abductor hallucis (left)', organ_id: 'ah_l' };
+    const resolve = (n: string) =>
+      n === 'Abductor hallucis (left)' ? '08-解剖学/肌肉/踇展肌（左）.md'
+      : n === 'Abductor hallucis' ? '08-解剖学/肌肉/踇展肌.md'
+      : null;
+    expect(resolveAnatomyNotePath(resolve, left, '踇展肌（左）')).toBe('08-解剖学/肌肉/踇展肌（左）.md');
+  });
+
+  it('成对结构：无分侧笔记时落到共享篇（另一侧建的「踇展肌」）', () => {
+    const right: ManifestOrgan = { ...organ, name_en: 'Abductor hallucis (right)', organ_id: 'ah_r' };
+    const resolve = (n: string) => (n === '踇展肌' ? '08-解剖学/肌肉/踇展肌.md' : null);
+    expect(resolveAnatomyNotePath(resolve, right, '踇展肌（右）')).toBe('08-解剖学/肌肉/踇展肌.md');
+  });
+
+  it('成对结构：另一侧的分侧笔记不会被打开（候选不含对侧精确名）', () => {
+    const left: ManifestOrgan = { ...organ, name_en: 'Abductor hallucis (left)', organ_id: 'ah_l' };
+    const resolve = (n: string) => (n === 'Abductor hallucis (right)' ? '08-解剖学/肌肉/踇展肌（右）.md' : null);
+    expect(resolveAnatomyNotePath(resolve, left, null)).toBeNull();
   });
 });
 

@@ -71,7 +71,7 @@ export function isAbortError(e: unknown): boolean {
 /**
  * 传输层失败的原文特征。除了浏览器 fetch 自己的措辞（Failed to fetch / ERR_CONNECTION_*），
  * 还必须覆盖 **openai SDK 的 APIConnectionError**：pi 引擎走官方 SDK，网络不可达 / 跨域被拦时
- * 一律只抛一句 `Connection error.`（node_modules/openai/core/error.js），此前不在表内，
+ * 一律只抛一句 `Connection error.`（node_modules/openai/core/error.js）；不覆盖它，
  * 用户看到的就是这句没有任何指引的原文。undici 的 `fetch failed` 同理。
  */
 const TRANSPORT_RE = /failed to fetch|fetch failed|load failed|networkerror|network error|err_connection|err_network|err_internet|connection refused|connection reset|connection error|econnrefused|enotfound|etimedout|socket hang up|net::/i;
@@ -549,7 +549,7 @@ export function queryFragments(term: string): string[] {
  * 至少命中一半片段（单片段需整中）才算命中，评分用归一化词频 + 标题命中加权。
  *
  * 长笔记（docIndex.LONG_NOTE 以上）走「父子」两段：先按小节定位，再在段内细检，
- * 返回「路径 §小节 (P页码) ｜ 片段」——短笔记退化为整篇，格式与旧版一致。
+ * 返回「路径 §小节 (P页码) ｜ 片段」——短笔记退化为整篇，格式不变。
  */
 export function searchNotes(docs: Map<string, string>, query: string, limit = 8): string {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);

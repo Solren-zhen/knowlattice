@@ -332,8 +332,9 @@ describe('自动组题 · 软门控', () => {
   });
 
   it('样本不足时不下结论（两题全错也不提示）', async () => {
+    // 预置 1 题 + 练习里再答 1 题 = 共 2 个样本，低于 MASTERY_MIN_SEEN(3) 阈值。
+    // 预置两题会正好把样本凑到阈值，用例就不再检验「样本不足」这条分支了。
     await recordAnswer(BANK, 'q1-0', false);
-    await recordAnswer(BANK, 'q1-1', false);
     const { container } = await setup();
     openCompose();
     pickChapter(container, 0);
@@ -342,6 +343,9 @@ describe('自动组题 · 软门控', () => {
     fireEvent.click(chip('10'));
     fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
     fireEvent.click(screen.getByRole('button', { name: /容易结合氧/ }));
+    // 必须等这一题的记录真的落进 stats 再断言，否则可能在「刷新前」的空窗期通过，
+    // 让这个用例失去判定力（阈值若被改成 2 也照样绿）。2 条 = 预置 1 + 本次 1。
+    await waitFor(() => expect(Object.keys(loadStats()[BANK] ?? {})).toHaveLength(2));
     await waitFor(() => expect(screen.getByRole('button', { name: /下一题/ })).toBeTruthy());
     expect(gate(container)).toBe('');
   });

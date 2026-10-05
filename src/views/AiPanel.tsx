@@ -36,8 +36,7 @@ export default function AiPanel({ onClose }: Props) {
   const [custom, setCustom] = useState('');
   // 内嵌页首屏是白屏：用统一载入语汇补上「正在加载」的反馈，换站点时重置
   const [frameLoading, setFrameLoading] = useState(true);
-  // 延迟挂 iframe：只有用户真正「打开」过某站点才挂载（2026-10-04 审计 M4）。
-  // 旧实现面板一打开就把 PRESETS[0] 挂进 iframe，等于每次开面板都主动连一次第三方。
+  // 延迟挂 iframe：只有用户真正「打开」过某站点才挂载，避免一开面板就主动连第三方。
   const [frameArmed, setFrameArmed] = useState(false);
 
   // Esc 快捷关闭。走全局 Esc 栈（只关最上面那一层）；焦点在输入框里时先退出输入框
@@ -57,7 +56,7 @@ export default function AiPanel({ onClose }: Props) {
   return (
     <div className="ai-panel">
       <div className="ai-header">
-        <span className="ai-title">AI 助手</span>
+        <span className="ai-title">AI 问答</span>
         <button className="btn-small" onClick={openExternal} title="部分站点禁止嵌入，可在新窗口打开">
           新窗口打开
         </button>

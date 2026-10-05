@@ -28,7 +28,7 @@ describe('isSafeHref', () => {
   });
 });
 
-describe('sanitizeRenderedHyperlinks（渲染后 DOM 清洗，审计 M1）', () => {
+describe('sanitizeRenderedHyperlinks（渲染后 DOM 清洗）', () => {
   let host: HTMLDivElement;
 
   beforeEach(() => {
@@ -62,7 +62,7 @@ describe('sanitizeRenderedHyperlinks（渲染后 DOM 清洗，审计 M1）', () 
   });
 });
 
-describe('safeExternalUrl（审计 L1：window.open 前的白名单）', () => {
+describe('safeExternalUrl（window.open 前的白名单）', () => {
   it('放行 http/https/mailto 并归一化', () => {
     expect(safeExternalUrl('https://a.b/c')).toBe('https://a.b/c');
     expect(safeExternalUrl('http://a.b/c')).toBe('http://a.b/c');

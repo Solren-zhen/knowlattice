@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { enqueueWrite, resetWriteQueuesForTests } from '../writeQueue';
 
-/** 复现审计 H2 的原始事故形状：两个异步写同一文件，验证落盘顺序 == 调用顺序。 */
+/** 复现原始事故形状：两个异步写同一文件，验证落盘顺序 == 调用顺序。 */
 describe('enqueueWrite', () => {
   beforeEach(() => {
     resetWriteQueuesForTests();

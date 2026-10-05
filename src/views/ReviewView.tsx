@@ -3,7 +3,7 @@
  * 正面 = 小节标题 + 属性键（不含值）；有口诀时先只显示口诀；
  * 背面 = 该小节正文。评分按钮走 FSRS 调度。
  *
- * M6+ · 粒度：一张卡 = 一个知识点（笔记里的 `##`/`###` 小节），不再是「一整篇」。
+ * M6+ · 粒度：一张卡 = 一个知识点（笔记里的 `##`/`###` 小节）。
  * 建卡规则见 core/srsCards.ts；旧数据（一篇一卡）由首张卡继承调度，不会丢进度。
  *
  * M6++ · 卡片可自定义：正面/背面可改写、可整张删除，都独立于笔记内容之外
@@ -298,7 +298,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
       ) : (
         <div className="review-card">
           <div className="review-front">
-            {/* 小节卡：标题就是问题，不能打码；整篇卡沿用原来的模糊标题（靠属性键回忆）。
+            {/* 小节卡：标题就是问题，不能打码；整篇卡仍用模糊标题（靠属性键回忆）。
                 自定义过正面就以用户写的为准，同样不打码。 */}
             <h2 className={card.heading || revealed || card.front ? '' : 'blurred-title'}>
               {frontText}

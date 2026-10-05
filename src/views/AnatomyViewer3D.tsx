@@ -231,7 +231,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       '3D 解剖视图：拖拽旋转，滚轮缩放，单击选中结构并在光标旁浮现该结构的笔记卡片，同一位置再点可穿透到下一层'
     );
 
-    // 灯光总量要和 albedo 同量级：加了环境贴图后原来的强度会把模型冲成死白（ACES 还会去饱和）
+    // 灯光总量要和 albedo 同量级：环境贴图叠加后强度过高会把模型冲成死白（ACES 还会去饱和）
     scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8478, 0.35));
     const dir = new THREE.DirectionalLight(0xffffff, 0.75);
     dir.position.set(2, 3, 4);
@@ -277,8 +277,8 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     };
 
     // 每个「系统 × 是否筋膜」共享一对材质：基础材质 + 选中高亮材质。
-    // 原来逐结构 clone 材质（全量最多 3478 份），逐 draw call 的材质切换与 uniforms
-    // 上传是拖拽旋转时的主要 CPU 开销；逐结构颜色改由顶点色承载。
+    // 逐结构 clone 材质（全量最多 3478 份）会让逐 draw call 的材质切换与 uniforms
+    // 上传成为拖拽旋转时的主要 CPU 开销；逐结构颜色由顶点色承载。
     const sharedMaterials = new Map<
       string,
       { base: THREE.MeshStandardMaterial; highlight: THREE.MeshStandardMaterial }
@@ -477,8 +477,8 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      // 原实现每次移动都新建上千元素数组、对全部网格求交、再线性反查 organ；
-      // 现改为缓存列表 + 包围盒粗筛 + userData 直查。
+      // 拾取走缓存列表 + 包围盒粗筛 + userData 直查：每次移动都新建上千元素数组、
+      // 对全部网格求交、再线性反查 organ 的代价太高。
       const candidates = t.pickMeshes.filter((m) => m.visible !== false && mayHit(m));
       const hits = raycaster.intersectObjects(candidates, false);
       const out: ManifestOrgan[] = [];
@@ -639,8 +639,8 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     setLoadingSystems((s) => new Set(s).add(system));
     // 一个系统可能对应**多个**文件：digestive / endocrine / respiratory 的内脏器官在
     // visceral_male.glb 里（见 core/anatomy.systemMeshFiles）。第一个是主文件，它失败才算
-    // 整个系统失败；附加文件失败只提示影响范围。以前只取「第一条 organ 的 mesh_file」，
-    // 于是这 13 个结构在列表里点得到、3D 里永远不显示。
+    // 整个系统失败；附加文件失败只提示影响范围。只取「第一条 organ 的 mesh_file」的话，
+    // 这 13 个结构会出现在列表里、3D 里却不显示。
     const files = systemMeshFiles(manifest, system);
     // GLB 导出时节点名被归一化：空格→下划线、去除点号（"Calcaneus.l" → "Calcaneusl"）
     const normalize = (s: string) => s.replace(/\./g, '').replace(/ /g, '_');
@@ -781,9 +781,9 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     }
   };
 
-  // 肌肉分层改用「精选解剖分层表」（core/muscleLayer）：
-  // 原来的「到骨骼距离 + 排名均分」无法区分深浅（比目鱼肌与腓肠肌到骨距离几乎相同），
-  // 且肌腱/滑囊也被当成肌肉分层。现在是显式定层、纯静态，不再需要几何计算。
+  // 肌肉分层用「精选解剖分层表」（core/muscleLayer）：显式定层、纯静态，不做几何计算。
+  // 「到骨骼距离 + 排名均分」区分不了深浅（比目鱼肌与腓肠肌到骨距离几乎相同），
+  // 还会把肌腱/滑囊也当成肌肉分层。
   const muscleLayerMap = useMemo(
     () => assignMuscleLayers(manifest.organs.filter((o) => o.system === 'muscular')),
     [manifest]

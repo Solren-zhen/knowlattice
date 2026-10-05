@@ -74,7 +74,7 @@ describe('响应式导航抽屉', () => {
     const rail = container.querySelector('.rail')!;
 
     fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
-    fireEvent.click(screen.getByRole('button', { name: 'AI 助手' }));
+    fireEvent.click(screen.getByRole('button', { name: 'AI 问答' }));
     expect(props.onAi).toHaveBeenCalledOnce();
     expect(rail.classList.contains('rail--expanded')).toBe(false);
 
