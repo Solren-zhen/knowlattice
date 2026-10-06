@@ -183,7 +183,7 @@ interface AgentSession {
 
 const ZERO_USAGE: SessionUsage = { promptTokens: 0, completionTokens: 0, estimated: false };
 const DEFAULT_PREFS: AgentPrefs = { readonly: false, autoApply: false, autonomous: false };
-/** 停顿看门狗阈值：这么久没有任何流事件就认为连接卡死（模型思考会走 thinking 增量） */
+/** 停顿看门狗阈值：这么久没有任何流事件就认为连接卡死（模型思考会走 thinking 增量；等用户确认提案的不算） */
 const STALL_IDLE_MS = 120_000;
 
 /** 全部工具＝笔记工具＋学习状态工具；只读模式只留检索与学习状态（写入类都以 propose_ 开头） */
@@ -763,9 +763,12 @@ export default function AiAgentPanel({
     let thinkAccum = '';
     // 停顿看门狗：连接卡死时流不会给出任何事件（这不是「模型在思考」，思考会走 thinking 增量），
     // 面板会一直停在「停止」按钮上等下去。任何事件都会刷新 lastEventRef。
+    // 例外：等用户在提案卡上点「应用/拒绝」时没有流事件是正常的——读 diff、想清楚都可能超过
+    // 阈值，绝不能当成连接卡死杀掉整个任务；有 pendingRef 待裁决时就一直续命等下去。
     let stalled = false;
     lastEventRef.current = Date.now();
     const watchdog = window.setInterval(() => {
+      if (pendingRef.current.size > 0) { lastEventRef.current = Date.now(); return; }
       if (Date.now() - lastEventRef.current > STALL_IDLE_MS) { stalled = true; ctrl.abort(); }
     }, 5_000);
 

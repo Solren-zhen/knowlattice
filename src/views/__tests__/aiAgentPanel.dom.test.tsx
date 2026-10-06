@@ -215,6 +215,32 @@ describe('AI 笔记助手审批流', () => {
     void fetchMock;
   });
 
+  it('看门狗豁免：等用户确认提案超过阈值也不被当成连接卡死中止', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const fetchMock = stubFetch([
+        async () => sseResponse(patchCallChunks('c1', '心肌收缩泵血。', '心肌收缩泵血，维持循环。')),
+        async () => sseResponse(finalChunks('改好了。')),
+      ]);
+      const { onSave } = renderPanel();
+
+      await sendMessage('把泵血那句补充一下');
+      await screen.findByText(/修改笔记/, { selector: '.agent-proposal-head' });
+
+      // 提案卡一直挂着没人点，时间推过看门狗阈值（120s）：任务必须还活着，卡片仍待裁决
+      await vi.advanceTimersByTimeAsync(150_000);
+      expect(screen.queryByText(/没有任何响应/)).toBeNull();
+      expect(screen.getByRole('button', { name: '停止' })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('button', { name: '应用修改' }));
+      await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.getByText('改好了。')).toBeTruthy());
+      void fetchMock;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('重开面板 id 续接：第二轮拒绝不会误改第一轮已应用的卡片', async () => {
     const fetchMock = stubFetch([
       async () => sseResponse(patchCallChunks('c1', '心肌收缩泵血。', '第一轮的修改')),
