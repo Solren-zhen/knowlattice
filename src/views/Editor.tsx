@@ -269,7 +269,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               mac: a.key.cmMac,
               run: (v: EditorView) => { a.run(v); return true; },
             })),
-            // 旧版行内格式键位（Ctrl/⌘+B 加粗、+I 斜体、+H 高亮）已废弃，改到 Alt 系（见 core/mdFormat.ts）。
+            // 行内格式键位在 Alt 系（见 core/mdFormat.ts），Ctrl/⌘ 系留给 CodeMirror。
             // 它们由 Workspace 里的应用级守卫统一消费——焦点在哪都拦得住，不必在这里再绑一遍。
             ...closeBracketsKeymap,
             ...defaultKeymap,

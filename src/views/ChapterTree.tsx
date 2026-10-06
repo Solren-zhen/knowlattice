@@ -230,8 +230,7 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
     });
   };
 
-  /** 单篇删除：行内垃圾桶。此前只能开批量模式勾选、或先打开这篇笔记再从编辑器头部删，
-   *  目录里没有「就删这一篇」的入口（用户反馈：只找得到批量删除）。 */
+  /** 单篇删除：行内垃圾桶，目录里随时能有「就删这一篇」的入口。 */
   const delOne = useCallback((path: string) => {
     const name = path.replace(/\.md$/, '').split('/').pop() ?? path;
     void confirmBox({

@@ -83,9 +83,8 @@ describe('VaultSearch', () => {
 });
 
 /**
- * 「模糊查询」：此前 MiniSearch 的 fuzzy 从没打开过，查询也没有任何展开，
- * 于是搜「心衰」找不到标题是「心力衰竭」的笔记——而那篇笔记的 aliases
- * 里很可能就写着「心衰」。这一组就是守这几条召回路径。
+ * 「模糊查询」：MiniSearch 的 fuzzy 与查询展开守住的召回路径——
+ * 搜「心衰」要能找到标题是「心力衰竭」、aliases 里写着「心衰」的笔记。
  */
 describe('VaultSearch 语义近似 / 别名 / 错字', () => {
   const bank = {

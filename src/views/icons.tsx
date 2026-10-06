@@ -383,9 +383,7 @@ export const IconChevron = ({ size = 14, open }: P & { open?: boolean }) => (
   </svg>
 );
 
-/** 关闭：全站浮层统一的「退出/关闭」图形。
-    此前 17 处直接用文字字符 ✕——字形宽度、笔画粗细与光学中心都随字体走，
-    和这里的描边图标不是同一套笔。 */
+/** 关闭：全站浮层统一的「退出/关闭」图形，描边风格与其它图标同一套笔。 */
 export const IconClose = ({ size = 15 }: P) => (
   <svg {...base(size)}>
     <path d="M7 7 17 17M17 7 7 17" strokeWidth={2} />

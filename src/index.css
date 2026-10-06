@@ -25,8 +25,8 @@
   --accent-ring: rgba(79, 70, 229, 0.28);
   /* 主色填充之上的文字色：浅色用白，深色反转为深墨，两主题均 ≥4.5:1 */
   --accent-ink: #ffffff;
-  /* 渐变顶端原来用 #6366f1：白字压在上面只有 4.47:1，差 0.03 不达 AA。
-     整体压暗 2%（肉眼不可辨）→ 4.66:1，底端 #4f46e5 本来就是 6.29:1。 */
+  /* 渐变顶端压暗 2%：白字压在 #6366f1 上只有 4.47:1 不达 AA，
+     #5f63ee 达到 4.66:1；底端 #4f46e5 为 6.29:1。 */
   --grad-primary: linear-gradient(180deg, #5f63ee 0%, var(--accent) 100%);
   --grad-primary-hover: linear-gradient(180deg, #4f46e5 0%, var(--accent-hover) 100%);
 
@@ -44,8 +44,8 @@
   --danger-text: #b91c1c;
   --amber-text: #b45309;
   --cyan-text: #0e7490;
-  /* 成功色此前没有「文字变体」出口，于是判分对的 ✓ 直接吃 --success：#10b981
-     压在 12% 成功淡底上只有 2.54:1。补上同一套出口（4.97:1）。 */
+  /* 判分对的 ✓ 等文字用 --success-text：#10b981 压在 12% 成功淡底上
+     只有 2.54:1，不达 4.5:1。 */
   --success-text: #047857;
   --warn-bg: #eff6ff;
   --warn-border: #bfdbfe;
@@ -55,8 +55,8 @@
      --font-ui      界面文字（现代科技无衬线字栈，Linear / Raycast 级）
      --font-reading 笔记正文（默认同界面字栈；切「衬线 / 等宽」时随 data-font 改变）
      --font-mono    代码块、公式报错、按键提示等真正的等宽语境
-     此前正文被 .editor-host .cm-scroller 硬编码成等宽字栈，于是「切换字体」
-     只动界面、动不了笔记内容；这里把三者都收到变量上，正文跟随 --font-reading。 */
+     正文绑定 --font-reading，不跟随 .cm-scroller 的字栈，
+     「切换字体」对界面与笔记正文同时生效。 */
   --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-reading: var(--font-ui);
   --font-mono: 'Cascadia Code', 'Fira Code', Consolas, 'JetBrains Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
@@ -72,7 +72,7 @@
   /* ---- 动效（物理缓出曲线与触觉反馈） ---- */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   /* 交互元素的过渡属性集：只动 paint/compositor 层（颜色/阴影/位移/透明度），
-     绝不带 layout 属性——此前 35 处 transition:all 把 padding/宽度也拉进动画，
+     不带 layout 属性——transition:all 会把 padding/宽度拉进动画，
      且每次属性变化都要全量比对。fill/stroke 是 SVG 控件（pw-svg 等）需要的。 */
   --tr-interact: color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease),
@@ -150,18 +150,16 @@
 }
 
 /* ============================================================ 排版标尺
-   功能面板此前各自为政：同一个「按钮」角色出现过 12 / 12.5 / 13 / 13.3 / 13.5px，
-   同一个「小字说明」出现过 11 / 11.5 / 12 / 12.5px，26 种字号散落在 184 处声明里。
-   现在收敛为 6 级：一个角色在任何面板里都是同一个字号、字重、行高。
+   全站字号收敛为 6 级：一个角色在任何面板里都是同一个字号、字重、行高，
+   不允许出现 12.5 / 13.3 这类杂散值。
      微型 M  11px   角标 / 计数 / 坐标 / 快捷键旁注
      说明 C  12px   说明文案（.muted 一类）
      控件 K  12.5px 按钮、输入框、下拉、chip、选项卡
      正文 B  13px   面板内列表行 / 菜单项 / 摘录
      标题 T  14.5px 面板标题
      主级 L  15px   空态标题、主 CTA、题干
-   字号之外的两条：控件文字一律 500 字重（主 CTA 600），行高一律 1.3 —— 此前
-   .btn-small 是 line-height:1、chip 是 normal、输入框是继承的 1.5，同一行控件
-   因此在视觉上「不是一个字体」。 */
+   字号之外的两条：控件文字一律 500 字重（主 CTA 600），行高一律 1.3，
+   保证同一行里的控件看起来是同一套字体。 */
 :root {
   --fs-micro: 11px;
   --fs-caption: 12px;
@@ -204,9 +202,8 @@ body::before {
   z-index: 1;
 }
 /* 表单控件默认不继承排版：UA 样式表给 button/input/select/textarea 指定了
-   Arial 13.33px，此前只给 button 补了 font-family，于是功能面板里的输入框、
-   下拉框与纯图标按钮各自跑出第三套字体（实测：input 解析为 Arial 13.3333px）。
-   一次把整套字体属性交给继承，控件文字与所在上下文完全一致。 */
+   Arial 13.33px，必须把整套 font 属性交给继承，控件文字才能与所在上下文
+   完全一致（只补 font-family 的话 input/select 仍是 Arial 13.3333px）。 */
 button, input, select, textarea { font: inherit; letter-spacing: inherit; }
 .muted { color: var(--muted); font-size: var(--fs-caption); }
 
@@ -246,7 +243,7 @@ button, input, select, textarea { font: inherit; letter-spacing: inherit; }
   transition: var(--tr-interact);
 }
 .btn-small { padding: 5px 12px; font-size: var(--fs-control); line-height: var(--lh-control); font-weight: var(--fw-control); }
-/* 纯图标按钮此前不声明字号，直接吃 UA 的 13.3333px；显式归位到控件级 */
+/* 纯图标按钮显式声明控件级字号，避免吃 UA 默认的 13.3333px */
 .btn-icon  { width: 28px; height: 28px; padding: 0; font-size: var(--fs-control); line-height: var(--lh-control); }
 .btn-small:hover, .btn-icon:hover {
   border-color: var(--border-accent);
@@ -522,9 +519,8 @@ kbd {
   box-shadow: var(--glass-shine);
 }
 /* 工具栏控件统一高度。
-   此前 .btn-small 没有定高，其实际身高由内联内容决定：纯文字 24px / 内联 svg 26px /
-   内联 <kbd> 31px（kbd 是 inline-block，19px 高）。而 .btn-icon 定 30px、
-   .toolbar-search 定 28px。结果同一行出现 24 / 26 / 28 / 30 / 31 五种高度。 */
+   工具栏控件一律定高 28px：不定高的话实际身高由内联内容决定，
+   纯文字 24px / 内联 svg 26px / 内联 <kbd> 31px，同一行会参差。 */
 .editor-toolbar .btn-small,
 .editor-toolbar .toolbar-search { height: 28px; }
 /* 面板头部同理：同一位置在不同界面用的是 .btn-small(24px) 或 .btn-icon(28px)，统一到 28px */
@@ -578,7 +574,7 @@ kbd {
   flex-shrink: 0;
 }
 .cm-tool-btn {
-  /* 与全站控件统一：28px 高 + 控件字阶/字重（此前 24px 低于 .editor-toolbar 的 28px 标尺） */
+  /* 与全站控件统一：28px 高 + 控件字阶/字重 */
   min-width: 28px; height: 28px;
   flex-shrink: 0; white-space: nowrap;
   border: 1px solid transparent;
@@ -966,9 +962,9 @@ kbd {
 .markdown-body th {
   background: var(--panel); font-weight: 600;
 }
-/* 表格斑马纹：编辑区可编辑表格与预览区表格共用同一条规则。
-   原来是两条一模一样的 rgba(241,245,249,0.6)（硬编码浅色），深色主题下
-   等于给深底盖一层 60% 白，正文 2.7:1。合并成一处，并改用随主题翻转的 text 淡色。 */
+/* 表格斑马纹：编辑区可编辑表格与预览区表格共用同一条规则，
+   用随主题翻转的 text 淡色（硬编码浅灰会在深色主题下盖一层白雾，
+   正文只剩 2.7:1）。 */
 .editor-host .lp-table tbody tr:nth-child(even) td,
 .markdown-body tr:nth-child(even) td { background: color-mix(in srgb, var(--text) 4%, transparent); }
 .markdown-body hr {
@@ -1602,7 +1598,7 @@ a.wikilink.missing::after {
   width: fit-content;
 }
 .layer-chip {
-  /* 此前硬编码白底/灰字/青色 hover：深色主题下白底刺眼、青色跳出靛紫语言。全部走主题令牌 */
+  /* 底色/文字/hover 全走主题令牌，两个主题下都要协调 */
   border: 1px solid var(--border);
   background: var(--bg-raised);
   color: var(--text-2);
@@ -2741,8 +2737,8 @@ a.wikilink.missing::after {
 }
 .opt:disabled { cursor: default; }
 /* 正确 / 错误态：底色 + 描边 + 序号圈 + 尾部标记四个冗余信号已经说清了结果，
-   正文一律保持正文色。此前正文直接吃 --success，浅色下是 #10b981 落在自己的 12% 底色上，
-   实测 2.27:1（连 3:1 都不到）；两态用同一套「内描边」而不是一边发光一边描边，视觉才对称。 */
+   正文一律保持正文色——#10b981 落在自己的 12% 底色上只有 2.27:1；
+   两态用同一套「内描边」而不是一边发光一边描边，视觉才对称。 */
 .opt.right {
   border-color: var(--success);
   background: color-mix(in srgb, var(--success) 12%, transparent);
@@ -2798,8 +2794,7 @@ a.wikilink.missing::after {
   background: var(--accent-soft);
   opacity: 1;
 }
-/* 批注卡片与选项框同宽同边：此前缩进 50px 去对齐选项正文，
-   结果右边贴齐、左边缩进 50px，一张带底色的卡片这样摆就像没对齐。 */
+/* 批注卡片与选项框同宽同边：带底色的卡片右侧贴齐、左侧缩进会像没对齐。 */
 .opt-note, .opt-note-edit { grid-column: 1; }
 .opt-note {
   display: flex; align-items: flex-start; gap: 7px;
@@ -2867,8 +2862,8 @@ a.wikilink.missing::after {
   position: sticky; bottom: 0;
   display: flex; align-items: center; gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-6) var(--sp-4);
-  /* 起手用 transparent：渐变按预乘插值，等价于「目标色零透明」，两个主题都只淡出、不串色。
-     此前写死 rgba(255,255,255,0)，深色主题下就是在深色面板底部糊一层白雾。 */
+  /* 起手必须用 transparent：渐变按预乘插值，rgba(255,255,255,0) 等价于
+     「白色零透明」，深色主题下会在面板底部糊一层白雾。 */
   background: linear-gradient(180deg, transparent, var(--bg-raised) 30%);
 }
 .quiz-next { width: auto; padding: 10px 26px; font-size: var(--fs-lead); margin-left: auto; }
@@ -3027,8 +3022,7 @@ a.wikilink.missing::after {
 }
 .quiz-wrong-item + .quiz-wrong-item { border-top: 1px solid var(--border); }
 .quiz-wrong-item span { flex: 1; min-width: 0; font-weight: 600; }
-/* 正解做成淡色药丸：此前是 --accent 蓝字，既跟「正确」无关，13px 蓝字也偏灰；
-   文字用 --text-2，颜色语义交给底色和描边。 */
+/* 正解做成淡色药丸：颜色语义交给底色和描边，文字用 --text-2。 */
 .quiz-wrong-item i {
   font-style: normal; color: var(--text-2); font-size: var(--fs-caption);
   white-space: nowrap;
@@ -4269,7 +4263,7 @@ a.wikilink.missing::after {
 }
 .preview.placeholder .hero-badge {
   font-size: var(--fs-micro); font-weight: 650; color: var(--accent-ink);
-  /* 实底靛紫胶囊：此前是 8% 淡底 + 描边，首屏柔光一冲就没了存在感。
+  /* 实底靛紫胶囊，首屏柔光下也要立得住。
      渐变两端按 AA 反推：白字压 #6366f1 只有 4.46:1（11px 文字不够），
      起点压到 #5b5ff0（4.79:1），终点 #7c3aed（5.67:1）。 */
   background: linear-gradient(135deg, #5b5ff0 0%, #7c3aed 100%);
@@ -4330,9 +4324,8 @@ a.wikilink.missing::after {
   box-shadow: var(--shadow-xs), var(--glass-shine);
 }
 .hero-cta .hero-graph {
-  /* 次级 CTA：同色系淡靛底 + 靛字，与实底主按钮构成主/次层级。
-     此前是深青色实心胶囊——色相跳出全应用的靛紫语言，在极光底上像别的系统的按钮。
-     （9-25 合并曾把 9-24 另一条工作线的青色版本带回来，这里按已确认的方向重新应用） */
+  /* 次级 CTA：同色系淡靛底 + 靛字，与实底主按钮构成主/次层级，
+     色相保持在全应用的靛紫语言里。 */
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), color-mix(in srgb, var(--accent) 6%, transparent));
   color: var(--accent);
   border: 1px solid var(--border-accent);
@@ -4572,7 +4565,7 @@ a.wikilink.missing::after {
 }
 .brain-readout-name { color: #94a3b8; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 英文原名作为第二标签：字号降一级、压暗，中文名仍然是主读对象。
-   原来是 #64748b：压在读数条的 72% 深底上只有 3.97:1（11px 小字要 4.5:1）。 */
+   #94a3b8 压在读数条的 72% 深底上达到 4.5:1（#64748b 只有 3.97:1）。 */
 .brain-readout-en {
   max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--fs-micro); color: #7c8da3;
@@ -4690,8 +4683,7 @@ a.wikilink.missing::after {
    等旧类把内距改成 16px 上下，于是同类头部在不同面板里高度是 44~62px 不等
    （pdf-topbar 固定 44px、quiz-header 54px、mistake-header 62px）。
    这里只统一几何（高度 / 内距 / 列间距），底面按「卡片型 = 实底、画布型 = 玻璃」
-   分两组：图谱与 PDF 对照的头部本来就压在画布上，保留各自的面色。
-   注：此前一版把 graph-header 也拉成实底，等于把它的玻璃面吃掉，已修正。 */
+   分两组：图谱与 PDF 对照的头部本来就压在画布上，保留各自的面色。 */
 .panel__head.quiz-header,
 .panel__head.mistake-header,
 .panel__head.mindmap-header,
@@ -4735,7 +4727,6 @@ a.wikilink.missing::after {
 }
 
 /* ---- 5. 空态统一：同一套居中排版与标题层级 ----
-   此前 8 处空态的 padding 在 16~48px 之间、标题字号 13~22px 之间各写各的。
    这 7 个空态形状一致（一行标题 + 一行 muted 说明，可选一个动作按钮），
    统一到一套排版；侧栏 .tree-empty 是窄栏内联提示，不套用居中版式。 */
 .anatomy-empty, .mistake-empty, .quiz-empty, .qs-empty,
@@ -4789,7 +4780,6 @@ a.wikilink.missing::after {
 }
 
 /* ---- 8. 内联载入语汇：面板内的异步等待统一用「骨架条 + 一句说明」 ----
-   PDF 渲染、OCR 识别、内嵌 AI 页此前各写各的灰字（或干脆没提示）。
    与整片浮层的 .loading 同源（同一套 mv-sheen 扫光），只是内联排布。 */
 .loading-inline {
   display: flex; align-items: center; justify-content: center; gap: 10px;
@@ -4882,7 +4872,7 @@ a.wikilink.missing::after {
 .pw-svg .pw-link:focus { outline: none; }
 
 /* ---------- 医学通路绘图面板 ---------- */
-/* 左距跟随导航轨实际宽度（收起 66 / 展开 208 + 16 间隙）：此前写死 66px，展开的轨
+/* 左距跟随导航轨实际宽度（收起 66 / 展开 208 + 16 间隙），写死 66px 时展开的轨
    会盖住工作区左侧 142px（标题、撤销/导出按钮都压在轨下面）。变量在兄弟节点间
    不继承，用兄弟组合器直接改 padding；限 ≥1041px——窄屏轨是浮层抽屉，不该推内容。 */
 .pathway-builder-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: stretch; padding: 0 0 0 66px; background: var(--bg); }

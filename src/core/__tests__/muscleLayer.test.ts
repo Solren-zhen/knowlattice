@@ -45,7 +45,7 @@ describe('classifyMuscularPart', () => {
     expect(classifyMuscularPart(ins)).toBe('other');
   });
 
-  it('muscular 系统里非肌肉条目占相当比例（这正是原来分层粗糙的原因之一）', () => {
+  it('muscular 系统里非肌肉条目占相当比例，不能全按肌肉分层', () => {
     const muscles = muscular.filter((o) => classifyMuscularPart(o) === 'muscle');
     const others = muscular.length - muscles.length;
     expect(muscles.length).toBeGreaterThan(400);
@@ -115,7 +115,7 @@ describe('assignMuscleLayers', () => {
     for (const [, l] of layers) expect([1, 2, 3, 4]).toContain(l);
   });
 
-  it('层级分布不再像原来那样每档硬凑四分之一（浅层是少数、深层占多数）', () => {
+  it('层级分布真实反映解剖学：浅层是少数、深层占多数', () => {
     const muscleLayers = realMuscles.map((o) => layers.get(o.organ_id)!);
     const count = (l: number) => muscleLayers.filter((v) => v === l).length;
     const total = muscleLayers.length;
