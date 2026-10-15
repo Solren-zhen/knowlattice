@@ -5,7 +5,8 @@
  *   2. node scripts/make-update-manifest.mjs        # 在 bundle/nsis/ 下生成 latest.json
  *   3. GitHub 新建 Release（tag = vX.Y.Z），上传 latest.json 和所有列出的产物 + .sig
  *      - Windows：KnowLattice_X.Y.Z_x64-setup.exe / *.sig
- *      - macOS：KnowLattice.app.tar.gz / *.sig
+ *      - macOS：KnowLattice.app.tar.gz / *.sig（上传时可按平台改名，清单按磁盘上的实际
+ *        文件名写 URL —— 名字对不上就是 macOS 端 404）
  *
  * 清单按平台自动收录：哪个平台的 .sig 签名文件存在，就写入哪个平台的条目
  * （Windows 产物在 bundle/nsis/，macOS 产物在 bundle/macos/，两个平台都构建则都收录）。
@@ -57,37 +58,44 @@ const bundleDirs = (kind) => {
 const darwinPlatform = (triple) =>
   triple.includes('x86_64') ? 'darwin-x86_64' : triple.includes('aarch64') ? 'darwin-aarch64' : null;
 
-const artifacts = [
-  {
-    platform: 'windows-x86_64',
-    dirs: bundleDirs('nsis').map((d) => d.dir),
-    fileName: `KnowLattice_${version}_x64-setup.exe`,
-  },
+// 文件名从磁盘上**实际存在**的那个读出来，不写死：Release 资产的 URL 就是上传时的文件名。
+// 写死的名字一旦和真实资产不一致，端侧就是静默 404 —— macOS 侧尤其容易踩，因为
+// tauri 的产物叫 KnowLattice.app.tar.gz，而人工上传时通常会按平台改成名带架构的那种。
+const findSigned = (dir, re) => {
+  if (!existsSync(dir)) return null;
+  for (const name of readdirSync(dir)) {
+    if (re.test(name) && existsSync(join(dir, `${name}.sig`))) return { dir, file: name };
+  }
+  return null;
+};
+
+const candidates = [
+  ...bundleDirs('nsis').map(({ dir }) => ({ platform: 'windows-x86_64', dir, re: /-setup\.exe$/i })),
   ...bundleDirs('macos').map(({ dir, triple }) => {
     const platform = darwinPlatform(triple);
     if (!platform) {
       console.warn(`[warn] ${dir}：目录名里看不出目标架构，按 aarch64 记入清单，请自行确认 --target。`);
-      return { platform: 'darwin-aarch64', dirs: [dir], fileName: 'KnowLattice.app.tar.gz' };
     }
-    return { platform, dirs: [dir], fileName: 'KnowLattice.app.tar.gz' };
+    return { platform: platform ?? 'darwin-aarch64', dir, re: /\.app\.tar\.gz$/i };
   }),
 ];
 
 const platforms = {};
 const missing = [];
 const outDirs = [];
-for (const { platform, dirs, fileName } of artifacts) {
+for (const { platform, dir, re } of candidates) {
   if (platforms[platform]) continue; // 同一平台出现多个目录时只取第一个
-  const hit = dirs.find((d) => existsSync(join(d, `${fileName}.sig`)));
+  const hit = findSigned(dir, re);
   if (!hit) {
     missing.push(platform);
     continue;
   }
-  outDirs.push(hit);
+  outDirs.push(hit.dir);
   platforms[platform] = {
-    signature: readFileSync(join(hit, `${fileName}.sig`), 'utf8').trim(),
-    url: `${releaseBase}/${encodeURIComponent(fileName)}`,
+    signature: readFileSync(join(hit.dir, `${hit.file}.sig`), 'utf8').trim(),
+    url: `${releaseBase}/${encodeURIComponent(hit.file)}`,
   };
+  console.log(`  ${platform} ← ${hit.file}`);
 }
 
 if (Object.keys(platforms).length === 0) {
