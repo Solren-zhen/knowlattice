@@ -18,7 +18,7 @@
  */
 import { createEmptyCard, fsrs, generatorParameters, Rating as FSRSRating, type Card } from 'ts-fsrs';
 import { getAllQuestionStats, migrateLegacyQuestionStats, putQuestionStat, removeQuestionStats, replaceQuestionStats, type StoredQuestionStat } from '../storage/qbank';
-import type { QuizBank } from './qbank';
+import { chaptersOf, type QuizBank } from './qbank';
 
 /** 一道题的逐题记录。时间都是 epoch **毫秒**（存储层再折算成分钟）。 */
 export interface QStat {
@@ -215,13 +215,26 @@ function fromCard(c: Card, wrong: number): QStat {
  * 二值对错 → FSRS 四档评分的映射：对 = Good，错 = Again。
  * 不做「用时/犹豫」之类的推测——那是编造数据，宁可只喂真实信号。
  * `recall`（简答自判）与选择题共用这一条路径，因为两者拿到的都是用户自报的对错。
+ *
+ * `relearn`（错题重练模式）改变的是 **wrong 计数** 的去向，不是 FSRS：
+ * 普通练习里答对不会把之前的错抹掉（错题就该一直留着被加权抽到）；
+ * 而「错题重练」这个动作的语义就是「把错题消灭掉」——所以答对一次减一次 wrong，
+ * 减到 0 的题自然从 `scope: 'wrong'` 的候选池里消失（filterPool 判的是 `wrong > 0`），
+ * 答错则继续累加、保持高权重。这样闭环是真实的：练对了就出池，练错了就更重。
  */
-export async function recordAnswer(bank: string, qid: string, correct: boolean, now = Date.now()): Promise<QStat> {
+export async function recordAnswer(
+  bank: string,
+  qid: string,
+  correct: boolean,
+  now = Date.now(),
+  relearn = false,
+): Promise<QStat> {
   const stats = initialized ? cache : await initializeStats();
   const prev = stats[bank]?.[qid];
   const card = prev ? toCard(prev) : createEmptyCard(now);
   const next = f.next(card, new Date(now), correct ? FSRSRating.Good : FSRSRating.Again).card;
-  const rec = fromCard(next, (prev?.wrong ?? 0) + (correct ? 0 : 1));
+  const wrongDelta = correct ? (relearn ? -1 : 0) : 1;
+  const rec = fromCard(next, Math.max(0, (prev?.wrong ?? 0) + wrongDelta));
   const per: BankStats = { ...(stats[bank] ?? {}), [qid]: rec };
   cache = { ...stats, [bank]: per };
   try {
@@ -309,18 +322,26 @@ export interface ChapterMastery {
   weak: boolean;
 }
 
-/** 按章节汇总掌握度，最差的排前面（正确率相同则样本多的在前） */
+/** 按章节汇总掌握度，最差的排前面（正确率相同则样本多的在前）。
+ *  一题多章节时**同一题在每个章节下各记一次**（见下面的注释与 chaptersOf）。 */
 export function chapterMastery(bank: QuizBank, stats: StatsMap = loadStats()): ChapterMastery[] {
   const per = stats[bank.name] ?? {};
   const groups = new Map<string, { seen: number; wrong: number }>();
   for (const q of bank.questions) {
     const s = per[q.id];
     if (!s) continue;
-    const key = q.chapter || '';
-    const g = groups.get(key) ?? { seen: 0, wrong: 0 };
-    g.seen += 1;
-    if (s.wrong > 0) g.wrong += 1;
-    groups.set(key, g);
+    // 量纲选择：题确实**同时属于**它列出的每一章，所以每个章节各记一次。
+    // 只记一次（比如只记 chapters[0]）会让这道题在其余章节里凭空消失：
+    // 「某章正确率」正是用户选择复习哪一章的依据，少算比多算的代价大得多。
+    // 没有 chapters 的题走 chaptersOf 的单值口径 —— 与旧代码 `q.chapter || ''` **逐字相同**；
+    // chaptersOf 返回空数组时同样退回空串那一档（既有的「未标注」分组，不新开档位）。
+    const keys = chaptersOf(q);
+    for (const key of keys.length ? keys : ['']) {
+      const g = groups.get(key) ?? { seen: 0, wrong: 0 };
+      g.seen += 1;
+      if (s.wrong > 0) g.wrong += 1;
+      groups.set(key, g);
+    }
   }
   return [...groups]
     .map(([chapter, g]) => {

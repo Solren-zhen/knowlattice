@@ -71,6 +71,32 @@ describe('VaultSearch', () => {
     expect(vs.listSome(new Set(), 0)).toEqual([]);
   });
 
+  // 回归：首屏是分块构建的（每块之间让出主线程），期间 sync() 因 mini 仍为 null 只能在
+  // docs 上登记。若构建完成时直接用当时的旧快照当索引，这段时间的新增会搜不到、删除会残留。
+  it('分块构建期间登记的新增/删除，索引建好后能补齐', async () => {
+    const many = () =>
+      new Map(Array.from({ length: 600 }, (_, i) => [`批量/${i}.md`, `# 批量 ${i}\n\n第 ${i} 篇内容。`]));
+    const byId = (vs: VaultSearch, q: string) => vs.search(q).map((h) => h.id);
+
+    const added = new VaultSearch();
+    const base = many();
+    added.sync(base);
+    const warming = added.warm();
+    added.sync(new Map([...base, ['新.md', '# 新篇\n\n提到主动脉弓。']]));
+    await warming;
+    expect(byId(added, '主动脉弓')).toContain('新.md');
+
+    const removed = new VaultSearch();
+    const all = new Map([...many(), ['待删.md', '# 待删\n\n主动脉弓分支。']]);
+    removed.sync(all);
+    const warming2 = removed.warm();
+    const rest = new Map(all);
+    rest.delete('待删.md');
+    removed.sync(rest);
+    await warming2;
+    expect(byId(removed, '主动脉弓')).not.toContain('待删.md');
+  });
+
   it('只索引 .md，附件不进入', async () => {
     const vs = new VaultSearch();
     vs.sync(new Map([

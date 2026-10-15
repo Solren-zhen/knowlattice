@@ -140,11 +140,20 @@ function splitNoteIntoCardsUncached(path: string, raw: string): ReviewCard[] {
   return cards;
 }
 
-/** 全库建卡：只取 .md，按传入顺序（与队列顺序一致） */
+/**
+ * 系统目录：功能性的 .md 但不是知识笔记，不进复习队列——
+ * AI命令/ 是斜杠命令模板（内容是给模型看的指令），学习日志/ 是陪练流水（一次学习一个小节，
+ * 会随天数无限增长）。不排除的话它们的正文会被切成卡，复习队列很快被噪声填满。
+ * 与 core/aiStudyLog.ts 的 STUDY_LOG_DIR 保持一致。
+ */
+const NON_CARD_PREFIXES = ['AI命令/', '学习日志/'];
+
+/** 全库建卡：只取 .md，按传入顺序（与队列顺序一致）；系统目录跳过 */
 export function buildCards(paths: string[], docs: Map<string, string>): ReviewCard[] {
   const out: ReviewCard[] = [];
   for (const p of paths) {
     if (!p.endsWith('.md')) continue;
+    if (NON_CARD_PREFIXES.some((dir) => p.startsWith(dir))) continue;
     out.push(...splitNoteIntoCards(p, docs.get(p) ?? ''));
   }
   return out;

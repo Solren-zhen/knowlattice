@@ -145,6 +145,35 @@ export function systemMeshFiles(manifest: AnatomyManifest, system: string): stri
   return files.length > 0 ? files : [`${system}_male.glb`];
 }
 
+/**
+ * 系统英文键 → 界面用中文名。
+ *
+ * 这原本是 views/Workspace 里 handleAnatomyOpenNote 的**函数内局部常量**，只服务「建笔记」一条路径。
+ * 「从结构生成复习卡」也要在卡片属性里写所属系统，两处各留一份必然漂移
+ * （改了建笔记那处的名字、复习卡上还是旧名），所以提到这里——
+ * 这是解剖学领域的展示数据，本来就属于本模块。
+ */
+export const ANATOMY_SYSTEM_ZH: Record<string, string> = {
+  articular: '关节',
+  cardiovascular: '心血管',
+  digestive: '消化',
+  endocrine: '内分泌',
+  integumentary: '皮肤',
+  lymphatic: '淋巴',
+  muscular: '肌肉',
+  nervous: '神经',
+  regional: '区域',
+  renal: '泌尿',
+  reproductive: '生殖',
+  respiratory: '呼吸',
+  skeletal: '骨骼',
+};
+
+/** 系统键 → 中文名；未知键原样返回（manifest 以后加了新系统也不至于显示成空白） */
+export function systemZhName(system: string): string {
+  return ANATOMY_SYSTEM_ZH[system] ?? system;
+}
+
 // ---------- 模型加载失败时给用户看什么 ----------
 
 /**

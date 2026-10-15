@@ -92,11 +92,17 @@ export default function TagBrowser({ docs, onOpenPath, onClose }: Props) {
           ) : (
             <>
               <h4 className="tag-note-list-title">#{sel} · {selNotes.length} 篇</h4>
-              {selNotes.map((p) => {
+              {selNotes.map((p, i) => {
                 const { title } = parseFrontmatterCached(p, docs.get(p) ?? '');
                 const label = title || p.replace(/\.md$/, '').split('/').pop() || p;
                 return (
-                  <div key={p} className="mistake-item tag-note-item" onClick={() => openNote(p)} {...clickable(`打开笔记：${label}`)}>
+                  <div
+                    key={p}
+                    className="mistake-item tag-note-item stagger-item"
+                    style={{ ['--i' as string]: Math.min(i, 12) }}
+                    onClick={() => openNote(p)}
+                    {...clickable(`打开笔记：${label}`)}
+                  >
                     <div className="mistake-item-main">
                       <div className="panel__title mistake-title">{label}</div>
                       <div className="mistake-meta muted">{p}</div>

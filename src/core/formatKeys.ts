@@ -28,9 +28,12 @@ export interface FormatKey {
   labelMac: string;
 }
 
-export const FORMAT_KEYS: Record<'bold' | 'highlight' | 'italic' | 'wiki', FormatKey> = {
+export const FORMAT_KEYS: Record<'bold' | 'highlight' | 'italic' | 'wiki' | 'cloze', FormatKey> = {
   bold: { cm: 'Alt-a', cmMac: 'Mod-Alt-a', label: 'Alt+A', labelMac: 'Alt/⌥+A' },
   highlight: { cm: 'Alt-s', cmMac: 'Mod-Alt-s', label: 'Alt+S', labelMac: 'Alt/⌥+S' },
   italic: { cm: 'Alt-z', cmMac: 'Mod-Alt-z', label: 'Alt+Z', labelMac: 'Alt/⌥+Z' },
   wiki: { cm: 'Alt-x', cmMac: 'Mod-Alt-x', label: 'Alt+X', labelMac: 'Alt/⌥+X' },
+  // 挖空：Alt+C（Cloze）。同样落在左手基准位附近、且不与浏览器级快捷键冲突——
+  // 与上面四个键的选择理由一致（见本文件顶部）。Alt+C 在 Chrome 里没有绑定。
+  cloze: { cm: 'Alt-c', cmMac: 'Mod-Alt-c', label: 'Alt+C', labelMac: 'Alt/⌥+C' },
 };

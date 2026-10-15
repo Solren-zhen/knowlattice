@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { toggleMark, wikiLink, type MdEdit } from '../mdFormat';
+import { toggleCloze, toggleMark, wikiLink, type MdEdit } from '../mdFormat';
+import { countCloze, maskCloze, revealCloze } from '../cloze';
 
 /** 把编辑描述套用到原文上，得到「按下快捷键之后文档长什么样」 */
 function apply(doc: string, edit: MdEdit): { text: string; selected: string } {
@@ -147,5 +148,55 @@ describe('wikiLink 双链', () => {
   it('在句子中间插入时只改选区范围', () => {
     const doc = '见 波尔效应 一节';
     expect(apply(doc, wikiLink(doc, 2, 6)).text).toBe('见 [[波尔效应]] 一节');
+  });
+});
+
+const CLOZE_SRC = '值 = 甲';
+
+describe('toggleCloze 挖空', () => {
+  it('选中文字包成挖空', () => {
+    const src = '心输出量 = 每搏输出量 × 心率';
+    const { text } = apply(src, toggleCloze(src, 7, 12));
+    expect(text).toBe('心输出量 = {{每搏输出量}} × 心率');
+  });
+
+  it('选区正好是整处挖空 → 去掉包裹', () => {
+    const src = '值 = {{甲}}';
+    const { text, selected } = apply(src, toggleCloze(src, 4, 9));
+    expect(text).toBe('值 = 甲');
+    expect(selected).toBe('甲');
+  });
+
+  it('标记紧贴选区外侧 → 去掉包裹（与加粗/高亮的取消行为一致）', () => {
+    const src = '值 = {{甲}}';
+    const { text } = apply(src, toggleCloze(src, 6, 7));
+    expect(text).toBe('值 = 甲');
+  });
+
+  it('空选区插入占位并选中它，直接打字即可替换', () => {
+    const src = '值 = ';
+    const { text, selected } = apply(src, toggleCloze(src, 4, 4));
+    expect(text).toBe('值 = {{挖空内容}}');
+    expect(selected).toBe('挖空内容');
+  });
+
+  it('反方向选区也能正常包（从右往左拖选）', () => {
+    const src = '甲乙';
+    const { text } = apply(src, toggleCloze(src, 2, 0));
+    expect(text).toBe('{{甲乙}}');
+  });
+
+  it('连按两次不会叠成多套花括号（否则复习界面认不出来）', () => {
+    const first = apply(CLOZE_SRC, toggleCloze(CLOZE_SRC, 4, 5));
+    expect(first.text).toBe('值 = {{甲}}');
+    const second = apply(first.text, toggleCloze(first.text, 6, 7));
+    expect(second.text).toBe('值 = 甲');
+  });
+
+  it('与复习界面同源：包出来的结果一定被 maskCloze 认成挖空', () => {
+    const { text } = apply(CLOZE_SRC, toggleCloze(CLOZE_SRC, 4, 5));
+    expect(countCloze(text)).toBe(1);
+    expect(maskCloze(text)).toBe('值 = ＿＿＿');
+    expect(revealCloze(text)).toBe('值 = 甲');
   });
 });

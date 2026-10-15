@@ -632,9 +632,20 @@ export function exportTodos(): Todo[] {
   return loadTodos();
 }
 
+/**
+ * 进程内自增序号：保证**同一毫秒内连续生成**也不重复。
+ *
+ * 为什么不能只靠「时间戳 + 4 位随机」：同一毫秒里连发 200 条时，撞号概率约 1.2%
+ * （生日问题：200²/2 ÷ 36⁴ ≈ 1.19%）——撞了就是「两条待办同一个 id」，React key 重复、
+ * 勾选/删除会串到另一条上。加一个自增序号后，同毫秒内严格递增、绝无重复；
+ * 时间戳继续负责跨会话不撞，随机后缀继续负责多标签页/多进程之间不撞。
+ */
+let idSeq = 0;
+
 /** 新待办 id（视图与演示数据共用同一形状） */
 export function newTodoId(): string {
-  return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  idSeq += 1;
+  return `t-${Date.now().toString(36)}-${idSeq.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
 /** 新建一条待办（短语法解析结果 + 默认值） */

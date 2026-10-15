@@ -28,6 +28,7 @@ function railProps(): ComponentProps<typeof Rail> {
     onDraft: vi.fn(),
     onPdf: vi.fn(),
     onConvert: vi.fn(),
+    onImport: vi.fn(),
     onNotice: vi.fn(),
   };
 }

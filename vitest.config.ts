@@ -17,6 +17,17 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['src/__tests__/setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    /**
+     * 单测总预算。默认 5s，而这个仓库的用例大量在「等一条真实异步链走完」：
+     * 打开库要读全部笔记 + 媒体 + 跑一遍 Markdown 自动修正，写入走 fake-indexeddb，
+     * 导入要逐文件分流。整套 150+ 文件并行跑（每个文件一个 worker）时，机器负载会把某一次等待
+     * 推过默认值 —— 表现为「单跑全绿、整套偶尔红」的假红，比真 bug 更消耗人。
+     *
+     * 这里统一放宽**等待上限**，断言条件一个字没改：条件不成立照样失败，判定力不变。
+     * （RTL 的 waitFor / findBy* 上限在 src/__tests__/setup.ts 里一起放宽——那两处必须匹配：
+     *  单测预算必须大于用例里所有等待之和，否则先到点的永远是 vitest 自己的超时。）
+     */
+    testTimeout: 20_000,
     // benchmark 默认 include 是 **/*.bench.ts，会把 .pack-staging/ 里的源码副本也扫进来，
     // 同一份基准跑两遍。收窄到 src 下。
     benchmark: {

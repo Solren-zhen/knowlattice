@@ -1,11 +1,12 @@
 /**
  * AI 笔记助手（对标 Obsidian 的 Claudian 插件）：
  * - 侧栏多会话对话，agent 可用工具检索笔记（列目录 / 搜索 / 读取）
- * - 修改以 diff 卡片呈现：「应用」后才经 vault.save 落盘（自动进历史版本）；
- *   应用前若发现笔记已被用户改过，先弹覆盖确认再动手；「自动应用」开关可让
- *   定点替换（patch）跳过确认；「自主」模式下全部写入免确认（漂移仍要确认）
+ * - 两档模式：read（默认，写入先出 diff 等用户点「应用」）与 yolo（写入免确认）。
+ *   应用前若发现笔记已被用户改过，先弹覆盖确认再动手，yolo 下同样要确认。
+ *   旧的中间档「自动应用」（只有 patch 免确认）已删——它和 yolo 的差别只是
+ *   「整篇重写仍要确认」，三档并存时用户得先想清楚自己在哪一档，收益不抵心智成本。
  * - Claudian 式交互：@路径 引用笔记（附内容进上下文）、/斜杠命令（AI命令/ 目录
- *   下的笔记，$ARGUMENTS 传参）、AGENT.md 自定义指南（对应 CLAUDE.md）、只读模式、
+ *   下的笔记，$ARGUMENTS 传参）、AGENT.md 自定义指南（对应 CLAUDE.md）、
  *   运行中消息排队、推理模型思考过程展示
  * - 模型走 OpenAI 兼容协议，地址 / Key / 模型名由用户配置（小米 MiMo / DeepSeek /
  *   智谱 / Kimi / OpenRouter / Ollama 均可），配置与会话只存本机 localStorage
@@ -17,22 +18,26 @@ import {
   type AgentSettings, type MentionHit, type RunAgentOptions, type TokenUsage, type WireMessage,
 } from '../core/aiAgent';
 import {
-  formatMedBooks, formatMedHits, medBookRecords, medBookRemove, medBooksList, medBooksSearch,
+  formatMedBooks, formatMedHits, medBookFullText, medBookPage, medBookRecords, medBookRemove, medBooksList, medBooksSearch,
   type MedBookHit, type MedBookMeta,
 } from '../core/medBooks';
 import { PiUnavailableError, runPiAgent } from '../core/piAgent';
 import { collapseDiff, diffLines } from '../core/aiDiff';
-import { LEARNING_TOOLS, quizProgressReport, reviewDueReport, studySummaryReport, weakChaptersReport } from '../core/aiLearning';
+import { LEARNING_TOOLS, quizProgressReport, reviewDueReport, reviewPlanPrompt, studySummaryReport, weakChaptersReport } from '../core/aiLearning';
+import { appendStudyLogEntry, studyLogEntryFromArgs, studyLogPath } from '../core/aiStudyLog';
 import { loadBanks } from '../core/qbank';
 import { initializeStats } from '../core/qbankStats';
 import { cardHints } from '../core/srsCards';
 import { renderMarkdown } from '../core/markdown';
-import { CITE_LABEL, CITE_MARK, lookupQuote, verifyCitations } from '../core/citeVerify';
+import { CITE_LABEL, CITE_MARK, lookupQuote, verifyCitations, verifyQuote } from '../core/citeVerify';
+import { parseSynonymLines, setUserSynonymGroups, USER_SYNONYMS_KEY } from '../core/medSynonyms';
+import { setMedBookPageOffset } from '../storage/medStore';
 import { safeVaultPath } from '../core/vault';
 import { fuzzyFindAnchor, type AnchorHit } from '../core/aiPatch';
 import { toast } from '../core/feedback';
+import { bumpRecallHits, lookupRecall, saveRecall, type RecallEntry } from '../core/localRecall';
 import { useEsc, escThenClose } from './useEsc';
-import { IconClose, IconTrash } from './icons';
+import { IconClose, IconLattice, IconTrash } from './icons';
 import Preview from './Preview';
 
 interface Props {
@@ -81,8 +86,16 @@ const MENTION_CONTENT_LIMIT = 8_000;
 
 type Decision = 'applied' | 'rejected';
 
-/** 编辑器右键「问 AI」带进来的选段：发送时附进消息上下文，气泡里展示引用卡 */
-export type QuoteSelection = { text: string; path: string | null };
+/** 从别处「问 AI」带进来的上下文：发送时附进消息上下文，气泡里展示引用卡。
+ *  - 编辑器右键选段：只有 text + path
+ *  - 复习卡 / 错题本 / 题库：额外带 ask（预填一句话，用户可改再发）
+ *  ask 只预填、不自动发送 —— 与「先预览后写入」同一条原则：AI 动手前先让用户过一眼。 */
+export type QuoteSelection = {
+  text: string;
+  path: string | null;
+  /** 预填到输入框的建议问法（输入框已有内容时不覆盖） */
+  ask?: string;
+};
 
 /** 流式正文也吃 markdown 排版：防抖 250ms 渲染（markdown-it 懒加载，首条消息后常驻内存） */
 function useDeferredMarkdown(text: string): string {
@@ -160,7 +173,7 @@ type ChatItem =
       kind: 'proposal'; id: number; path: string; old: string; next: string;
       isNew: boolean;
       status: 'pending' | 'applied' | 'rejected' | 'stale' | 'failed';
-      /** 自动应用（「自动应用」开关 + patch 且未漂移） */
+      /** yolo 静默落盘（未漂移） */
       autoApplied?: boolean;
       drifted?: boolean;
       /** status = failed 时的写入错误信息 */
@@ -170,8 +183,10 @@ type ChatItem =
 
 interface SessionUsage { promptTokens: number; completionTokens: number; estimated: boolean }
 
-/** autonomous：自主模式——所有写入提案免确认直接落盘（漂移确认保留） */
-interface AgentPrefs { readonly: boolean; autoApply: boolean; autonomous: boolean }
+/** 只有一个开关：yolo=true 时所有写入提案免确认直接落盘（漂移确认保留）；
+ *  缺省即 read——写入先出 diff 卡片等用户点「应用」。两档工具集相同，
+ *  差别只在落盘要不要等确认，所以一个布尔就够；用枚举会多一层无用的互斥判断。 */
+interface AgentPrefs { yolo: boolean }
 
 interface AgentSession {
   id: string;
@@ -179,16 +194,19 @@ interface AgentSession {
   updatedAt: number;
   usage: SessionUsage;
   items: ChatItem[];
+  /** 陪练模式：会话级开关。开着的会话在系统提示里加陪练契约（先测后讲、一次一题） */
+  coach?: boolean;
 }
 
 const ZERO_USAGE: SessionUsage = { promptTokens: 0, completionTokens: 0, estimated: false };
-const DEFAULT_PREFS: AgentPrefs = { readonly: false, autoApply: false, autonomous: false };
+const DEFAULT_PREFS: AgentPrefs = { yolo: false };
 /** 停顿看门狗阈值：这么久没有任何流事件就认为连接卡死（模型思考会走 thinking 增量） */
 const STALL_IDLE_MS = 120_000;
 
-/** 全部工具＝笔记工具＋学习状态工具；只读模式只留检索与学习状态（写入类都以 propose_ 开头） */
+/** 全部工具＝笔记工具＋学习状态工具。两档模式都给同一套工具：
+ *  差别只在「写入要不要等用户点应用」，而不是「能不能写」——read 档若拿掉写入工具，
+ *  diff 预览＋人工确认这条主写入路径就整个消失了，那是砍功能，不是简化界面。 */
 const ALL_AGENT_TOOLS = [...NOTE_AGENT_TOOLS, ...MEDBOOK_TOOLS, ...LEARNING_TOOLS];
-const READONLY_TOOLS = ALL_AGENT_TOOLS.filter((t) => !t.name.startsWith('propose_'));
 
 /** 属性键行：`- 键: `，与 srsCards.cardHints 同口径（键 ≤12 字，无空格冒号） */
 const HEADING_LINE = /^(#{1,6})\s+(.+?)\s*$/;
@@ -297,8 +315,11 @@ function loadPrefs(): AgentPrefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return { ...DEFAULT_PREFS };
-    const p = JSON.parse(raw) as Partial<AgentPrefs>;
-    return { readonly: p.readonly === true, autoApply: p.autoApply === true, autonomous: p.autonomous === true };
+    // 旧版本存的是 { readonly, autoApply, autonomous } 三档。只把 autonomous 迁到 yolo：
+    // 老的 autoApply（仅 patch 免确认、整篇重写仍问）语义已不存在，把它当 yolo 会悄悄
+    // 放宽权限，宁可退回默认的 read 让用户自己重开一次。
+    const p = JSON.parse(raw) as Partial<AgentPrefs> & { autonomous?: boolean };
+    return { yolo: p.yolo === true || p.autonomous === true };
   } catch {
     return { ...DEFAULT_PREFS };
   }
@@ -325,10 +346,31 @@ function fmtTokens(n: number): string {
   return n < 1000 ? String(n) : `${(n / 1000).toFixed(1)}k`;
 }
 
+/** 相对时间（会话列表用）：分钟内「刚刚」，当天按小时，其余按天 */
+function fmtAgo(ts: number, now = Date.now()): string {
+  const min = Math.floor((now - ts) / 60_000);
+  if (min < 1) return '刚刚';
+  if (min < 60) return `${min} 分钟前`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} 小时前`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d} 天前`;
+  return new Date(ts).toLocaleDateString();
+}
+
 export default function AiAgentPanel({
   onClose, docs, onSave, onOpenPath, currentPath, resolveLink, quote, onQuoteConsumed,
 }: Props) {
-  useEsc(escThenClose(onClose));
+  /** 会话切换弹层开着时 Esc 只关弹层，不把整块面板带走（ref 供栈顶闭包读最新值） */
+  const switcherOpenRef = useRef(false);
+  useEsc((e) => {
+    if (switcherOpenRef.current) {
+      switcherOpenRef.current = false;
+      setSwitcherOpen(false);
+      return;
+    }
+    escThenClose(onClose)(e);
+  });
   const [settings, setSettings] = useState<AgentSettings | null>(loadSettings);
   const [settingsOpen, setSettingsOpen] = useState(() => !loadSettings());
   const [sessions, setSessions] = useState<AgentSession[]>(() => {
@@ -337,12 +379,14 @@ export default function AiAgentPanel({
   });
   const [activeId, setActiveId] = useState<string>(() => sessions[0].id);
   const [input, setInput] = useState('');
+  /** 当前输入在本地速查里命中的历史答案（命中才提示，未命中原样发送） */
+  const [recallHit, setRecallHit] = useState<RecallEntry | null>(null);
   const [running, setRunning] = useState(false);
   /** 进行中那一轮助手回复的流式正文 / 思考过程 */
   const [streamText, setStreamText] = useState('');
   const streamHtml = useDeferredMarkdown(streamText);
   const [thinkingText, setThinkingText] = useState('');
-  /** 只读 / 自动应用偏好 */
+  /** read / yolo 偏好 */
   const [prefs, setPrefs] = useState<AgentPrefs>(loadPrefs);
   /** 运行中排队的后续消息（Claudian 式：不打断，跑完自动接续） */
   const [queued, setQueued] = useState<string[]>([]);
@@ -356,6 +400,17 @@ export default function AiAgentPanel({
   const pendingQuoteRef = useRef<QuoteSelection | null>(null);
   /** 已流出的正文（含未落定部分）：停止/出错时据此保住半截回答 */
   const streamRef = useRef('');
+  /** 会话切换弹层 / 重命名行 */
+  const [switcherOpen, setSwitcherOpenState] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState('');
+  /** 视口是否贴底（state 只驱动「回到底部」按钮的显隐，跟随逻辑仍在 pinnedRef） */
+  const [atBottom, setAtBottom] = useState(true);
+
+  const setSwitcherOpen = (v: boolean) => {
+    switcherOpenRef.current = v;
+    setSwitcherOpenState(v);
+  };
 
   const active = sessions.find((s) => s.id === activeId) ?? sessions[0];
   const items = active.items;
@@ -386,6 +441,9 @@ export default function AiAgentPanel({
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   const prefsRef = useRef(prefs);
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
+  /** 活跃会话的陪练开关（排队续跑等异步路径里读最新值） */
+  const coachRef = useRef(false);
+  useEffect(() => { coachRef.current = !!active?.coach; });
   const runningRef = useRef(false);
   const queueRef = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
@@ -422,14 +480,25 @@ export default function AiAgentPanel({
     const el = scrollRef.current;
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [items.length, streamText, thinkingText, queued.length]);
-  // 消费编辑器「问 AI」带进来的选段：进入待发送区，等用户补一句话再发
+  // 消费别处「问 AI」带进来的上下文：进入待发送区，等用户补一句话再发
   useEffect(() => {
     if (quote && quote.text.trim()) {
       pendingQuoteRef.current = quote;
       setPendingQuote(quote);
+      // 带 ask 的入口（复习卡 / 错题本 / 题库）顺手把问法预填好：一次点击就能发。
+      // 直接覆盖而不是「只在空时填」：每次点「问 AI」都是一次显式动作，
+      // 留着上一次的预填会让输入框和新引用对不上（那是更糟的误导）。 */
+      if (quote.ask) setInput(quote.ask);
       onQuoteConsumed?.();
     }
   }, [quote, onQuoteConsumed]);
+  // 输入框随内容自适应高度（约 1~8 行）：单行提问时输入区更轻，长贴文也不至于把对话区挤没
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 176)}px`;
+  }, [input]);
 
   const updateActive = (patch: (s: AgentSession) => AgentSession) =>
     setSessions((cur) => cur.map((s) => (s.id === activeId ? patch(s) : s)));
@@ -437,6 +506,40 @@ export default function AiAgentPanel({
   const push = (item: ChatItem) => {
     itemsRef.current = [...itemsRef.current, item];
     updateActive((s) => ({ ...s, updatedAt: Date.now(), items: [...s.items, item] }));
+  };
+
+  /**
+   * 输入内容变化时看一眼本地速查（localStorage 一次读，内部有原始字符串缓存）。
+   * 命中只**提示**、不自动复用：缓存会过期，静默返回旧答案会让用户以为模型又答了一遍。
+   * 速查本身任何异常都不影响发送 —— 出错就当没命中。
+   */
+  useEffect(() => {
+    let hit: RecallEntry | null = null;
+    try {
+      hit = lookupRecall(input);
+    } catch {
+      hit = null;
+    }
+    setRecallHit(hit);
+  }, [input]);
+
+  /** 复用本地已有答案：不调模型，直接把历史答案落成一条助手消息（并记一次复用） */
+  const reuseRecall = () => {
+    const hit = recallHit;
+    if (!hit) return;
+    setRecallHit(null);
+    // 标记在正文最前面，用 Markdown 引用块让用户一眼看出这条不是刚生成的
+    push({
+      kind: 'msg',
+      id: idRef.current++,
+      role: 'assistant',
+      text: `> 复用本地已有答案（未重新生成）\n\n${hit.a}`,
+    });
+    try {
+      bumpRecallHits(hit.q);
+    } catch { /* 计数写不进去不影响这次复用 */ }
+    setInput('');
+    setMention(null);
   };
 
   const patchProposal = (id: number, patch: Partial<Extract<ChatItem, { kind: 'proposal' }>>) =>
@@ -504,7 +607,7 @@ export default function AiAgentPanel({
 
     if (name === 'list_notes') {
       const result = formatNoteList(docsRef.current);
-      push({ kind: 'tool', id: idRef.current++, name, summary: '浏览目录', detail: result });
+      push({ kind: 'tool', id: idRef.current++, name, summary: '全部笔记', detail: result });
       return result;
     }
     if (name === 'search_notes') {
@@ -518,13 +621,60 @@ export default function AiAgentPanel({
       const content = docsRef.current.get(path);
       if (content === undefined) return `错误：找不到笔记「${path}」。可先用 list_notes 或 search_notes 确认路径。`;
       const result = truncateForModel(content);
-      push({ kind: 'tool', id: idRef.current++, name, summary: `读取 ${path}`, detail: result });
+      push({ kind: 'tool', id: idRef.current++, name, summary: path, detail: result });
       return result;
+    }
+
+    if (name === 'read_med_book_page') {
+      const wantBook = String(args.book ?? '').trim();
+      const page = Math.floor(Number(args.page) || 0);
+      if (!wantBook || !page) return '错误：需要 book（书名关键字）与 page（页码，与检索结果一致）。';
+      try {
+        const p = await medBookPage(wantBook, page);
+        if (!p) {
+          const msg = `错误：找不到《${wantBook}》的第 ${page} 页。可先用 list_medical_books 确认书名，或用 search_medical_books 确认页码。`;
+          push({ kind: 'tool', id: idRef.current++, name, summary: '读取教材页失败', detail: msg });
+          return msg;
+        }
+        // 整页原文一并进引用核验证据池：跨段引文也能核到
+        recordBookEvidence([{
+          book: p.book, page: p.printed, endPage: 0, section: '', text: p.text,
+          chunkId: `${p.book}#page${p.pdfPage}`, score: 0,
+        }]);
+        const result = `《${p.book}》 P${p.printed}（PDF 第 ${p.pdfPage} 页）\n${truncateForModel(p.text)}`;
+        push({ kind: 'tool', id: idRef.current++, name, summary: `${p.book} P${p.printed}`, detail: result });
+        return result;
+      } catch (e) {
+        if (isAbortError(e)) throw e;
+        const msg = e instanceof Error ? e.message : String(e);
+        push({ kind: 'tool', id: idRef.current++, name, summary: '读取教材页失败', detail: msg });
+        return msg;
+      }
     }
 
     if (name === 'verify_quote') {
       const quote = String(args.quote ?? '').trim();
       if (!quote) return '错误：缺少 quote（要核验的引文）。';
+      // 教材来源：按书名（+页码）从教材库取原文核验——整页/整本出自 medStore，
+      // 不受检索结果截断与会话证据缓存的限制，跨段引文也不会误判
+      const wantBook = String(args.book ?? '').trim();
+      const wantPage = Math.floor(Number(args.page) || 0);
+      if (wantBook) {
+        const src = wantPage
+          ? await medBookPage(wantBook, wantPage)
+          : await medBookFullText(wantBook).then((b) => b && { book: b.book, printed: 0, pdfPage: 0, text: b.text });
+        if (!src) {
+          const msg = `错误：找不到来源教材${wantPage ? `「${wantBook}」第 ${wantPage} 页` : `「${wantBook}」`}。`
+            + '可先用 list_medical_books / search_medical_books 确认书名与页码。';
+          push({ kind: 'tool', id: idRef.current++, name, summary: '核验引文失败', detail: msg });
+          return msg;
+        }
+        const where = wantPage ? `《${src.book}》 P${src.printed}` : `《${src.book}》全书`;
+        const st = verifyQuote(quote, src.text);
+        const result = `${CITE_MARK[st]} ${CITE_LABEL[st]}（来源：${where}）\n引文：“${quote}”`;
+        push({ kind: 'tool', id: idRef.current++, name, summary: `核验引文（${CITE_LABEL[st]}）`, detail: result });
+        return result;
+      }
       const sources = evidenceForVerify();
       const want = String(args.path ?? '').trim();
       // 路径容错：工具结果里的 chunk_id 不带 .md 后缀，模型可能给「书名」而非「书名.md」
@@ -546,7 +696,7 @@ export default function AiAgentPanel({
       try {
         if (name === 'list_medical_books') {
           const result = formatMedBooks(await medBooksList());
-          push({ kind: 'tool', id: idRef.current++, name, summary: '医学教材清单', detail: result });
+          push({ kind: 'tool', id: idRef.current++, name, summary: '已导入教材', detail: result });
           return result;
         }
         const query = String(args.query ?? '').trim();
@@ -571,24 +721,24 @@ export default function AiAgentPanel({
 
     if (name === 'get_review_due') {
       const result = reviewDueReport([...docsRef.current.keys()], docsRef.current);
-      push({ kind: 'tool', id: idRef.current++, name, summary: '查看今日复习队列', detail: result });
+      push({ kind: 'tool', id: idRef.current++, name, summary: '今日复习队列', detail: result });
       return result;
     }
     if (name === 'get_study_summary') {
       const result = studySummaryReport([...docsRef.current.keys()], docsRef.current);
-      push({ kind: 'tool', id: idRef.current++, name, summary: '查看学习概况', detail: result });
+      push({ kind: 'tool', id: idRef.current++, name, summary: '打卡与复习卡概况', detail: result });
       return result;
     }
     if (name === 'get_weak_chapters') {
       const result = weakChaptersReport();
-      push({ kind: 'tool', id: idRef.current++, name, summary: '查看错题本薄弱章节', detail: result });
+      push({ kind: 'tool', id: idRef.current++, name, summary: '薄弱章节与错因', detail: result });
       return result;
     }
     if (name === 'get_quiz_progress') {
       try {
         const [banks, stats] = await Promise.all([loadBanks(), initializeStats()]);
         const result = quizProgressReport(banks, stats);
-        push({ kind: 'tool', id: idRef.current++, name, summary: '查看题库练习情况', detail: result });
+        push({ kind: 'tool', id: idRef.current++, name, summary: '题库进度', detail: result });
         return result;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -596,17 +746,25 @@ export default function AiAgentPanel({
       }
     }
 
-    if (name === 'propose_note_edit' || name === 'propose_note_patch' || name === 'propose_note_create' || name === 'propose_card_hints') {
-      const path = safeVaultPath(String(args.path ?? ''));
+    if (name === 'propose_note_edit' || name === 'propose_note_patch' || name === 'propose_note_create' || name === 'propose_card_hints' || name === 'propose_study_log') {
+      // 学习日志的路径与内容由代码定位/组装（今天哪篇、追加成什么样），模型只给条目字段
+      const isLog = name === 'propose_study_log';
+      const path = isLog ? studyLogPath(new Date()) : safeVaultPath(String(args.path ?? ''));
       if (!path) return '错误：路径不合法（需要库内相对路径，如 解剖/心脏.md）。';
-      const isNew = name === 'propose_note_create';
       const old = docsRef.current.get(path);
-      if (isNew && old !== undefined) return `错误：「${path}」已存在，请改用 propose_note_edit / propose_note_patch 修改它。`;
-      if (!isNew && old === undefined) return `错误：「${path}」不存在，请先用 list_notes 或 search_notes 确认路径。`;
+      const isNew = isLog ? old === undefined : name === 'propose_note_create';
+      if (!isLog) {
+        if (isNew && old !== undefined) return `错误：「${path}」已存在，请改用 propose_note_edit / propose_note_patch 修改它。`;
+        if (!isNew && old === undefined) return `错误：「${path}」不存在，请先用 list_notes 或 search_notes 确认路径。`;
+      }
 
-      // patch：锚文本唯一性校验后算出新正文；hints：小节定位后插属性键骨架；edit/create 直接用模型给的整篇
+      // patch：锚文本唯一性校验后算出新正文；hints：小节定位后插属性键骨架；log：追加小节；edit/create 直接用模型给的整篇
       let next: string;
-      if (name === 'propose_card_hints') {
+      if (isLog) {
+        const entry = studyLogEntryFromArgs(args);
+        if (typeof entry === 'string') return entry;
+        next = appendStudyLogEntry(old, entry, new Date());
+      } else if (name === 'propose_card_hints') {
         const heading = String(args.heading ?? '').trim();
         const keys = [...new Set((Array.isArray(args.keys) ? args.keys : []).map((k) => String(k).trim()).filter(Boolean))];
         if (!heading) return '错误：缺少 heading（小节标题）。先 read_note，再原样复制标题（不含 # 号）。';
@@ -644,10 +802,9 @@ export default function AiAgentPanel({
         isNew, status: 'pending',
       });
 
-      // 「自动应用」只对 patch 生效；「自主模式」下所有写入都免确认。
-      // 漂移（笔记被用户改过）永远要人工确认，任何模式下都不悄悄覆盖。
-      const autoOk = prefsRef.current.autonomous
-        || (prefsRef.current.autoApply && !isNew && name === 'propose_note_patch');
+      // yolo：所有写入都免确认。漂移（笔记被用户改过）永远要人工确认，
+      // 任何模式下都不悄悄覆盖用户的手改。
+      const autoOk = prefsRef.current.yolo;
       let decision: Decision;
       let drifted = false;
       if (autoOk) {
@@ -657,7 +814,7 @@ export default function AiAgentPanel({
       }
 
       // 应用前核对：笔记在提案期间被用户改过（新建则是路径被占了）→ 显式确认覆盖。
-      // 自动应用模式下同样要停下来问，绝不悄悄覆盖用户的手改。
+      // yolo 下同样要停下来问，绝不悄悄覆盖用户的手改。
       if (decision === 'applied' && (docsRef.current.get(path) ?? null) !== (old ?? null)) {
         drifted = true;
         patchProposal(itemId, { status: 'pending', drifted: true });
@@ -683,9 +840,10 @@ export default function AiAgentPanel({
       docsRef.current = new Map(docsRef.current).set(path, next);
       patchProposal(itemId, { status: 'applied', autoApplied: autoOk && !drifted });
       if (autoOk && !drifted) {
-        // 自动应用/自主模式静默落盘：必须让用户看见「笔记已经变了」。
+        // yolo 静默落盘：必须让用户看见「笔记已经变了」。
         toast(isNew ? `已自动创建笔记「${path}」` : `已自动应用对「${path}」的修改`, 'ok', 4200);
       }
+      if (isLog) return `已把这次学习写入学习日志「${path}」。`;
       return isNew
         ? `已在「${path}」创建笔记。`
         : `已把修改写入「${path}」。`;
@@ -714,11 +872,13 @@ export default function AiAgentPanel({
     setActiveId(s.id);
   };
 
-  const deleteSession = () => {
-    // 会话一旦删掉就找不回来（对话记录不随笔记进历史版本），有内容时先问一句
-    if (active.items.length
-      && !window.confirm(`删除会话「${active.title}」？这段对话记录会一起删除，无法恢复。`)) return;
-    const rest = sessions.filter((s) => s.id !== activeId);
+  /** 删除任意会话（会话列表里逐条删）；删光时补一个新会话 */
+  const removeSession = (id: string) => {
+    const victim = sessions.find((s) => s.id === id);
+    if (!victim) return;
+    if (victim.items.length
+      && !window.confirm(`删除会话「${victim.title}」？这段对话记录会一起删除，无法恢复。`)) return;
+    const rest = sessions.filter((s) => s.id !== id);
     if (!rest.length) {
       const f = freshSession();
       setSessions([f]);
@@ -726,7 +886,29 @@ export default function AiAgentPanel({
       return;
     }
     setSessions(rest);
-    setActiveId(rest[rest.length - 1].id);
+    if (id === activeId) setActiveId(rest[rest.length - 1].id);
+  };
+
+  const renameSession = (id: string, title: string) => {
+    setRenamingId(null);
+    const t = title.trim();
+    if (!t) return;
+    setSessions((cur) => cur.map((s) => (s.id === id ? { ...s, title: t.slice(0, 40) } : s)));
+  };
+
+  /** 陪练模式开关（会话级）：开着的会话系统提示里加学习契约，界面亮陪练条 */
+  const toggleCoach = () => {
+    const next = !active.coach;
+    coachRef.current = next;
+    updateActive((s) => ({ ...s, coach: next }));
+  };
+
+  /** 结束陪练：让模型把薄弱点写进学习日志再收尾，然后自动退出陪练模式 */
+  const endCoach = () => {
+    if (runningRef.current) return;
+    coachRef.current = false;
+    updateActive((s) => ({ ...s, coach: false }));
+    void sendText('结束本次陪练：先总结这次暴露的薄弱点（带 [[双链]]），再用 propose_study_log 写进今天的学习日志，最后用一句话收尾。');
   };
 
   /** 真正发起一轮对话（排队续跑也走这里） */
@@ -751,7 +933,10 @@ export default function AiAgentPanel({
       title: s.items.some((i) => i.kind === 'msg' && i.role === 'user') ? s.title : text.slice(0, 24),
       updatedAt: Date.now(),
       items: [...s.items, userItem],
+      // 发送 /陪练 即进入陪练模式（会话级，界面亮起陪练条；发 /陪练 之外的消息不退出）
+      coach: text.trimStart().startsWith('/陪练') ? true : s.coach,
     }));
+    if (text.trimStart().startsWith('/陪练')) coachRef.current = true;
     runningRef.current = true;
     setRunning(true);
     streamRef.current = '';
@@ -761,6 +946,8 @@ export default function AiAgentPanel({
     abortRef.current = ctrl;
     let wasAborted = false;
     let thinkAccum = '';
+    // 本轮助手正文累计（工具轮之间的过渡语也算进来，避免把最后一句「已写入…」当成答案存进速查）
+    let answerAccum = '';
     // 停顿看门狗：连接卡死时流不会给出任何事件（这不是「模型在思考」，思考会走 thinking 增量），
     // 面板会一直停在「停止」按钮上等下去。任何事件都会刷新 lastEventRef。
     let stalled = false;
@@ -788,13 +975,11 @@ export default function AiAgentPanel({
     }
 
     const agentMd = docsRef.current.get(AGENT_MD);
-    const sys = buildNoteSystemPrompt(currentPath, agentMd ? truncateForModel(agentMd, 4_000) : null)
-      + (prefsRef.current.readonly
-        ? '\n只读模式：本次会话没有提供任何写入工具，只做阅读、检索与讨论。'
-        : prefsRef.current.autonomous
-          ? '\n自主模式：写入操作免确认直接生效（自动存历史版本，可回溯）。仍必须先 read_note 拿最新原文再动手；'
-            + '发现笔记被用户改过会停下询问；改动保持最小，删除或整篇重写要格外谨慎。'
-          : '');
+    const sys = buildNoteSystemPrompt(currentPath, agentMd ? truncateForModel(agentMd, 4_000) : null, coachRef.current)
+      + (prefsRef.current.yolo
+        ? '\nyolo 模式：写入操作免确认直接生效（自动存历史版本，可回溯）。仍必须先 read_note 拿最新原文再动手；'
+          + '发现笔记被用户改过会停下询问；改动保持最小，删除或整篇重写要格外谨慎。'
+        : '\nread 模式：写入一律先出 diff 卡片等用户点「应用」，不要假设已经写入；提案被拒就换方向，别重复提交。');
     const wire: WireMessage[] = [
       { role: 'system', content: sys },
       ...history,
@@ -804,7 +989,7 @@ export default function AiAgentPanel({
     const agentOpts: RunAgentOptions = {
       settings: settingsRef.current,
       messages: wire,
-      tools: prefsRef.current.readonly ? READONLY_TOOLS : ALL_AGENT_TOOLS,
+      tools: ALL_AGENT_TOOLS,
       executeTool,
       signal: ctrl.signal,
       onDelta: (t) => { lastEventRef.current = Date.now(); streamRef.current += t; setStreamText(streamRef.current); },
@@ -821,7 +1006,13 @@ export default function AiAgentPanel({
           setThinkingText('');
         }
         if (msg.content) {
+          answerAccum = answerAccum ? `${answerAccum}\n\n${msg.content}` : msg.content;
           push({ kind: 'msg', id: idRef.current++, role: 'assistant', text: msg.content });
+          // 本地速查：存下这一问一答，下次同样的输入可直接复用、不调模型。
+          // 问题用用户原始输入（含 /命令 原文），与输入框里 lookupRecall 用的键同源；写失败不影响回复。
+          try {
+            saveRecall(text, answerAccum);
+          } catch { /* 速查写不进去只影响下次能否复用，不能影响这一轮 */ }
         }
         streamRef.current = '';
         setStreamText('');
@@ -926,33 +1117,89 @@ export default function AiAgentPanel({
     : '';
 
   return (
-    <div className="agent-panel">
+    <div className={`agent-panel${pendingQuote ? ' has-quote' : ''}`}>
       <div className="ai-header agent-header">
         <div className="agent-brand">
-          <span className="agent-brand-dot" aria-hidden="true" />
+          <span className="agent-brand-mark" aria-hidden="true"><IconLattice size={15} /></span>
           <span className="agent-brand-name">AI 笔记</span>
         </div>
-        <select
-          className="agent-session-select"
-          value={activeId}
-          onChange={(e) => setActiveId(e.target.value)}
-          disabled={running}
-          aria-label="切换会话"
-        >
-          {[...sessions].sort((a, b) => b.updatedAt - a.updatedAt).map((s) => (
-            <option key={s.id} value={s.id}>{s.title}</option>
-          ))}
-        </select>
-        <button className="btn-small" onClick={createSession} disabled={running}>新对话</button>
         <button
-          className="btn-icon"
-          onClick={deleteSession}
-          disabled={running || sessions.length <= 1}
-          aria-label="删除当前会话"
-          title="删除当前会话"
+          type="button"
+          className="agent-switcher-btn"
+          onClick={() => setSwitcherOpen(!switcherOpen)}
+          disabled={running}
+          aria-expanded={switcherOpen}
+          aria-haspopup="dialog"
+          title="切换会话"
         >
-          <IconTrash />
+          <span className="agent-switcher-title">{active.title}</span>
+          <span className="agent-switcher-caret" aria-hidden="true">▾</span>
         </button>
+        {switcherOpen && (
+          <>
+            <div className="agent-switcher-overlay" onClick={() => setSwitcherOpen(false)} />
+            <div className="agent-switcher" role="dialog" aria-label="会话列表">
+              <div className="agent-switcher-list">
+                {[...sessions].sort((a, b) => b.updatedAt - a.updatedAt).map((s) => (
+                  <div key={s.id} className={`agent-session-row ${s.id === activeId ? 'on' : ''}`}>
+                    {renamingId === s.id ? (
+                      <input
+                        className="agent-session-rename"
+                        value={renameText}
+                        autoFocus
+                        maxLength={40}
+                        onChange={(e) => setRenameText(e.target.value)}
+                        onBlur={() => renameSession(s.id, renameText)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') renameSession(s.id, renameText);
+                          if (e.key === 'Escape') setRenamingId(null);
+                        }}
+                        aria-label="重命名会话"
+                      />
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="agent-session-main"
+                          onClick={() => { setActiveId(s.id); setSwitcherOpen(false); }}
+                        >
+                          <span className="agent-session-title">{s.title}</span>
+                          <span className="agent-session-meta">
+                            {s.coach ? '陪练 · ' : ''}{s.items.filter((i) => i.kind === 'msg').length} 条 · {fmtAgo(s.updatedAt)}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-session-act"
+                          title="重命名"
+                          onClick={() => { setRenamingId(s.id); setRenameText(s.title); }}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          className="agent-session-act danger"
+                          title="删除会话"
+                          disabled={sessions.length <= 1}
+                          onClick={() => removeSession(s.id)}
+                        >
+                          <IconTrash />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="agent-switcher-new"
+                onClick={() => { createSession(); setSwitcherOpen(false); }}
+              >
+                ＋ 新对话
+              </button>
+            </div>
+          </>
+        )}
         <button
           className="btn-small"
           onClick={() => setSettingsOpen((v) => !v)}
@@ -962,6 +1209,18 @@ export default function AiAgentPanel({
         </button>
         <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
       </div>
+
+      {active.coach && (
+        <div className="agent-coach" role="status">
+          <span className="agent-coach-dot" aria-hidden="true" />
+          <span className="agent-coach-text">
+            <strong>陪练中</strong>一次一题 · 答错先给提示 · 讲完必验证
+          </span>
+          <button type="button" className="agent-coach-end" onClick={endCoach} disabled={running}>
+            结束并写日志
+          </button>
+        </div>
+      )}
 
       {settingsOpen && (
         <SettingsForm
@@ -974,59 +1233,75 @@ export default function AiAgentPanel({
         />
       )}
 
-      <div
-        className="agent-log"
-        ref={scrollRef}
-        role="log"
-        aria-live="polite"
-        aria-busy={running}
-        aria-label="AI 笔记对话"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        }}
-      >
+      <div className="agent-body">
+        <div
+          className={`agent-log${!items.length && !running ? ' is-empty' : ''}`}
+          ref={scrollRef}
+          role="log"
+          aria-live="polite"
+          aria-busy={running}
+          aria-label="AI 笔记对话"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            pinnedRef.current = pinned;
+            setAtBottom(pinned);
+          }}
+        >
         {!items.length && !running && (
           <div className="agent-empty">
             <p className="agent-empty-title">让 AI 陪你把知识学扎实。</p>
-            <p className="muted">
-              出题自测、费曼追问、串联双链、整理笔记——写入类操作都会先给你<strong>对比预览</strong>，点「应用」才落盘。
-            </p>
+            {/* 出处一行：从主页面 hero 移到这里——「谁在做这件事」只在第一次打开
+                这个面板时值得占位，进过一轮对话后它就只是噪音。 */}
+            <p className="agent-empty-tagline">基于 pi agent 打造的学习助手</p>
             <div className="agent-suggestions">
               {(currentPath
                 ? [
-                    { insert: `/出题 ${currentPath}`, label: '出题自测', desc: '3-5 道题，先答后评' },
-                    { insert: `/费曼 ${currentPath}`, label: '费曼检验', desc: '你讲我挑错，讲透为止' },
-                    { insert: `/追问 ${currentPath}`, label: '追问检验', desc: '为什么/怎么解释，答完才纠偏' },
-                    { insert: `/串联 ${currentPath}`, label: '串联双链', desc: '找出该连未连的笔记' },
+                    { insert: `/陪练 ${currentPath}`, label: '陪练模式',
+                      tip: '先测后讲：一次只问一题，答错先给提示再揭示\n告一段落时把薄弱点写进今天的学习日志' },
+                    { insert: `/出题 ${currentPath}`, label: '出题自测',
+                      tip: '出 3-5 道题（问答 / 情景 / 鉴别）\n先只给题目，作答后逐题点评' },
+                    { insert: `/费曼 ${currentPath}`, label: '费曼检验',
+                      tip: '你先用自己的话讲一遍\nAI 扮演较真的同学挑错、逐条追问' },
+                    { insert: `/追问 ${currentPath}`, label: '追问检验',
+                      tip: '先给 3-5 个「为什么 / 怎么区分」的追问，不给答案\n作答后指出错漏并补标准说法' },
+                    { insert: `/串联 ${currentPath}`, label: '串联双链',
+                      tip: '在库里找相关笔记，列出该互链的笔记与理由\n确认后逐篇补 [[双链]]' },
                   ]
                 : [
-                    { insert: '/出题 ', label: '出题自测', desc: '围绕任意主题出题' },
-                    { insert: '/费曼 ', label: '费曼检验', desc: '用自己的话讲一遍' },
-                    { insert: '/追问 ', label: '追问检验', desc: '先答追问，再看标准说法' },
-                    { insert: '/错题归因 ', label: '错题归因', desc: '按错因分派补救动作' },
-                    { insert: '今天我该先复习什么？', label: '今日计划', desc: '按到期卡给建议' },
+                    { insert: '/陪练 ', label: '陪练模式',
+                      tip: '先测后讲：一次只问一题，答错先给提示再揭示\n告一段落时把薄弱点写进今天的学习日志' },
+                    { insert: '/出题 ', label: '出题自测',
+                      tip: '出 3-5 道题（问答 / 情景 / 鉴别）\n先只给题目，作答后逐题点评' },
+                    { insert: '/费曼 ', label: '费曼检验',
+                      tip: '你先用自己的话讲一遍\nAI 扮演较真的同学挑错、逐条追问' },
+                    { insert: '/错题归因 ', label: '错题归因',
+                      tip: '先看错题本的错因分布与薄弱章节\n把错题归到四类错因，再按错因分派补救' },
+                    {
+                      // 调度由代码算好直接注入（Pion 式分工）：状态就摆在输入框里，教练只管教学
+                      insert: reviewPlanPrompt([...docsRef.current.keys()], docsRef.current),
+                      label: '今日计划',
+                      tip: '把到期复习卡与薄弱章节直接交给 AI\n由它挑 1-2 篇先复习，并对第一篇出题',
+                    },
                   ]
               ).map((s) => (
-                <button
-                  key={s.label}
-                  type="button"
-                  className="agent-starter"
-                  onClick={() => {
-                    setInput(s.insert);
-                    textareaRef.current?.focus();
-                  }}
-                >
-                  <span className="agent-starter-label">{s.label}</span>
-                  <span className="agent-starter-desc" aria-hidden="true">{s.desc}</span>
-                </button>
+                /* 一行 = 入口 + 常驻气泡。气泡文字不放进 <button>：按钮的可访问名必须
+                   保持只有 label（读屏与测试都按「费曼检验」这样的短名字找它）。 */
+                <div className="agent-entry" key={s.label}>
+                  <button
+                    type="button"
+                    className="agent-starter"
+                    onClick={() => {
+                      setInput(s.insert);
+                      textareaRef.current?.focus();
+                    }}
+                  >
+                    <span className="agent-starter-label">{s.label}</span>
+                  </button>
+                  <span className="agent-bubble">{s.tip}</span>
+                </div>
               ))}
             </div>
-            <p className="muted">
-              输入 <code>@</code> 引用一篇笔记 · 输入 <code>/</code> 用命令（内置学习模板，<code>{CMD_DIR}</code> 下同名笔记可覆盖）·
-              建一篇 <code>{AGENT_MD}</code> 写下长期要求
-              {currentPath && <>· 当前打开：<code>{currentPath}</code></>}
-            </p>
           </div>
         )}
         {items.map((item) => {
@@ -1054,7 +1329,7 @@ export default function AiAgentPanel({
           if (item.kind === 'tool') {
             return (
               <details key={item.id} className="agent-tool">
-                <summary>{toolIcon(item.name)} {item.summary}</summary>
+                <summary><span className="agent-tool-tag">{toolIcon(item.name)}</span>{item.summary}</summary>
                 <pre className="agent-tool-detail">{item.detail}</pre>
               </details>
             );
@@ -1062,7 +1337,7 @@ export default function AiAgentPanel({
           if (item.kind === 'thinking') {
             return (
               <details key={item.id} className="agent-thinking">
-                <summary>思考过程</summary>
+                <summary><span className="agent-tool-tag">思考</span>推理过程</summary>
                 <div className="agent-thinking-body">{item.text}</div>
               </details>
             );
@@ -1125,6 +1400,9 @@ export default function AiAgentPanel({
         ) : (
           <div className="agent-msg assistant streaming">{streamText}</div>
         ))}
+        {running && !streamText && !thinkingText && (
+          <div className="agent-typing" aria-label="正在准备回复"><span /><span /><span /></div>
+        )}
         {queued.map((q, i) => (
           <div key={`queued-${i}`} className="agent-queued">
             <span className="agent-queued-text">{q}</span>
@@ -1140,6 +1418,22 @@ export default function AiAgentPanel({
             </button>
           </div>
         ))}
+        </div>
+        {!atBottom && (
+          <button
+            type="button"
+            className="agent-jump"
+            aria-label="回到底部"
+            onClick={() => {
+              pinnedRef.current = true;
+              setAtBottom(true);
+              const el = scrollRef.current;
+              if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+            }}
+          >
+            ↓
+          </button>
+        )}
       </div>
 
       <div className="agent-input">
@@ -1176,86 +1470,103 @@ export default function AiAgentPanel({
             ))}
           </div>
         )}
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => {
-            const v = e.target.value;
-            setInput(v);
-            syncMention(v, e.target.selectionStart ?? 0);
-          }}
-          onKeyUp={(e) => { caretRef.current = e.currentTarget.selectionStart ?? 0; }}
-          onClick={(e) => { caretRef.current = e.currentTarget.selectionStart ?? 0; }}
-          onKeyDown={(e) => {
-            if (mention && mentionMatches.length) {
-              if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setMentionIdx((i) => (i + 1) % mentionMatches.length);
-                return;
-              }
-              if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setMentionIdx((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
-                return;
-              }
-              if (e.key === 'Enter' || e.key === 'Tab') {
-                e.preventDefault();
-                selectMention(mentionMatches[mentionIdx]);
-                return;
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation(); // 只关菜单，不关面板
-                setMention(null);
-                return;
-              }
-            }
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={settingsValid ? '让 AI 帮你查找或整理笔记…（@ 引用笔记，/ 用命令）' : '先在「设置」里配置模型服务…'}
-          rows={3}
-          aria-label="对 AI 笔记说点什么"
-        />
-        {running ? (
-          <button className="btn-small agent-stop" onClick={stop}>停止</button>
-        ) : (
-          <button className="btn-primary agent-send" onClick={submit} disabled={!input.trim() || !settingsValid}>
-            发送
-          </button>
+        {recallHit && (
+          <div className="agent-recall" role="status">
+            <span className="agent-recall-text">
+              这台设备上已有这条问题的答案（{new Date(recallHit.at).toLocaleDateString()} 存下
+              {recallHit.hits > 0 ? ` · 已复用 ${recallHit.hits} 次` : ''}）——复用可省一次调用，但内容可能已过时，需要重新生成时点右侧。
+            </span>
+            <button className="btn-small" onClick={reuseRecall}>复用上次答案</button>
+            <button className="btn-small" onClick={() => setRecallHit(null)}>重新生成</button>
+          </div>
         )}
+        <div className="agent-composer">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => {
+              const v = e.target.value;
+              setInput(v);
+              syncMention(v, e.target.selectionStart ?? 0);
+            }}
+            onKeyUp={(e) => { caretRef.current = e.currentTarget.selectionStart ?? 0; }}
+            onClick={(e) => { caretRef.current = e.currentTarget.selectionStart ?? 0; }}
+            onKeyDown={(e) => {
+              if (mention && mentionMatches.length) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setMentionIdx((i) => (i + 1) % mentionMatches.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setMentionIdx((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
+                  return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault();
+                  selectMention(mentionMatches[mentionIdx]);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  e.stopPropagation(); // 只关菜单，不关面板
+                  setMention(null);
+                  return;
+                }
+              }
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder={settingsValid ? '问点什么…（@ 引用笔记，/ 用命令）' : '先在「设置」里配置模型服务…'}
+            rows={1}
+            aria-label="对 AI 笔记说点什么"
+          />
+          <div className="agent-composer-foot">
+            {running ? (
+              <button className="btn-small agent-stop" onClick={stop}>停止</button>
+            ) : (
+              <button className="btn-primary agent-send" onClick={submit} disabled={!input.trim() || !settingsValid}>
+                发送
+              </button>
+            )}
+          </div>
+        </div>
       </div>
       <div className="agent-prefs">
         <button
-          className={`pref-chip ${prefs.readonly ? 'on' : ''}`}
-          onClick={() => setPrefs((p) => ({ ...p, readonly: !p.readonly }))}
-          aria-pressed={prefs.readonly}
-          title="只读模式：不提供写入工具，只做阅读、检索与讨论"
+          className={`pref-chip ${active.coach ? 'on' : ''}`}
+          onClick={toggleCoach}
+          aria-pressed={!!active.coach}
+          title="陪练模式：先测后讲、一次只问一题、答错先给提示；顶部会出现陪练条，学完一键结束并写学习日志"
         >
-          只读
+          陪练
+        </button>
+        {/* 两档模式：read 是默认态，yolo 要显式点开并确认一次。
+            用两个互斥 chip 而不是下拉或开关，是因为「当前在哪一档」必须一眼可见——
+            写入权限的档位猜错一次就是一次误改。 */}
+        <button
+          className={`pref-chip ${prefs.yolo ? '' : 'on'}`}
+          onClick={() => setPrefs({ yolo: false })}
+          aria-pressed={!prefs.yolo}
+          title="read：写入前先给你看 diff，点「应用」才落盘"
+        >
+          read
         </button>
         <button
-          className={`pref-chip ${prefs.autoApply ? 'on' : ''}`}
-          onClick={() => setPrefs((p) => ({ ...p, autoApply: !p.autoApply }))}
-          aria-pressed={prefs.autoApply}
-          title="自动应用定点修改（patch），diff 仍会显示；整篇重写与新建仍需确认，笔记被改过时仍会先询问"
-        >
-          自动应用
-        </button>
-        <button
-          className={`pref-chip ${prefs.autonomous ? 'on' : ''}`}
+          className={`pref-chip ${prefs.yolo ? 'on' : ''}`}
           onClick={() => {
-            if (prefs.autonomous) { setPrefs((p) => ({ ...p, autonomous: false })); return; }
-            if (window.confirm('开启自主模式后，AI 的新建与修改将免确认直接写入（自动进历史版本，可回溯）。笔记被你改过时仍会先询问。确定开启吗？')) {
-              setPrefs((p) => ({ ...p, autonomous: true }));
+            if (prefs.yolo) return;
+            if (window.confirm('切到 yolo 后，AI 的新建与修改免确认直接写入（自动进历史版本，可回溯）。笔记被你改过时仍会先询问。确定切换吗？')) {
+              setPrefs({ yolo: true });
             }
           }}
-          aria-pressed={prefs.autonomous}
-          title="自主模式：所有写入提案免确认直接落盘（历史版本可回溯；笔记被改过时仍会先询问）"
+          aria-pressed={prefs.yolo}
+          title="yolo：所有写入提案免确认直接落盘（历史版本可回溯；笔记被改过时仍会先询问）"
         >
-          自主
+          yolo
         </button>
         {usageText && (
           <span
@@ -1266,23 +1577,20 @@ export default function AiAgentPanel({
           </span>
         )}
       </div>
-      <p className="ai-hint muted">
-        修改笔记默认需你确认后才会写入（「自主」模式下免确认），并自动存入历史版本。会话与配置只保存在本机浏览器；消息内容会发送给你配置的模型服务商，请勿包含患者信息等敏感数据。
-      </p>
     </div>
   );
 }
 
 function toolIcon(name: string): string {
   if (name === 'list_notes') return '目录';
-  if (name === 'search_notes') return '搜索';
+  if (name === 'search_notes') return '检索';
   if (name === 'read_note') return '读取';
   if (name === 'get_review_due') return '复习';
-  if (name === 'get_study_summary') return '概况';
+  if (name === 'get_study_summary') return '状态';
   if (name === 'get_weak_chapters') return '错题';
   if (name === 'get_quiz_progress') return '题库';
-  if (name === 'list_medical_books' || name === 'search_medical_books') return '教材';
-  if (name === 'verify_quote') return '核验';
+  if (name === 'list_medical_books' || name === 'search_medical_books' || name === 'read_med_book_page') return '教材';
+  if (name === 'verify_quote') return '引文';
   if (name === 'propose_card_hints') return '提示键';
   return '工具';
 }
@@ -1302,11 +1610,18 @@ function SettingsForm({ initial, onSaved, onCancel }: {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [models, setModels] = useState<string[]>([]);
 
-  // 医学教材库：本机索引的管理（导入 / 清单 / 删除）
+  // 医学教材库：本机索引的管理（导入 / 清单 / 删除 / 页码偏移）
   const [medBooks, setMedBooks] = useState<MedBookMeta[]>([]);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState('');
   const medFileRef = useRef<HTMLInputElement>(null);
+  /** 文本层抽取失败的书（多为扫描版）：留着手柄供「OCR 重新导入」 */
+  const failedFilesRef = useRef<File[]>([]);
+  const [canOcr, setCanOcr] = useState(false);
+  // 用户自定义等价词组：设置页编辑，blur 时生效并持久化
+  const [synText, setSynText] = useState(() => {
+    try { return localStorage.getItem(USER_SYNONYMS_KEY) ?? ''; } catch { return ''; }
+  });
 
   const refreshMedBooks = async () => setMedBooks(await medBookRecords());
   useEffect(() => {
@@ -1315,14 +1630,19 @@ function SettingsForm({ initial, onSaved, onCancel }: {
     return () => { alive = false; };
   }, []);
 
-  /** 导入教材 PDF：convert/pdf.js 体量大，动态引入；逐个解析并入库，扫描件会失败但不断批 */
-  const importMedBooks = async (files: File[]) => {
+  /** 导入教材 PDF：convert/pdf.js 体量大，动态引入；逐个解析并入库，扫描件在 ocr 开启时走 OCR 回退 */
+  const importMedBooks = async (files: File[], ocr = false) => {
     if (!files.length || importing) return;
     setImporting(true);
     setImportMsg('');
     try {
       const { importMedPdfFiles } = await import('../core/medImport');
-      const res = await importMedPdfFiles(files, (p) => setImportMsg(`${p.label}（${p.done}/${p.total}）`));
+      const res = await importMedPdfFiles(files, (p) => setImportMsg(`${p.label}（${p.done}/${p.total}）`), { ocr });
+      const failedFiles = res.failed
+        .map((f) => files.find((x) => x.name === f.name))
+        .filter((x): x is File => !!x);
+      failedFilesRef.current = failedFiles;
+      setCanOcr(failedFiles.length > 0);
       const parts = [`已导入 ${res.imported.length} 本`];
       if (res.overwritten.length) {
         parts.push(`覆盖同名 ${res.overwritten.length} 本：${res.overwritten.join('、')}`);
@@ -1330,6 +1650,7 @@ function SettingsForm({ initial, onSaved, onCancel }: {
       if (res.failed.length) {
         parts.push(`${res.failed.length} 本失败：${res.failed.map((f) => f.name).join('、')}`);
       }
+      for (const w of res.warnings) parts.push(w);
       setImportMsg(parts.join('；'));
       await refreshMedBooks();
     } catch (e) {
@@ -1337,6 +1658,17 @@ function SettingsForm({ initial, onSaved, onCancel }: {
     } finally {
       setImporting(false);
     }
+  };
+
+  /** 页码偏移 = PDF 物理页 − 印刷页（前言/目录的页数）；留空按 0。检索结果据此直接报印刷页码 */
+  const commitOffset = async (name: string, raw: string) => {
+    const v = raw.trim();
+    const n = v === '' ? 0 : Math.floor(Number(v));
+    if (!Number.isFinite(n) || n < 0) return;
+    try {
+      await setMedBookPageOffset(name, n);
+      await refreshMedBooks();
+    } catch { /* 教材可能刚被删除 */ }
   };
 
   const deleteMedBook = async (name: string) => {
@@ -1453,6 +1785,15 @@ function SettingsForm({ initial, onSaved, onCancel }: {
           >
             {importing ? '导入中…' : '导入教材 PDF'}
           </button>
+          {canOcr && !importing && (
+            <button
+              className="btn-small"
+              onClick={() => void importMedBooks(failedFilesRef.current, true)}
+              title="扫描版 PDF 没有文字层，走本地 OCR（每页约 2~5 秒，单次上限 30 页）"
+            >
+              用 OCR 导入失败的书
+            </button>
+          )}
           <span className="muted">{medBooks.length ? `已导入 ${medBooks.length} 本` : '尚未导入'}</span>
           <input
             ref={medFileRef}
@@ -1473,6 +1814,16 @@ function SettingsForm({ initial, onSaved, onCancel }: {
               <li key={b.name}>
                 <span className="agent-medbooks-name" title={`${b.chars.toLocaleString()} 字`}>{b.name}</span>
                 <span className="muted">{b.pages} 页</span>
+                <label className="agent-medbooks-offset" title="页码偏移 = PDF 物理页 − 原书印刷页（即前言/目录的页数）。填好后检索结果直接报印刷页码，引用更准确。">
+                  偏移
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    defaultValue={b.pageOffset ?? 0}
+                    onBlur={(e) => void commitOffset(b.name, e.target.value)}
+                  />
+                </label>
                 <button
                   className="agent-medbooks-del"
                   title="删除这本教材索引"
@@ -1485,13 +1836,34 @@ function SettingsForm({ initial, onSaved, onCancel }: {
           </ul>
         )}
       </div>
+      <label className="agent-field">
+        <span>自定义等价词组（可选，每行一组、组内词用空格分隔，搜索与教材检索通用）</span>
+        <textarea
+          value={synText}
+          rows={3}
+          spellCheck={false}
+          placeholder={'如：\n支扩 支气管扩张\nRTA 肾小管酸中毒'}
+          onChange={(e) => setSynText(e.target.value)}
+          onBlur={() => {
+            const groups = parseSynonymLines(synText);
+            setUserSynonymGroups(groups);
+            try { localStorage.setItem(USER_SYNONYMS_KEY, JSON.stringify(groups)); } catch { /* 存储不可用忽略 */ }
+          }}
+        />
+      </label>
       <p className="agent-settings-hint muted">
-        导入的教材只存在本机（浏览器 IndexedDB），助手用 list_medical_books / search_medical_books 检索。
-        页码按 PDF 物理页计（从封面第 1 页数起），可能与原书印刷页码相差前言/目录的页数。
-        扫描版 PDF（无文字层）无法导入，需先 OCR。
+        导入的教材只存在本机（浏览器 IndexedDB），助手用 list_medical_books / search_medical_books / read_med_book_page 查阅。
+        页码默认按 PDF 物理页计（从封面第 1 页数起），在上面的「偏移」里填前言/目录页数即可换成原书印刷页码。
+        扫描版 PDF（无文字层）普通导入会失败，可用「用 OCR 导入失败的书」走本地识别（较慢）。
       </p>
       {importMsg && <p className="agent-settings-hint muted">{importMsg}</p>}
       {hint && <p className="agent-settings-hint muted">{hint}</p>}
+      {/* 合规提示从对话区底部移到这里：它是「关于这个助手怎么工作」的说明，
+          每次打开面板都占一行是白占地方，放在设置里按需查阅即可。 */}
+      <p className="agent-settings-hint muted">
+        写入默认需你确认（yolo 模式除外），自动存入历史版本；会话与配置只保存在本机。
+        消息会发送给你配置的模型服务商，请勿包含患者信息等敏感数据。
+      </p>
       <div className="agent-settings-actions">
         <button className="btn-small" onClick={() => void test()} disabled={testing || !valid}>
           {testing ? '测试中…' : '测试连接'}

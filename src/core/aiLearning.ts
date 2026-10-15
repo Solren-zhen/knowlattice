@@ -170,3 +170,20 @@ export function quizProgressReport(banks: QuizBank[], stats: StatsMap, now = Dat
     ...(due.length ? ['今日待复习最多的题库：', ...due] : []),
   ].join('\n');
 }
+
+/**
+ * 今日计划的提示词：调度由代码算好直接注入（到期卡 + 错题本），教练只负责教学。
+ * 不走工具——快速开始按钮按下时状态就在输入框里了，模型不必先调 get_review_due
+ * 才知道今天有什么，省一轮工具调用，也避免模型偷懒不查就凭空建议。
+ */
+export function reviewPlanPrompt(paths: string[], docs: Map<string, string>): string {
+  return [
+    '帮我校准今天的学习安排。下面的学习状态是刚算好的，不用再调 get_review_due / get_weak_chapters：',
+    '',
+    reviewDueReport(paths, docs),
+    '',
+    weakChaptersReport(),
+    '',
+    '请从中挑最值得先复习的 1-2 篇并说明理由，然后对第一篇出题自测（先只给题目，等我作答）。',
+  ].join('\n');
+}

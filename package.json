@@ -14,7 +14,9 @@
     "preview": "vite preview",
     "pack": "node scripts/pack.mjs",
     "predev": "node scripts/copy-pdf-worker.mjs",
-    "tauri": "node scripts/tauri.mjs"
+    "tauri": "node scripts/tauri.mjs",
+    "tauri:build:win": "node scripts/tauri.mjs build --bundles nsis",
+    "tauri:build:mac": "node scripts/tauri.mjs build --bundles app,dmg"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

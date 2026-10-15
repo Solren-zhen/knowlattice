@@ -14,6 +14,8 @@ import {
   filterPool, interleaveByChapter, sortByChapter, weightOf, type ComposeRules,
 } from '../qbankCompose';
 import type { QStat, StatsMap } from '../qbankStats';
+import type { StarMap } from '../qbankStarred';
+import { buildTagContext } from '../qbankTags';
 
 const NOW = Date.UTC(2026, 0, 15, 9, 0, 0);
 const DAY = 86_400_000;
@@ -109,6 +111,55 @@ describe('qbankCompose · 过滤', () => {
 
   it('空章节数组 = 全部章节（不是"一章都不要"）', () => {
     expect(filterPool(bank.questions, rules({ chapters: [] }), {}, BANK, NOW)).toHaveLength(4);
+  });
+
+  it('scope=starred 只留收藏题，且与是否作答无关（没做过的新题也能被收藏命中）', () => {
+    const stars: StarMap = { [BANK]: { a: true, d: true } };
+    // 注意 d 是 recall、也没作答记录：收藏范围不该把它挡掉
+    expect(filterPool(bank.questions, rules({ scope: 'starred' }), {}, BANK, NOW, stars).map((x) => x.id)).toEqual(['a', 'd']);
+    // 没传 stars 时收藏范围为空（而不是退回「全部」——那会让筛选形同虚设）
+    expect(filterPool(bank.questions, rules({ scope: 'starred' }), {}, BANK, NOW)).toEqual([]);
+  });
+
+  it('composeQuestions 透传 stars：starred 范围能真的抽出收藏的题', () => {
+    const stars: StarMap = { [BANK]: { b: true } };
+    const picked = composeQuestions(bank, rules({ scope: 'starred', count: 0 }), {}, NOW, () => 0.5, stars);
+    expect(picked.map((x) => x.id)).toEqual(['b']);
+  });
+
+  it('按考点标签筛选：易错（有记录且正确率低）/ 没做过（无记录）', () => {
+    const stats = statsWith({ a: stat({ wrong: 2, reps: 2 }) });
+    expect(filterPool(bank.questions, rules({ tags: ['weak'] }), stats, BANK, NOW).map((x) => x.id)).toEqual(['a']);
+    expect(filterPool(bank.questions, rules({ tags: ['new'] }), stats, BANK, NOW).map((x) => x.id)).toEqual(['b', 'c', 'd']);
+    // 空标签集 = 不限，与旧行为逐字一致
+    expect(filterPool(bank.questions, rules({ tags: [] }), stats, BANK, NOW)).toHaveLength(4);
+  });
+
+  it('按难度档筛选：hard 只留 FSRS difficulty 高的；unknown = 没做过', () => {
+    const stats = statsWith({ a: stat({ difficulty: 8 }), b: stat({ difficulty: 1 }) });
+    expect(filterPool(bank.questions, rules({ difficulty: ['hard'] }), stats, BANK, NOW).map((x) => x.id)).toEqual(['a']);
+    expect(filterPool(bank.questions, rules({ difficulty: ['easy'] }), stats, BANK, NOW).map((x) => x.id)).toEqual(['b']);
+    expect(filterPool(bank.questions, rules({ difficulty: ['unknown'] }), stats, BANK, NOW).map((x) => x.id)).toEqual(['c', 'd']);
+  });
+
+  it('只抽高频考点：需要传 TagContext；不传时不过滤（不清空范围）', () => {
+    const big: QuizBank = {
+      name: 'B',
+      importedAt: 0,
+      questions: [
+        ...Array.from({ length: 6 }, (_, i) => q(`h${i}`, '高频章')),
+        q('x', '小章'),
+      ],
+    };
+    const ctx = buildTagContext(big);
+    const hit = filterPool(big.questions, { ...DEFAULT_RULES, highFreqOnly: true }, {}, 'B', NOW, {}, ctx);
+    expect(hit.map((x) => x.id).every((id) => id.startsWith('h'))).toBe(true);
+    expect(hit).toHaveLength(6);
+    // 没给上下文就不过滤：范围不至于被悄悄清空
+    expect(filterPool(big.questions, { ...DEFAULT_RULES, highFreqOnly: true }, {}, 'B', NOW)).toHaveLength(7);
+    // 经 composeQuestions 透传 tagCtx 也能抽到
+    const picked = composeQuestions(big, { ...DEFAULT_RULES, highFreqOnly: true, count: 0 }, {}, NOW, () => 0.5, {}, ctx);
+    expect(picked).toHaveLength(6);
   });
 });
 

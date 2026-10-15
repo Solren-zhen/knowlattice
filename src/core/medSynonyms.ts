@@ -82,28 +82,70 @@ const GROUPS: string[][] = [
 /** 归一化：去掉所有空白并转小写（CJK 不受影响，ASCII 统一大小写） */
 const norm = (s: string): string => s.replace(/\s+/g, '').toLowerCase();
 
+/** 用户自定义等价词组（设置页维护，localStorage 持久化），与内置 GROUPS 合并生效 */
+let USER_GROUPS: string[][] = [];
+
 /** 归一化词 → 该词所在组的全部词（保留原始写法，供高亮时在正文里找） */
-const INDEX: Map<string, string[]> = (() => {
-  const m = new Map<string, string[]>();
-  for (const group of GROUPS) {
+const INDEX: Map<string, string[]> = new Map();
+/** 按长度降序排好的键：包含式命中要长词优先（否则"心梗"会被更短的键抢走） */
+let KEYS_BY_LEN: string[] = [];
+
+function rebuildIndex(): void {
+  INDEX.clear();
+  for (const group of [...GROUPS, ...USER_GROUPS]) {
     for (const term of group) {
       const k = norm(term);
       if (!k) continue;
       // 一个词出现在多组里时合并，不覆盖
-      const prev = m.get(k);
-      m.set(k, prev ? [...new Set([...prev, ...group])] : [...group]);
+      const prev = INDEX.get(k);
+      INDEX.set(k, prev ? [...new Set([...prev, ...group])] : [...group]);
     }
   }
-  return m;
-})();
+  KEYS_BY_LEN = [...INDEX.keys()].sort((a, b) => b.length - a.length);
+}
+rebuildIndex();
 
-/** 词表规模（供测试与「设置」页显示，别把数据说大） */
-export const SYNONYM_TERM_COUNT = INDEX.size;
+/** 词表规模（供测试与「设置」页显示，别把数据说大）。含用户自定义词。 */
+export function synonymTermCount(): number {
+  return INDEX.size;
+}
 
-/** 按长度降序排好的键：包含式命中要长词优先（否则"心梗"会被更短的键抢走）。
- *  在模块级算一次：搜索面板每敲一个键就要对 20 条结果各展开一次，
- *  若在 expandQuery 里现排会重复付出排序成本。 */
-const KEYS_BY_LEN: string[] = [...INDEX.keys()].sort((a, b) => b.length - a.length);
+/** localStorage 键：用户自定义等价词组（string[][] 的 JSON） */
+export const USER_SYNONYMS_KEY = 'knowlattice.medSynonyms';
+
+/**
+ * 设置页的文本框 → 词组：每行一组，行内按空白/逗号/顿号分隔，
+ * 组内不足 2 个词的行丢弃。只做解析不落库，落库由调用方负责。
+ */
+export function parseSynonymLines(text: string): string[][] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.split(/[\s,，、]+/).filter(Boolean))
+    .filter((parts) => parts.length >= 2);
+}
+
+/** 覆盖用户自定义词组并立即生效（下次 expandQuery 就带上）。 */
+export function setUserSynonymGroups(groups: string[][]): void {
+  USER_GROUPS = groups;
+  rebuildIndex();
+}
+
+/** 启动时从 localStorage 恢复用户词组；返回恢复的词组数（无存储环境返回 0）。 */
+export function loadUserSynonyms(): number {
+  try {
+    const raw = localStorage.getItem(USER_SYNONYMS_KEY);
+    if (!raw) return 0;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return 0;
+    const groups = parsed
+      .filter((g): g is string[] => Array.isArray(g) && g.every((t) => typeof t === 'string'))
+      .filter((g) => g.length >= 2);
+    setUserSynonymGroups(groups);
+    return groups.length;
+  } catch {
+    return 0;
+  }
+}
 
 /** 展开结果的上限：词表命中过多时只取前若干个，避免一次查询召回被稀释成噪声 */
 const MAX_EXTRA = 8;

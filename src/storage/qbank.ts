@@ -1,7 +1,9 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'knowlattice-qbank';
-const DB_VERSION = 1;
+// v2：新增 stars 对象仓库（收藏/重点题）。升级只加仓库、不动旧数据，
+// 老库打开时按 upgrade 里的 contains 判断补建，历史题库与逐题统计原样保留。
+const DB_VERSION = 2;
 
 export interface StoredBank {
   name: string;
@@ -13,6 +15,12 @@ export interface StoredQuestionStat {
   bank: string;
   qid: string;
   tuple: number[];
+}
+
+/** 收藏/重点题：只存「这道题被标了」，没有值可言，keyPath 即身份。 */
+export interface StoredStar {
+  bank: string;
+  qid: string;
 }
 
 interface MetaRecord {
@@ -29,6 +37,10 @@ function getDB(): Promise<IDBPDatabase> {
         if (!db.objectStoreNames.contains('stats')) {
           const stats = db.createObjectStore('stats', { keyPath: ['bank', 'qid'] });
           stats.createIndex('bank', 'bank');
+        }
+        if (!db.objectStoreNames.contains('stars')) {
+          const stars = db.createObjectStore('stars', { keyPath: ['bank', 'qid'] });
+          stars.createIndex('bank', 'bank');
         }
         if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
       },
@@ -58,15 +70,53 @@ export async function putBanks(banks: StoredBank[]): Promise<void> {
 
 export async function removeBankAndStats(bank: string): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(['banks', 'stats'], 'readwrite');
+  const tx = db.transaction(['banks', 'stats', 'stars'], 'readwrite');
   await tx.objectStore('banks').delete(bank);
-  const store = tx.objectStore('stats');
+  for (const name of ['stats', 'stars'] as const) {
+    const store = tx.objectStore(name);
+    const index = store.index('bank');
+    let cursor = await index.openKeyCursor(IDBKeyRange.only(bank));
+    while (cursor) {
+      await store.delete(cursor.primaryKey);
+      cursor = await cursor.continue();
+    }
+  }
+  await tx.done;
+}
+
+// ---------- 收藏 / 重点题 ----------
+
+export async function getAllStars(): Promise<StoredStar[]> {
+  return (await getDB()).getAll('stars') as Promise<StoredStar[]>;
+}
+
+export async function putStar(star: StoredStar): Promise<void> {
+  await (await getDB()).put('stars', star);
+}
+
+export async function removeStar(bank: string, qid: string): Promise<void> {
+  await (await getDB()).delete('stars', [bank, qid]);
+}
+
+export async function removeBankStars(bank: string): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('stars', 'readwrite');
+  const store = tx.store;
   const index = store.index('bank');
   let cursor = await index.openKeyCursor(IDBKeyRange.only(bank));
   while (cursor) {
     await store.delete(cursor.primaryKey);
     cursor = await cursor.continue();
   }
+  await tx.done;
+}
+
+export async function replaceStars(stars: StoredStar[]): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('stars', 'readwrite');
+  const store = tx.objectStore('stars');
+  await store.clear();
+  for (const star of stars) store.put(star);
   await tx.done;
 }
 
@@ -145,19 +195,21 @@ export async function migrateLegacyQuestionStats(stats: StoredQuestionStat[]): P
 
 export async function resetQbankStorageForTests(): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(['banks', 'stats', 'meta'], 'readwrite');
+  const tx = db.transaction(['banks', 'stats', 'stars', 'meta'], 'readwrite');
   tx.objectStore('banks').clear();
   tx.objectStore('stats').clear();
+  tx.objectStore('stars').clear();
   tx.objectStore('meta').clear();
   await tx.done;
 }
 
 export async function clearQbankDatabase(): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(['banks', 'stats', 'meta'], 'readwrite');
+  const tx = db.transaction(['banks', 'stats', 'stars', 'meta'], 'readwrite');
   await Promise.all([
     tx.objectStore('banks').clear(),
     tx.objectStore('stats').clear(),
+    tx.objectStore('stars').clear(),
     tx.objectStore('meta').clear(),
   ]);
   await tx.done;

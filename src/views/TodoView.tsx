@@ -294,7 +294,8 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
   }, [timer.running]);
 
   const pomo = useMemo(() => pomoStats(records, today), [records, today]);
-  const pomoTrendData = useMemo(() => pomoTrend(records, today, 7), [records, today]);
+  // 14 天而不是 7 天：折线要够长才值得横向拖着看（第 4 项），7 个点指头一动就到底
+  const pomoTrendData = useMemo(() => pomoTrend(records, today, 14), [records, today]);
   const heat = useMemo(() => heatmap(today, 12), [today]);
   // 打卡在别的页面写入（复习评卡 / 题库作答），所以切到统计页时重新读一次
   const [study, setStudy] = useState(() => ({ streak: studyStreak(), days: studyDays().length }));

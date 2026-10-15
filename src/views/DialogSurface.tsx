@@ -102,6 +102,7 @@ export default function DialogSurface({ label, className, children, onClick }: P
     <div
       ref={dialogRef}
       className={className}
+      data-stagger
       role="dialog"
       aria-modal="true"
       aria-label={label}

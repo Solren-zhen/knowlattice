@@ -32,7 +32,9 @@ jobs:
       - name: 安装 Rust（含目标架构工具链）
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ inputs.target || 'aarch64-apple-darwin' }}
+          # universal-apple-darwin 不是合法的 rustup target（rustup 只有 aarch64-/x86_64-apple-darwin，
+          # universal 由 tauri 打包时 lipo 合成），所以两个都装上，三种选项都能构建。
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Rust 编译缓存
         uses: Swatinem/rust-cache@v2
@@ -41,6 +43,12 @@ jobs:
 
       - name: 安装依赖
         run: npm ci
+
+      - name: 静态检查
+        run: npm run lint
+
+      - name: 单元测试
+        run: npm test
 
       - name: 构建 macOS 应用
         # 签名私钥存在仓库 Secret（TAURI_SIGNING_PRIVATE_KEY）里，用于生成自动更新包

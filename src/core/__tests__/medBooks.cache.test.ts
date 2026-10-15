@@ -2,10 +2,14 @@
 /** 教材全文缓存与「导入/删除」的竞态：在途读库期间失效，旧内容不得写回缓存。 */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getMedBookTexts } = vi.hoisted(() => ({ getMedBookTexts: vi.fn() }));
+const { getMedBookTexts, getMedBookText } = vi.hoisted(() => ({
+  getMedBookTexts: vi.fn(),
+  getMedBookText: vi.fn(async () => null),
+}));
 
 vi.mock('../../storage/medStore', () => ({
   getMedBookTexts,
+  getMedBookText,
   listMedBookMeta: vi.fn(async () => []),
   listMedBookRecords: vi.fn(async () => []),
   removeMedBook: vi.fn(async () => {}),

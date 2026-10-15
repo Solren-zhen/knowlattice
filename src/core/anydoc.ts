@@ -6,7 +6,7 @@
  * the user converts a file, and Vite code-splits it out of the main chunk.
  * anydoc does not OCR, so scanned PDFs throw an error with code 'needsOcr'.
  */
-import { tidyMarkdown, type ConvertResult } from './convert';
+import { tidyMarkdown, extractInlineImages, type ConvertResult } from './convert';
 import { normalizeMarkdownSpacing } from './mdSpace';
 
 type AnydocModule = typeof import('@firecrawl/anydoc-wasm');
@@ -44,12 +44,15 @@ export async function anydocToMarkdown(file: File): Promise<AnydocResult> {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
   const detected = mod.formatFromBytes(bytes) ?? mod.formatFromExtension(ext);
   if (detected === undefined) throw new Error('anydoc can not detect this file format');
-  const markdown = normalizeMarkdownSpacing(tidyMarkdown(mod.toMarkdownBytes(bytes, detected)));
+  const raw = normalizeMarkdownSpacing(tidyMarkdown(mod.toMarkdownBytes(bytes, detected)));
+  // 引擎可能把图内联成 base64：先落成附件、改写为 _attachments/，否则「存为笔记」时这些图会丢
+  const { markdown, images } = extractInlineImages(raw);
   if (markdown.trim().length === 0) throw new Error('anydoc produced no content');
   return {
     title: file.name.replace(/\.[^.]+$/, ''),
     markdown,
     engine: 'anydoc',
     detected,
+    ...(images.length ? { images } : {}),
   };
 }

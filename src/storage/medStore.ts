@@ -24,6 +24,8 @@ export interface MedBookMeta {
   chars: number;
   /** 导入时间（ms），清单按它倒序 */
   at: number;
+  /** 页码偏移 = PDF 物理页 − 原书印刷页（前言/目录的页数）。未设置时按 0 处理 */
+  pageOffset?: number;
 }
 
 async function db(): Promise<IDBPDatabase> {
@@ -64,6 +66,16 @@ export async function getMedBookTexts(): Promise<Array<{ name: string; text: str
   return out;
 }
 
+/** 读回单本教材正文（整页阅读 / 引文核验用），不存在返回 null */
+export async function getMedBookText(name: string): Promise<string | null> {
+  try {
+    const d = await db();
+    return ((await d.get('texts', name)) as string | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** 是否已存在同名教材（同名导入会覆盖，导入方据此提示） */
 export async function hasMedBook(name: string): Promise<boolean> {
   try {
@@ -87,4 +99,12 @@ export async function removeMedBook(name: string): Promise<void> {
   const d = await db();
   await d.delete('meta', name);
   await d.delete('texts', name);
+}
+
+/** 更新某本书的页码偏移；教材不存在时抛错。 */
+export async function setMedBookPageOffset(name: string, offset: number): Promise<void> {
+  const d = await db();
+  const meta = (await d.get('meta', name)) as MedBookMeta | undefined;
+  if (!meta) throw new Error(`教材不存在：${name}`);
+  await d.put('meta', { ...meta, pageOffset: offset } satisfies MedBookMeta);
 }

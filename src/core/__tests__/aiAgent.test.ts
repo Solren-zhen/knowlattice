@@ -276,6 +276,15 @@ describe('模型侧工具实现', () => {
     expect(prompt).toContain('AGENT.md');
     expect(prompt).toContain('永远用表格对比鉴别诊断。');
   });
+
+  it('陪练模式注入强化契约：一次一题、先提示后揭示、结束写学习日志', () => {
+    const base = buildNoteSystemPrompt(null);
+    expect(base).not.toContain('陪练模式】');
+    const coach = buildNoteSystemPrompt(null, null, true);
+    expect(coach).toContain('陪练模式】');
+    expect(coach).toContain('一次只问一个问题');
+    expect(coach).toContain('propose_study_log');
+  });
 });
 
 describe('agentNetHint', () => {

@@ -20,7 +20,10 @@ import { markStudy } from '../core/stats';
 import { parseFrontmatterCached } from '../core/parser';
 import { recordMistake } from '../core/mistakes';
 import { notesToAnki, exportApkg, downloadFile } from '../core/anki';
+import { countCloze, maskCloze, revealCloze } from '../core/cloze';
+import { applyDailyCap, effectiveDailyCap, loadPlan } from '../core/reviewPlan';
 import Preview from './Preview';
+import type { QuoteSelection } from './AiAgentPanel';
 
 interface Props {
   paths: string[];
@@ -29,6 +32,8 @@ interface Props {
   onOpenLink: (name: string) => void;
   onClose: () => void;
   onOpenPath: (path: string) => void;
+  /** 与 AI 笔记联动：把这张复习卡交给 AI 讲透；不传则不显示入口 */
+  onAskAi?: (quote: QuoteSelection) => void;
 }
 
 /** 评分快捷键：A 忘了 / S 困难 / D 良好 / F 简单（左手基准位，与格式键同一思路） */
@@ -44,13 +49,18 @@ function keyLabel(key: string, docs: Map<string, string>): string {
   return head ? `${name} · ${head}` : name;
 }
 
-export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, onOpenPath }: Props) {
+export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, onOpenPath, onAskAi }: Props) {
   // 全库建卡（纯函数，一篇笔记可能出多张）→ 套上自定义正/背面、剔除已删的卡
   const [edits, setEdits] = useState<CardEditMap>(() => loadCardEdits());
   const cards = useMemo(() => applyCardEdits(buildCards(paths, docs), edits), [paths, docs, edits]);
   const cardMap = useMemo(() => new Map(cards.map((c) => [c.key, c])), [cards]);
   // 队列只存卡键：编辑/删除后卡对象会变（甚至消失），键是稳定的
-  const [order, setOrder] = useState<string[]>(() => dueQueue(cards).map((c) => c.key));
+  // 每日复习上限：默认 0 = 不限制，由「学习统计」面板里的复习计划显式开启（见 core/reviewPlan.ts）
+  const [order, setOrder] = useState<string[]>(() => {
+    const queue = dueQueue(cards);
+    const cap = effectiveDailyCap(loadPlan(), queue.length);
+    return applyDailyCap(queue, cap).map((c) => c.key);
+  });
   const srsImportRef = useRef<HTMLInputElement>(null);
   const [revealed, setRevealed] = useState(false);
   const [done, setDone] = useState(0);
@@ -80,17 +90,30 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
     () => (card ? parseFrontmatterCached(card.path, docs.get(card.path) ?? '').meta : null),
     [card, docs]
   );
-  const noteCardCount = useMemo(
-    () => (card ? cards.filter((c) => c.path === card.path).length : 0),
-    [cards, card]
-  );
+  // 每篇笔记的卡数：一次 O(全库卡数) 建表，之后翻面/切卡都是 O(1) 查表。
+  // 原来这里是每次渲染都 cards.filter(...) 全表扫一遍（翻面、编辑输入框都会触发重渲染）。
+  // 数值与那句 filter 完全等价（同一批 cards，按 path 计数），只是不再逐次重算。
+  const cardCountByPath = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of cards) m.set(c.path, (m.get(c.path) ?? 0) + 1);
+    return m;
+  }, [cards]);
+  const noteCardCount = card ? cardCountByPath.get(card.path) ?? 0 : 0;
   // 自定义正/背面优先；没自定义就用笔记切出来的原文
   const frontText = card ? card.front ?? (card.heading || card.noteTitle) : '';
   const backText = card ? card.back ?? card.body : '';
+  // 挖空只影响呈现，不动卡键（见 core/cloze.ts 的设计约束）
+  const clozeCount = countCloze(backText);
+  const clozeMasked = clozeCount ? maskCloze(backText) : backText;
+  const backRevealed = clozeCount ? revealCloze(backText) : backText;
   const hasMnemonic = /口诀:[ \t]*\S/.test(backText);
   const showMnemonicOnly = hasMnemonic && !revealed;
 
-  const stats = srsStats(cards);
+  // 统计：依赖里带 `order` 是必须的——srsStats 读的是 localStorage 里的调度表，不是 cards 本身
+  // （见 core/srs.ts），而写完调度表的两处（评分 / 导入复习数据）都会换掉 order 的身份，
+  // 所以「库内 x/y 张卡已在调度中」仍会立即更新；翻面、编辑输入框这些与调度无关的重渲染则不再全表扫。
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- order 不在回调体里，但它是「调度表被写过」的信号，必须留
+  const stats = useMemo(() => srsStats(cards), [cards, order]);
 
   const rate = (r: Rating) => {
     if (!card) return;
@@ -236,8 +259,8 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
       {showDeleted && removed.length > 0 && (
         <div className="card-edit card-edit--list">
           <div className="card-edit-head">已删除的卡片（{removed.length}）· 恢复后回到原队列与原进度</div>
-          {removed.map((k) => (
-            <div key={k} className="card-edit-row">
+          {removed.map((k, i) => (
+            <div key={k} className="card-edit-row stagger-item" style={{ ['--i' as string]: Math.min(i, 12) }}>
               <span>{keyLabel(k, docs)}</span>
               <button
                 className="btn-small"
@@ -303,13 +326,41 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
             <h2 className={card.heading || revealed || card.front ? '' : 'blurred-title'}>
               {frontText}
             </h2>
-            <p className="muted">
-              出自: {card.noteTitle}
-              {noteCardCount > 1 ? `（共 ${noteCardCount} 节）` : ''}
-              {meta?.chapter ? ` · 章节: ${meta.chapter}` : ''}
-              {meta?.source ? ` · 来源: ${meta.source}` : ''}
-              {card.front || card.back ? ' · 已自定义' : ''}
-            </p>
+            {/* 面包屑：笔记 › 章节 › 小节。点击笔记名可跳回原文。
+                打码条件必须与上面的 h2 完全一致：整篇卡未翻面时标题是糊的（靠属性键回忆），
+                面包屑若把同一个笔记名明文写出来，等于直接把答案给了人。
+                但整篇卡的正面标题本来就等于笔记名——那一格改成明确的「打开笔记」入口：
+                既不重复（同一段文字在 DOM 里出现两次会打架），也不必打码
+                （「打开笔记」四个字不含任何答案信息，糊掉它只会让人看不懂按钮）。 */}
+            <nav className="review-crumbs" aria-label="卡片来源路径">
+              <button
+                type="button"
+                className={`crumb crumb--link${
+                  card.noteTitle !== frontText && !(card.heading || revealed || card.front) ? ' blurred-title' : ''
+                }`}
+                onClick={() => card.path && onOpenPath(card.path)}
+                disabled={!card.path}
+                title={card.path ? '打开这篇笔记' : '这张卡没有对应笔记'}
+              >
+                {card.noteTitle !== frontText ? card.noteTitle : '打开笔记'}
+              </button>
+              {meta?.chapter ? (
+                <>
+                  <span className="crumb-sep" aria-hidden>›</span>
+                  <span className="crumb crumb--static">{meta.chapter}</span>
+                </>
+              ) : null}
+              {/* 小节只在正面不是小节标题时补出来（避免与 H2 重复） */}
+              {card.heading && card.front ? (
+                <>
+                  <span className="crumb-sep" aria-hidden>›</span>
+                  <span className="crumb crumb--static">{card.heading}</span>
+                </>
+              ) : null}
+              {noteCardCount > 1 ? <span className="crumb-note">共 {noteCardCount} 节</span> : null}
+              {meta?.source ? <span className="crumb-note">来源: {meta.source}</span> : null}
+              {card.front || card.back ? <span className="crumb-note">已自定义</span> : null}
+            </nav>
             {meta && meta.exam.length > 0 && (
               <p className="exam-hint">历年真题: {meta.exam.join(' · ')}</p>
             )}
@@ -321,6 +372,17 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
                     提示属性键: {card.hints.map((k) => (
                       <kbd key={k}>{k}</kbd>
                     ))}
+                  </div>
+                )}
+                {/* 挖空卡片：把遮罩后的正文当题面。只在有挖空时出现，其他卡片完全不受影响。 */}
+                {clozeCount > 0 && (
+                  <div className="cloze-prompt">
+                    <div className="cloze-prompt-label">
+                      挖空回忆 · {clozeCount} 处
+                    </div>
+                    <div className="review-back">
+                      <Preview content={clozeMasked} resolve={resolve} onOpenLink={onOpenLink} />
+                    </div>
                   </div>
                 )}
                 {showMnemonicOnly && (
@@ -340,7 +402,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
             <>
               <hr />
               <div className="review-back">
-                <Preview content={backText} resolve={resolve} onOpenLink={onOpenLink} />
+                <Preview content={backRevealed} resolve={resolve} onOpenLink={onOpenLink} />
               </div>
               <div className="review-meta muted">
                 {cardCount
@@ -362,6 +424,26 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
                 >
                   删除卡片
                 </button>
+                {/* 与 AI 笔记联动：这张卡的正面/背面 + 出处整段交给 AI。
+                    不收起复习面板（review-overlay 与 AI 面板同层，收起会打断本轮复习），
+                    由 Workspace 把 AI 面板抬到本面板之上。 */}
+                {onAskAi && (
+                  <button
+                    className="btn-small"
+                    title="把这张卡交给 AI 笔记讲透（不改动卡片与笔记）"
+                    onClick={() => onAskAi({
+                      text: [
+                        `【复习卡】出自：${card.noteTitle}${card.heading ? ` · ${card.heading}` : ''}`,
+                        `正面：${frontText}`,
+                        `背面：${backText}`,
+                      ].join('\n'),
+                      path: card.path,
+                      ask: '帮我讲透这张复习卡背后的考点：先问我一个问题（不要先讲），我答完再补漏，最后给出该连的 [[双链]]。',
+                    })}
+                  >
+                    问 AI 讲这张卡
+                  </button>
+                )}
               </div>
               <div className="rating-row">
                 <button className="rate again" onClick={() => rate('again')}>忘了<br /><small><kbd>A</kbd> &lt;10分钟</small></button>

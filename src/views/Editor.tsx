@@ -17,7 +17,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { livePreview, toggleLivePreview } from '../core/livePreview';
 import { safeExternalUrl } from '../core/domSanitize';
-import { FORMAT_KEYS, toggleMark, wikiLink } from '../core/mdFormat';
+import { FORMAT_KEYS, toggleCloze, toggleMark, wikiLink } from '../core/mdFormat';
 import { insertTable, tableSkeleton, TABLE_MAX_COLS, TABLE_MAX_ROWS, textToTable } from '../core/mdTable';
 import { toast } from '../core/feedback';
 import { IconEye } from './icons';
@@ -47,6 +47,15 @@ const applyWikiLink = (v: EditorView) => {
   if (from === to) startCompletion(v);
 };
 
+/**
+ * 挖空 `{{答案}}`：与加粗/高亮同为"再按一次取消"的开闭标记，但开闭符号不同，
+ * 所以走 core/mdFormat 的 toggleCloze，而不是只支持对称标记的 applyMark。
+ */
+const applyCloze = (v: EditorView) => {
+  const { from, to } = v.state.selection.main;
+  v.dispatch(toggleCloze(v.state.doc.toString(), from, to));
+};
+
 /** 实时预览中的通路图是一个跨行替换部件；点击它时选中对应源码块，便于直接删除或修改。 */
 function selectPathwayBlock(view: EditorView, element: HTMLElement): boolean {
   const block = element.closest('.lp-pathway');
@@ -72,13 +81,14 @@ function selectPathwayBlock(view: EditorView, element: HTMLElement): boolean {
 }
 
 /**
- * 四个格式命令：名称 + 键位（来自 core/mdFormat.ts）+ 动作。
+ * 五个格式命令：名称 + 键位（来自 core/mdFormat.ts）+ 动作。
  * 快捷键、右键菜单都由这张表生成，界面提示也从同一处取键名——改键不会再漏改提示。
  */
 const FORMAT_ACTIONS: Array<{ name: string; key: (typeof FORMAT_KEYS)[keyof typeof FORMAT_KEYS]; run: (v: EditorView) => void }> = [
   { name: '加粗', key: FORMAT_KEYS.bold, run: (v) => applyMark(v, MARK_BOLD) },
   { name: '高亮', key: FORMAT_KEYS.highlight, run: (v) => applyMark(v, MARK_HIGHLIGHT) },
   { name: '斜体', key: FORMAT_KEYS.italic, run: (v) => applyMark(v, MARK_ITALIC) },
+  { name: '挖空', key: FORMAT_KEYS.cloze, run: (v) => applyCloze(v) },
   { name: '插入双链', key: FORMAT_KEYS.wiki, run: (v) => applyWikiLink(v) },
 ];
 
@@ -631,6 +641,10 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
     {
       label: '==', title: `高亮（${FORMAT_KEYS.highlight.labelMac}，再按一次取消）`,
       run: (v) => applyMark(v, MARK_HIGHLIGHT),
+    },
+    {
+      label: '{{}}', title: `挖空（${FORMAT_KEYS.cloze.labelMac}，再按一次取消）：复习时被遮住，翻面后显示`,
+      run: (v) => applyCloze(v),
     },
     {
       label: <i>I</i>, title: `斜体（${FORMAT_KEYS.italic.labelMac}，再按一次取消）`,

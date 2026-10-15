@@ -20,6 +20,8 @@ export interface EvidenceUnit {
   headingLine: number;
   /** 最近的页码锚点页号（无锚点则 null） */
   page: number | null;
+  /** 单元终点前的最后一个页码锚点页号：跨页段落的引用页码可标成 P3-4（无锚点则 null） */
+  endPage: number | null;
   /** 在原文 content 中的字符起点 */
   start: number;
   /** 字符终点（不含） */
@@ -63,6 +65,7 @@ function buildChunksUncached(content: string, path: string): EvidenceUnit[] {
     return [{
       path, heading: '', headingLine: 0,
       page: anchors.length ? anchors[0].page : null,
+      endPage: anchors.length ? anchors[anchors.length - 1].page : null,
       start: 0, end: content.length, text: stripPageAnchors(content),
     }];
   }
@@ -91,6 +94,15 @@ function buildChunksUncached(content: string, path: string): EvidenceUnit[] {
     }
     return page;
   };
+  // 终点页：锚点须在单元文本之内（锚点独占一行且其后有换行，索引恰好等于 end 的是下一页的锚点）
+  const pageBefore = (idx: number): number | null => {
+    let page: number | null = null;
+    for (const a of anchors) {
+      if (a.index < idx) page = a.page;
+      else break;
+    }
+    return page;
+  };
 
   const units: EvidenceUnit[] = [];
   let i = 0;
@@ -108,6 +120,7 @@ function buildChunksUncached(content: string, path: string): EvidenceUnit[] {
       heading: h.text,
       headingLine: h.line,
       page: pageAt(start),
+      endPage: pageBefore(end),
       start,
       end,
       text: content.slice(start, end),

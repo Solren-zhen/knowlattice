@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addDays, addSubtask, BUCKET_LABELS, bulkComplete, bulkRemove, bulkUpdate, bumpPomo, clearCompleted, completeTodo,
   dayKey, daysBetween, dueBucket, dueLabel, editTodo, exportTodos, groupByNote, groupTodos, importTodos,
@@ -78,6 +78,18 @@ describe('todos', () => {
     const ids = new Set(Array.from({ length: 200 }, () => newTodoId()));
     expect(ids.size).toBe(200);
     expect([...ids].every((id) => id.startsWith('t-'))).toBe(true);
+  });
+
+  it('时间戳与随机数都被固定住（最坏情况）也不撞号：id 里有进程内自增序号', () => {
+    // 回归：id 曾经是「时间戳 + 4 位随机」，同一毫秒内连发 200 条约 1.2% 撞号
+    // （生日问题：200²/2 ÷ 36⁴ ≈ 1.19%），撞了就是两条待办同一个 id。
+    // 这条把 Date.now 与 Math.random 都钉死，逼出「到底靠什么保证唯一」。
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const ids = new Set(Array.from({ length: 200 }, () => newTodoId()));
+    expect(ids.size).toBe(200);
+    now.mockRestore();
+    rnd.mockRestore();
   });
 });
 

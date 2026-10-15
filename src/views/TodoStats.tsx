@@ -1,11 +1,12 @@
 /**
- * 工作台 · 统计页：专注总览 + 近 7 天专注趋势 + 待办完成率 + 学习打卡热力图。
+ * 工作台 · 统计页：专注总览 + 近 14 天专注趋势（折线，可横向拖动查看）+ 待办完成率 + 学习打卡热力图。
  *
  * 打卡数据来自 core/stats（复习评卡、题库作答自动记一次），所以这里**不做**手动习惯打卡——
  * 那会变成第二套并行数据，两边的「连续天数」迟早对不上。热力图画的也是这份真实学习记录。
  */
 import type { PomoStats } from '../core/pomodoro';
 import type { HeatCell } from '../core/stats';
+import TrendChart from './TrendChart';
 
 interface Props {
   stats: PomoStats;
@@ -18,7 +19,6 @@ interface Props {
 const HEAT_LABELS = ['0', '1', '2', '3', '4+'];
 
 export default function TodoStats({ stats, trend, heat, todos, study }: Props) {
-  const max = Math.max(1, ...trend.map((d) => d.count));
   const rate = todos.total > 0 ? Math.round((todos.done / todos.total) * 100) : 0;
 
   return (
@@ -30,23 +30,12 @@ export default function TodoStats({ stats, trend, heat, todos, study }: Props) {
         <div className="wb-stat"><span>累计专注</span><b>{stats.totalMinutes}<i>分钟</i></b></div>
       </div>
 
-      <section className="wb-card">
-        <h3 className="wb-card__title">近 7 天专注趋势</h3>
-        <div className="wb-trend">
-          {trend.map((d) => (
-            <div className="wb-trend__item" key={d.day} title={`${d.day}：${d.count} 个专注周期 · ${d.minutes} 分钟`}>
-              <span className="wb-trend__num">{d.count || ''}</span>
-              <div className="wb-trend__barwrap">
-                <div className="wb-trend__bar" style={{ height: `${(d.count / max) * 100}%` }} />
-              </div>
-              <span className="wb-trend__day">{d.day.slice(5)}</span>
-            </div>
-          ))}
-        </div>
-        <p className="muted wb-tip">共 {trend.reduce((n, d) => n + d.count, 0)} 个专注周期 · {trend.reduce((n, d) => n + d.minutes, 0)} 分钟。</p>
+      <section className="wb-card" data-tilt>
+        <h3 className="wb-card__title">近 14 天专注趋势</h3>
+        <TrendChart points={trend} />
       </section>
 
-      <section className="wb-card">
+      <section className="wb-card" data-tilt>
         <h3 className="wb-card__title">待办完成率</h3>
         <div className="wb-rate">
           <div className="todo-progress"><span className="todo-progress-bar" style={{ width: `${rate}%` }} /></div>
@@ -57,7 +46,7 @@ export default function TodoStats({ stats, trend, heat, todos, study }: Props) {
         </p>
       </section>
 
-      <section className="wb-card">
+      <section className="wb-card" data-tilt>
         <h3 className="wb-card__title">学习打卡（复习评卡 / 题库作答自动记）</h3>
         <div className="wb-cards wb-cards--tight">
           <div className="wb-stat"><span>连续打卡</span><b>{study.streak}<i>天</i></b></div>

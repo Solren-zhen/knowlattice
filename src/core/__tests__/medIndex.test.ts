@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { formatMedBooks, formatMedHits, pagesToMarkdown, searchMedBooks } from '../medIndex';
+import {
+  extractPage, formatMedBooks, formatMedHits, pagesToMarkdown, printedPage, searchMedBooks,
+} from '../medIndex';
 import { pageAnchor } from '../pageAnchor';
 
 const para = (n: number, t: string) => (t + '。').repeat(n);
@@ -45,7 +47,10 @@ describe('searchMedBooks', () => {
 
   it('多关键词需同时命中', () => {
     const books = [makeBook('内科学（第10版）')];
-    expect(searchMedBooks(books, '总论 治疗方案')).toHaveLength(1);
+    // 每本书取最密集的前几段：总论与治疗两段都含命中片段，都应返回
+    const hits = searchMedBooks(books, '总论 治疗方案');
+    expect(hits).toHaveLength(2);
+    expect(new Set(hits.map((h) => h.section))).toEqual(new Set(['第一章 总论', '第二节 治疗']));
     expect(searchMedBooks(books, '总论 心电图')).toHaveLength(0);
   });
 
@@ -74,6 +79,55 @@ describe('searchMedBooks', () => {
     const books = [makeBook('A'), makeBook('B'), makeBook('C')];
     expect(searchMedBooks(books, '治疗方案', 2)).toHaveLength(2);
   });
+
+  it('每本书取前几段命中，书少时也能凑满 limit', () => {
+    const books = [makeBook('内科学（第10版）')];
+    // 总论/检查/治疗三段各自命中自己的关键词
+    const hits = searchMedBooks(books, '总论内容 检查方法 治疗方案', 6);
+    expect(hits.length).toBe(3);
+    expect(new Set(hits.map((h) => h.section))).toEqual(
+      new Set(['第一章 总论', '第一节 检查', '第二节 治疗']),
+    );
+  });
+
+  it('页码偏移：命中页码按印刷页展示，跨页段落给页码区间', () => {
+    const text = [
+      pageAnchor(4), '# 第一章 总论', para(500, '总论内容'),
+      pageAnchor(5), '## 第一节 检查', para(500, '检查方法包括视触叩听'),
+      pageAnchor(6), '## 第二节 治疗', para(500, '治疗方案首选药物'),
+    ].join('\n\n');
+    const hits = searchMedBooks([{ name: '内科学（第10版）', text, pageOffset: 3 }], '治疗方案');
+    expect(hits).toHaveLength(1);
+    expect(hits[0].page).toBe(3); // 物理第 6 页 − 偏移 3
+    expect(hits[0].endPage).toBe(0); // 未跨页
+    const out = formatMedHits(hits);
+    expect(out).toContain('P3');
+  });
+
+  it('弱命中：原词片段零出现、纯靠等价词召回时打上标记', () => {
+    const book = { name: '病理学（第10版）', text: `${pageAnchor(1)}\n心肌梗死的表现。` };
+    // 查「心梗」：文本里只有「心肌梗死」，靠词表召回 → 弱命中
+    const weakHits = searchMedBooks([book], '心梗');
+    expect(weakHits).toHaveLength(1);
+    expect(weakHits[0].weak).toBe(true);
+    expect(formatMedHits(weakHits)).toContain('弱命中');
+    // 原词本身出现 → 不是弱命中
+    expect(searchMedBooks([book], '心肌梗死')[0].weak).toBeUndefined();
+  });
+
+  it('extractPage：按物理页取整页正文（已剥离锚点）', () => {
+    const md = pagesToMarkdown(['第一页正文', '', '第三页正文']);
+    expect(extractPage(md, 1)).toBe('第一页正文');
+    expect(extractPage(md, 2)).toBe('');
+    expect(extractPage(md, 3)).toBe('第三页正文');
+    expect(extractPage(md, 4)).toBeNull();
+  });
+
+  it('printedPage：物理页减偏移，下限 1', () => {
+    expect(printedPage(10, 3)).toBe(7);
+    expect(printedPage(2, 5)).toBe(1);
+    expect(printedPage(10)).toBe(10);
+  });
 });
 
 describe('formatMedHits', () => {
@@ -90,7 +144,7 @@ describe('formatMedHits', () => {
 
   it('超长正文截断', () => {
     const out = formatMedHits([{
-      book: 'X', page: 1, section: '', text: '甲'.repeat(2000), chunkId: 'c', score: 1,
+      book: 'X', page: 1, endPage: 0, section: '', text: '甲'.repeat(2000), chunkId: 'c', score: 1,
     }]);
     expect(out).toContain('…');
     expect(out.length).toBeLessThan(1200);

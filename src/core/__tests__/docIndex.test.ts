@@ -60,12 +60,32 @@ describe('buildChunks', () => {
     const check = units.find((u) => u.text.includes('检查内容'))!;
     expect(check.heading).toBe('第二节 检查');
     expect(check.page).toBe(3);
+    expect(check.endPage).toBe(3); // 段落在页内结束，终点页同起点页
     const def = units.find((u) => u.text.includes('定义内容'))!;
     expect(def.heading).toBe('第一节 定义');
     expect(def.page).toBe(2);
     const general = units.find((u) => u.text.includes('总论内容'))!;
     expect(general.heading).toBe('第一章 总论');
     expect(general.page).toBe(1);
+  });
+
+  it('长笔记单元页内结束（锚点即切分边界），endPage 同起点页', () => {
+    const content = longNote();
+    const units = buildChunks(content, '教材/跨页.md');
+    const treat = units.find((u) => u.text.includes('治疗内容'))!;
+    expect(treat.page).toBe(4);
+    expect(treat.endPage).toBe(4);
+  });
+
+  it('短文档整篇单元跨多页：page 是首页、endPage 是末页', () => {
+    const content = [
+      pageAnchor(3), '第三页的内容。',
+      pageAnchor(4), '第四页的内容。',
+    ].join('\n\n');
+    const units = buildChunks(content, 'a.md');
+    expect(units).toHaveLength(1); // 全文不足 LONG_NOTE，整篇一个单元
+    expect(units[0].page).toBe(3);
+    expect(units[0].endPage).toBe(4);
   });
 
   it('段落单元不含页码锚点', () => {

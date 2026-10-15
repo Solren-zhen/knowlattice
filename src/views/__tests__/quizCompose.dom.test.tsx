@@ -183,6 +183,19 @@ describe('自动组题 · 弹窗', () => {
     expect(text(container)).toContain('候选 0 题');
     // 没装 jest-dom，直接读原生属性
     expect((screen.getByRole('button', { name: '开始练习' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('考点 / 难度筛选生效：易错池为空、未评估含全部', async () => {
+    const { container } = await setup();
+    openCompose();
+    // 没做过任何题 → 「易错」必然为空（状态标签是「新题」）
+    fireEvent.click(chip('易错'));
+    expect(text(container)).toContain('候选 0 题');
+    fireEvent.click(chip('易错')); // 取消
+    expect(text(container)).toContain('候选 12 题');
+    // 全部没做过 → 难度「未评估」= 全部 12 题
+    fireEvent.click(chip('未评估'));
+    expect(text(container)).toContain('候选 12 题');
   });});
 
 describe('自动组题 · 作答落盘', () => {
@@ -332,9 +345,13 @@ describe('自动组题 · 软门控', () => {
   });
 
   it('样本不足时不下结论（两题全错也不提示）', async () => {
-    // 预置 1 题 + 练习里再答 1 题 = 共 2 个样本，低于 MASTERY_MIN_SEEN(3) 阈值。
-    // 预置两题会正好把样本凑到阈值，用例就不再检验「样本不足」这条分支了。
-    await recordAnswer(BANK, 'q1-0', false);
+    // 预置的样本故意放**第 2 章**：下面组题只勾第 1 章（rules.chapters 会过滤组题池），
+    // 练习首题必然来自第 1 章，于是「预置的那道题」与「练习里答的那道题」不可能是同一道。
+    // 以前预置第 1 章的 q1-0，而抽题是乱序的 —— 首题偶尔正好是 q1-0，重答同一题只更新
+    // 同一把 stats 记录，键数停在 1，用例就随抽题结果随机挂（约 1/8，表现为「断言长度 1≠2」
+    // 或「Test timed out in 5000ms」两种样子，取决于等待与断言谁先到 5s）。
+    // 第 1 章此刻只有 1 个样本，仍低于 MASTERY_MIN_SEEN(3) 阈值 → 正是「样本不足」这条分支。
+    await recordAnswer(BANK, 'q2-0', false);
     const { container } = await setup();
     openCompose();
     pickChapter(container, 0);
@@ -345,6 +362,9 @@ describe('自动组题 · 软门控', () => {
     fireEvent.click(screen.getByRole('button', { name: /容易结合氧/ }));
     // 必须等这一题的记录真的落进 stats 再断言，否则可能在「刷新前」的空窗期通过，
     // 让这个用例失去判定力（阈值若被改成 2 也照样绿）。2 条 = 预置 1 + 本次 1。
+    // 等待时长由全局放宽（src/__tests__/setup.ts 的 asyncUtilTimeout = 5s，配 vitest.config.ts 的
+    // testTimeout = 20s）：等的是 fake-indexeddb 的一次真实写入，100+ 文件并行时可能超过默认的 1s。
+    // 放宽的是**等待时长**，不是断言条件——条件依然必须真的成立，判定力不变。
     await waitFor(() => expect(Object.keys(loadStats()[BANK] ?? {})).toHaveLength(2));
     await waitFor(() => expect(screen.getByRole('button', { name: /下一题/ })).toBeTruthy());
     expect(gate(container)).toBe('');

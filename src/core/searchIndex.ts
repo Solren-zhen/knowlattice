@@ -108,6 +108,9 @@ export class VaultSearch {
   warm(): Promise<void> {
     if (this.mini) return Promise.resolve();
     if (this.warming) return this.warming;
+    // 构建是分块的（5227 篇量级要持续数秒），期间 sync() 因 this.mini 仍为 null 只能在
+    // docs 上登记、进不了索引。所以留一份构建快照，建完立刻把差异补进索引。
+    const builtFrom = new Map(this.docs);
     const m = new MiniSearch({
       fields: ['title', 'content', 'aliases'],
       tokenize: bigramTokenize,
@@ -120,8 +123,18 @@ export class VaultSearch {
       },
     });
     this.warming = m
-      .addAllAsync([...this.docs.entries()].map(([id, c]) => toIndexed(id, c)), { chunkSize: 200 })
+      .addAllAsync([...builtFrom.entries()].map(([id, c]) => toIndexed(id, c)), { chunkSize: 200 })
       .then(() => {
+        // 补构建期间的增量改动：漏掉的话「新加的文字搜不到、删掉的篇目还在索引里」，
+        // 且因为 sync 只比对内容是否变化，这个偏差会一直保持到那篇下次被编辑或重启。
+        for (const [id, c] of this.docs) {
+          if (builtFrom.get(id) === c) continue;
+          if (m.has(id)) m.discard(id);
+          m.add(toIndexed(id, c));
+        }
+        for (const id of builtFrom.keys()) {
+          if (!this.docs.has(id)) m.discard(id);
+        }
         this.mini = m;
         this.warming = null;
       })

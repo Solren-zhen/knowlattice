@@ -102,7 +102,8 @@ describe('QuickSearch 打开笔记时带上命中词', () => {
     });
     fireEvent.click(items()[0]);
 
-    expect(onOpenPath).toHaveBeenCalledWith('生理/氧解离曲线.md', '氧解离曲线');
+    // 第三参是触发的行元素（共享元素转场的来源），这里只关心前两参
+    expect(onOpenPath).toHaveBeenCalledWith('生理/氧解离曲线.md', '氧解离曲线', expect.anything());
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -110,6 +111,7 @@ describe('QuickSearch 打开笔记时带上命中词', () => {
     const { onOpenPath } = setup();
     await waitFor(() => expect(items().length).toBeGreaterThan(0));
     fireEvent.click(items()[0]);
-    expect(onOpenPath).toHaveBeenCalledWith(expect.any(String), undefined);
+    // 第三参是触发的行元素（共享元素转场的来源），这里只关心前两参
+    expect(onOpenPath).toHaveBeenCalledWith(expect.any(String), undefined, expect.anything());
   });
 });

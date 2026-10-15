@@ -8,17 +8,22 @@ import { useEsc } from './useEsc';
 import { loadMistakes, clearMistake, chapterHeat, reasonCounts, setMistakeReason, MISTAKE_REASONS, MISTAKE_REASON_LABELS, type MistakeMap } from '../core/mistakes';
 import { IconClose } from './icons';
 import { clickable } from './a11y';
+import type { QuoteSelection } from './AiAgentPanel';
 
 interface Props {
   onOpenPath: (path: string) => void;
   onClose: () => void;
+  /** 与 AI 笔记联动：把这条错题交给 AI 归因；不传则不显示入口 */
+  onAskAi?: (quote: QuoteSelection) => void;
 }
 
-export default function MistakeBook({ onOpenPath, onClose }: Props) {
+export default function MistakeBook({ onOpenPath, onClose, onAskAi }: Props) {
   // Esc 关闭（接进全局 Esc 栈，与其余面板一致）
   useEsc(onClose);
   const [mistakes, setMistakes] = useState<MistakeMap>(loadMistakes);
   const [filterChapter, setFilterChapter] = useState<string | null>(null);
+  // 「只看错过 ≥ N 次」的阈值：1 = 全部（默认，渲染结果与加这个过滤条之前逐像素一致）
+  const [minCount, setMinCount] = useState(1);
 
   const heat = useMemo(() => chapterHeat(mistakes), [mistakes]);
   const maxCount = Math.max(1, ...heat.map((h) => h.count));
@@ -35,6 +40,21 @@ export default function MistakeBook({ onOpenPath, onClose }: Props) {
     const list = Object.values(mistakes).sort((a, b) => b.lastFailedAt - a.lastFailedAt);
     return filterChapter ? list.filter((r) => r.chapter === filterChapter) : list;
   }, [mistakes, filterChapter]);
+
+  /**
+   * 阈值过滤只作用于**渲染列表**：保持 items 的原顺序与章节筛选语义，
+   * 顶部的「错题本 · N 条」与错因分布的占比仍按全表算——
+   * 否则用户会以为错题真的变少了。
+   */
+  const shown = useMemo(
+    // minCount === 1 时原样返回 items（不复制数组）：默认视图与加过滤条之前完全一致，
+    // 连脏数据里 count <= 0 的记录也照旧露出——「全部」这一档就该是什么都不筛。
+    () => (minCount > 1 ? items.filter((r) => r.count >= minCount) : items),
+    [items, minCount],
+  );
+  // 被隐藏的条数以「本章节筛选后的条数」为基数：全表 total 会把别的章节一起算进来，
+  // 章内一条都没被隐藏时也会报「另有 N 条」，数字对不上用户眼前这一屏。
+  const hidden = items.length - shown.length;
 
   const fmtTime = (t: number) => {
     const d = new Date(t);
@@ -118,9 +138,33 @@ export default function MistakeBook({ onOpenPath, onClose }: Props) {
               </div>
             </div>
 
+            {/* 「错题热力」入口：反复错的题才需要重点复盘，一次就过的错题不占视野 */}
+            <div className="mistake-filter-row" role="group" aria-label="按累计答错次数过滤">
+              <span className="muted">只看错过</span>
+              {[1, 2, 3, 5].map((n) => (
+                <button
+                  key={n}
+                  className={`chip${minCount === n ? ' on' : ''}`}
+                  aria-pressed={minCount === n}
+                  onClick={() => setMinCount(n)}
+                >
+                  {n === 1 ? '全部' : `≥${n} 次`}
+                </button>
+              ))}
+              {minCount > 1 && hidden > 0 && (
+                <span className="mistake-hidden muted">另有 {hidden} 条低于该阈值</span>
+              )}
+            </div>
+
             <div className="panel__body mistake-list">
-              {items.map((r) => (
-                <div key={r.path} className="mistake-item" onClick={() => onOpenPath(r.path)} {...clickable(`打开错题：${r.title}`)}>
+              {shown.map((r, i) => (
+                <div
+                  key={r.path}
+                  className="mistake-item stagger-item"
+                  style={{ ['--i' as string]: Math.min(i, 12) }}
+                  onClick={() => onOpenPath(r.path)}
+                  {...clickable(`打开错题：${r.title}`)}
+                >
                   <div className="mistake-item-main">
                     <div className="panel__title mistake-title">{r.title}</div>
                     <div className="mistake-meta muted">
@@ -152,6 +196,27 @@ export default function MistakeBook({ onOpenPath, onClose }: Props) {
                       >
                         未标注
                       </button>
+                      {/* 与 AI 笔记联动：这条错题（笔记 + 次数 + 已标错因）交给 AI 归因。
+                          预填 /错题归因 —— 该命令模板本来就要求「把错题贴进来」。 */}
+                      {onAskAi && (
+                        <button
+                          type="button"
+                          className="reason-chip"
+                          title="把这条错题交给 AI 笔记做归因（预填 /错题归因）"
+                          onClick={() => onAskAi({
+                            text: [
+                              `【错题】${r.title}（${r.chapter}）`,
+                              `笔记：${r.path}`,
+                              `累计答错：${r.count} 次`,
+                              `已标错因：${r.reason ? MISTAKE_REASON_LABELS[r.reason] : '未标注'}`,
+                            ].join('\n'),
+                            path: r.path,
+                            ask: '/错题归因 ',
+                          })}
+                        >
+                          问 AI 归因
+                        </button>
+                      )}
                     </div>
                   </div>
                   <button
@@ -167,6 +232,9 @@ export default function MistakeBook({ onOpenPath, onClose }: Props) {
                   </button>
                 </div>
               ))}
+              {shown.length === 0 && hidden > 0 && (
+                <p className="muted">没有错过 ≥{minCount} 次的题；把阈值调小看看。</p>
+              )}
             </div>
           </>
         )}

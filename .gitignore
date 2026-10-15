@@ -33,6 +33,8 @@ Thumbs.db
 # DSH Desktop 的工作文件（被占用删不掉，也不属于本项目；留着会让 git status 永远脏）
 token-cost-calc.univer
 verify2.univer
+# DSH 工具在仓库根落的临时目录（同上，属宿主产物）
+.dsh-tmp/
 
 # Python 字节码（离线包里的 server.py 是 Python 了，本地跑一次就会生成）
 __pycache__/

@@ -8,25 +8,32 @@
  * 检索复用与笔记检索同一套片段规则（相邻两字滑窗 + 等价词表）与同一套证据单元
  * （docIndex.buildChunks），保证「教材」与「笔记」两处的引用坐标口径一致。
  */
-import { buildChunks } from './docIndex';
+import { buildChunks, type EvidenceUnit } from './docIndex';
 import { expandQuery } from './medSynonyms';
 import { queryFragments } from './aiAgent';
-import { pageAnchor } from './pageAnchor';
+import { pageAnchor, pageAnchors, stripPageAnchors } from './pageAnchor';
 
 /** 单条命中正文的展示上限，避免一次工具结果撑爆上下文 */
 export const MED_HIT_TEXT_LIMIT = 900;
 
+/** 每本书最多返回的命中段落数：段落数量不该被书数卡死（两本书 × limit=6 只出 2 条太窄） */
+export const MED_HITS_PER_BOOK = 3;
+
 export interface MedBookHit {
   /** 教材名（文件名去扩展名，如「内科学（第10版）」） */
   book: string;
-  /** PDF 物理页号（从封面第 1 页数起；0 = 该段无页码锚点）。可能与原书印刷页码有偏移 */
+  /** 印刷页码（= PDF 物理页 − 偏移；未设偏移时两者相同，0 = 该段无页码锚点） */
   page: number;
+  /** 段落终点页（跨页段落与 page 不同）；0 = 无 */
+  endPage: number;
   /** 所属小节标题（'' = 无） */
   section: string;
   /** 命中的段落原文（已剥离页码锚点） */
   text: string;
   /** 稳定标识：书名 + 段落起点 */
   chunkId: string;
+  /** 弱命中：全书只有个别关键词片段出现，建议换更具体的词再查 */
+  weak?: boolean;
   score: number;
 }
 
@@ -37,11 +44,39 @@ export interface MedBookInfo {
   extractablePages: number;
 }
 
+/** 检索输入：lower / pageOffset 由调用方（medBooks）按缓存与设置提供，纯函数自身不算 */
+export interface MedBookInput {
+  name: string;
+  text: string;
+  /** 全文小写（缓存友好：教材全文百万字级，每次查询现算 toLowerCase 是重复开销） */
+  lower?: string;
+  /** 页码偏移 = PDF 物理页 − 印刷页 */
+  pageOffset?: number;
+}
+
 /** 由逐页文本拼成带页码锚点的 Markdown（页码从 1 起） */
 export function pagesToMarkdown(pages: string[]): string {
   return pages
     .map((t, i) => `${pageAnchor(i + 1)}\n${t.replace(/\r\n?/g, '\n').trim()}`)
     .join('\n\n');
+}
+
+/** 物理页 → 印刷页（偏移可把页码压到 1 以下时取 1） */
+export function printedPage(pdfPage: number, offset = 0): number {
+  return Math.max(1, pdfPage - Math.max(0, offset));
+}
+
+/**
+ * 从带页码锚点的 Markdown 里取某物理页的整页正文（锚点间内容，已剥离锚点）。
+ * 页不存在返回 null；页码按锚点实际值匹配，空页也能取到（返回空串）。
+ */
+export function extractPage(markdown: string, page: number): string | null {
+  const anchors = pageAnchors(markdown);
+  const at = anchors.findIndex((a) => a.page === page);
+  if (at < 0) return null;
+  const start = anchors[at].index + pageAnchor(anchors[at].page).length;
+  const end = at + 1 < anchors.length ? anchors[at + 1].index : markdown.length;
+  return stripPageAnchors(markdown.slice(start, end)).trim();
 }
 
 /**
@@ -61,11 +96,14 @@ export function bookMatches(name: string, wanted: string): boolean {
 
 /**
  * 在教材集合里检索：空格分隔多关键词需同时命中，每个关键词先做等价词展开，
- * 再按相邻两字滑窗做片段召回（与 searchNotes 同一规则）。命中最密集的段落胜出，
- * 并继承其所属小节与页码。
+ * 再按相邻两字滑窗做片段召回（与 searchNotes 同一规则）。
+ *
+ * 两级打分：书级（片段是否出现在书名/正文，决定这本书进不进结果）＋
+ * 段落级（命中片段最密集的证据单元胜出）。每本书取最密集的前 MED_HITS_PER_BOOK 段，
+ * 全局按分排序后截断——书少时也能凑满 limit。
  */
 export function searchMedBooks(
-  books: Array<{ name: string; text: string }>,
+  books: MedBookInput[],
   query: string,
   limit = 6,
   book?: string
@@ -78,7 +116,7 @@ export function searchMedBooks(
   for (const b of books) {
     if (!bookMatches(b.name, wanted)) continue;
     const content = b.text;
-    const lower = content.toLowerCase();
+    const lower = b.lower ?? content.toLowerCase();
     const lowerName = b.name.toLowerCase();
 
     let docScore = 0;
@@ -104,11 +142,19 @@ export function searchMedBooks(
       if (!matched) { matchedAll = false; break; }
     }
     if (!matchedAll || !matchedFrags.size) continue;
+    // 弱命中：原词的片段一个都没出现、纯靠等价词表召回（如查「心梗」只命中文本里的「心肌梗死」）。
+    // 这类命中仍返回，但打上标记让模型自己判断要不要换词再查。
+    const origFrags = new Set<string>();
+    for (const term of terms) for (const frag of queryFragments(term)) origFrags.add(frag);
+    let origMatched = false;
+    for (const frag of origFrags) if (matchedFrags.has(frag)) { origMatched = true; break; }
+    const weak = !origMatched;
 
-    // 段落级细检：命中片段最密集的证据单元胜出，并继承小节与页码
-    let best = { heading: '', page: null as number | null, text: content, start: 0 };
-    let bestScore = -1;
+    // 段落级细检：命中片段最密集的前几段胜出，各段继承小节与页码
+    const scored: Array<{ unit: EvidenceUnit; score: number }> = [];
     for (const u of buildChunks(content, `${b.name}.md`)) {
+      // 纯标题单元（文本就是标题行）不算命中候选：标题只是坐标，不是可引用的正文
+      if (u.heading && u.text.replace(/^#+\s*/, '').trim() === u.heading) continue;
       const ul = u.text.toLowerCase();
       let s = 0;
       for (const frag of matchedFrags) {
@@ -117,17 +163,25 @@ export function searchMedBooks(
       }
       const hl = u.heading.toLowerCase();
       for (const frag of matchedFrags) if (hl.includes(frag)) s += 2;
-      if (s > bestScore) { bestScore = s; best = { heading: u.heading, page: u.page, text: u.text, start: u.start }; }
+      if (s > 0) scored.push({ unit: u, score: s });
     }
+    scored.sort((a, z) => z.score - a.score);
 
-    hits.push({
-      book: b.name,
-      page: best.page ?? 0,
-      section: best.heading,
-      text: best.text,
-      chunkId: `${b.name}#${best.start}`,
-      score: docScore + bestScore,
-    });
+    const offset = b.pageOffset ?? 0;
+    for (const { unit, score } of scored.slice(0, MED_HITS_PER_BOOK)) {
+      const page = unit.page ? printedPage(unit.page, offset) : 0;
+      const endPage = unit.endPage && unit.endPage !== unit.page ? printedPage(unit.endPage, offset) : 0;
+      hits.push({
+        book: b.name,
+        page,
+        endPage,
+        section: unit.heading,
+        text: unit.text,
+        chunkId: `${b.name}#${unit.start}`,
+        weak: weak || undefined,
+        score: docScore + score,
+      });
+    }
   }
 
   hits.sort((a, b) => b.score - a.score);
@@ -142,7 +196,9 @@ export function formatMedHits(hits: MedBookHit[]): string {
   }
   return hits
     .map((h) => {
-      const where = `《${h.book}》${h.page ? ` P${h.page}` : ''}${h.section ? ` §${h.section}` : ''}`;
+      const span = h.endPage && h.endPage !== h.page ? `${h.page}-${h.endPage}` : `${h.page}`;
+      const where = `《${h.book}》${h.page ? ` P${span}` : ''}${h.section ? ` §${h.section}` : ''}`
+        + (h.weak ? '（弱命中：仅个别关键词出现，建议换更具体的关键词再查）' : '');
       const text = h.text.replace(/\s+/g, ' ').trim();
       const shown = text.length > MED_HIT_TEXT_LIMIT ? `${text.slice(0, MED_HIT_TEXT_LIMIT)}…` : text;
       return `${where}\n  ｜ ${shown}\n  chunk_id=${h.chunkId}`;

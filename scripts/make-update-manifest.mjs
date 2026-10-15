@@ -13,7 +13,7 @@
  * 学生端应用启动时会自动检查 https://github.com/Solren-zhen/knowlattice/releases/latest/download/latest.json
  * 发现新版本就自动下载安装并重启（签名不符的安装包会被拒绝）。
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,30 +22,70 @@ const conf = JSON.parse(readFileSync(join(repo, 'src-tauri', 'tauri.conf.json'),
 const version = conf.version;
 const releaseBase = `https://github.com/Solren-zhen/knowlattice/releases/download/v${version}`;
 
-// 各平台的更新器产物路径（.sig 与安装包同目录同名）
+// 三处版本必须一致：Tauri 实际读 tauri.conf.json，但 npm / Cargo 各自决定发布说明与安装信息。
+// 漂移了就在这里拦下，别让 latest.json 和真实产物对不上（只会表现为用户永远收不到更新）。
+{
+  const pkgVersion = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version;
+  const cargoVersion = /^version\s*=\s*"([^"]+)"/m.exec(readFileSync(join(repo, 'src-tauri', 'Cargo.toml'), 'utf8'))?.[1];
+  for (const [what, v] of [['package.json', pkgVersion], ['src-tauri/Cargo.toml', cargoVersion]]) {
+    if (v !== version) {
+      console.error(`版本不一致：tauri.conf.json=${version}，${what}=${v}。先把三处版本号统一再发布。`);
+      process.exit(1);
+    }
+  }
+}
+
+// 各平台的更新器产物目录。带 `--target <triple>` 构建时产物在 target/<triple>/release/bundle/，
+// 不带则落在 target/release/bundle/。两种都探 —— 否则在 Mac 上按文件头的注释直接
+// `npm run tauri build` 之后跑本脚本，会连 nsis 目录都不存在、崩在写 latest.json 上。
+const targetRoot = join(repo, 'src-tauri', 'target');
+const bundleDirs = (kind) => {
+  const out = [];
+  if (!existsSync(targetRoot)) return out;
+  for (const e of readdirSync(targetRoot, { withFileTypes: true })) {
+    if (!e.isDirectory() || e.name === 'release' || e.name === 'debug') continue;
+    const dir = join(targetRoot, e.name, 'release', 'bundle', kind);
+    if (existsSync(dir)) out.push({ dir, triple: e.name });
+  }
+  const plain = join(targetRoot, 'release', 'bundle', kind);
+  if (existsSync(plain)) out.push({ dir: plain, triple: '' });
+  return out;
+};
+
+// macOS 的平台键必须与实际构建的 triple 对应：固定写 darwin-aarch64 会让 Intel Mac
+// 永远查不到更新（updater 按运行架构查 darwin-x86_64）。
+const darwinPlatform = (triple) =>
+  triple.includes('x86_64') ? 'darwin-x86_64' : triple.includes('aarch64') ? 'darwin-aarch64' : null;
+
 const artifacts = [
   {
     platform: 'windows-x86_64',
-    dir: join(repo, 'src-tauri', 'target', 'release', 'bundle', 'nsis'),
+    dirs: bundleDirs('nsis').map((d) => d.dir),
     fileName: `KnowLattice_${version}_x64-setup.exe`,
   },
-  {
-    platform: 'darwin-aarch64',
-    dir: join(repo, 'src-tauri', 'target', 'release', 'bundle', 'macos'),
-    fileName: 'KnowLattice.app.tar.gz',
-  },
+  ...bundleDirs('macos').map(({ dir, triple }) => {
+    const platform = darwinPlatform(triple);
+    if (!platform) {
+      console.warn(`[warn] ${dir}：目录名里看不出目标架构，按 aarch64 记入清单，请自行确认 --target。`);
+      return { platform: 'darwin-aarch64', dirs: [dir], fileName: 'KnowLattice.app.tar.gz' };
+    }
+    return { platform, dirs: [dir], fileName: 'KnowLattice.app.tar.gz' };
+  }),
 ];
 
 const platforms = {};
 const missing = [];
-for (const { platform, dir, fileName } of artifacts) {
-  const sigFile = join(dir, `${fileName}.sig`);
-  if (!existsSync(sigFile)) {
+const outDirs = [];
+for (const { platform, dirs, fileName } of artifacts) {
+  if (platforms[platform]) continue; // 同一平台出现多个目录时只取第一个
+  const hit = dirs.find((d) => existsSync(join(d, `${fileName}.sig`)));
+  if (!hit) {
     missing.push(platform);
     continue;
   }
+  outDirs.push(hit);
   platforms[platform] = {
-    signature: readFileSync(sigFile, 'utf8').trim(),
+    signature: readFileSync(join(hit, `${fileName}.sig`), 'utf8').trim(),
     url: `${releaseBase}/${encodeURIComponent(fileName)}`,
   };
 }
@@ -61,7 +101,8 @@ const manifest = {
   pub_date: new Date().toISOString(),
   platforms,
 };
-const out = join(artifacts[0].dir, 'latest.json');
+// 写到实际产出了签名的目录；一个都没有时（理论上到不了这里）退回仓库根，.gitignore 已忽略 /latest.json
+const out = join(outDirs[0] ?? repo, 'latest.json');
 writeFileSync(out, JSON.stringify(manifest, null, 2) + '\n');
 console.log(`latest.json 已生成（v${version}）→ ${out}`);
 for (const platform of Object.keys(platforms)) console.log(`  含平台：${platform}`);

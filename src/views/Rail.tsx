@@ -2,15 +2,16 @@
  * 左侧导航轨：可展开分组标签 + 功能入口 + 字体/主题切换。
  * 字体与主题状态只有导航轨在用，收敛在此；各面板开关由 Workspace 传入回调。
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   applyFont, applyTheme, currentFont, currentTheme, FONT_LABELS,
   type Font, type Theme,
 } from '../core/theme';
+import { applyHighlight, currentHighlight, HIGHLIGHT_PRESETS } from '../core/highlight';
 import {
   IconLogo, IconTree, IconPathway, IconChevron, IconSearch, IconHistory, IconBody, IconBrain, IconGraph, IconCards,
   IconTarget, IconQuiz, IconTodo, IconTag, IconChart, IconAi, IconAgent, IconWand, IconBook,
-  IconConvert, IconSun, IconMoon, IconInfo,
+  IconConvert, IconSun, IconMoon, IconInfo, IconRestore,
 } from './icons';
 
 interface Props {
@@ -35,6 +36,7 @@ interface Props {
   onDraft: () => void;
   onPdf: () => void;
   onConvert: () => void;
+  onImport: () => void;
   onNotice: () => void;
 }
 
@@ -43,6 +45,10 @@ export default function Rail(p: Props) {
   const [font, setFont] = useState<Font>(currentFont);
   const [fontOpen, setFontOpen] = useState(false);
   const fontButtonRef = useRef<HTMLButtonElement>(null);
+  const [hl, setHl] = useState<string>(currentHighlight);
+  const [hlOpen, setHlOpen] = useState(false);
+  const hlButtonRef = useRef<HTMLButtonElement>(null);
+  const hlName = HIGHLIGHT_PRESETS.find((preset) => preset.bg === hl)?.name;
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [isNarrow, setIsNarrow] = useState(() => window.matchMedia?.('(max-width: 1040px)').matches === true);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -197,6 +203,10 @@ export default function Rail(p: Props) {
         <IconHistory />
         <span className="rail-label">历史版本</span>
       </button>
+      <button className={`rail-btn${p.activeItem === 'import' ? ' on' : ''}`} aria-current={p.activeItem === 'import' ? 'page' : undefined} data-tip="导入：自动识别格式（笔记 / 题库 / Anki / 数据集 / Word·PDF），支持批量" aria-label="导入" onClick={p.onImport}>
+        <IconRestore />
+        <span className="rail-label">导入</span>
+      </button>
       <button className={`rail-btn${p.activeItem === 'convert' ? ' on' : ''}`} aria-current={p.activeItem === 'convert' ? 'page' : undefined} data-tip="格式转换：PDF / Word → Markdown" aria-label="格式转换" onClick={p.onConvert}>
         <IconConvert />
         <span className="rail-label">格式转换</span>
@@ -248,14 +258,76 @@ export default function Rail(p: Props) {
           </div>
         )}
       </div>
+      {/* 高亮色：与「字体」并列的阅读外观设置。默认醒目红，预设之外可用取色器自定义
+          （颜色与反白/反黑字色都由 core/highlight.ts 落成 --hl-bg / --hl-ink）。 */}
+      <div className="rail-font-wrap">
+        <button
+          ref={hlButtonRef}
+          className={`rail-btn ${hlOpen ? 'on' : ''}`}
+          data-tip={`切换高亮色（当前：${hlName ?? '自定义'}）`}
+          aria-label="切换高亮色"
+          aria-expanded={hlOpen}
+          aria-controls="rail-highlight-options"
+          onClick={() => setHlOpen((v) => !v)}
+        >
+          {/* 文字样张「A」+ 下半截染当前高亮色，与「字体」的「Aa」成对（见 .rail-hl-glyph 注释） */}
+          <span
+            className="rail-hl-glyph"
+            style={{ '--hl-now': hl } as CSSProperties}
+            aria-hidden="true"
+          >A</span>
+          <span className="rail-label">高亮色</span>
+        </button>
+        {hlOpen && (
+          <div
+            className="rail-flyout rail-hl-flyout"
+            id="rail-highlight-options"
+            role="group"
+            aria-label="文本高亮色"
+            onMouseLeave={() => setHlOpen(false)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setHlOpen(false);
+                hlButtonRef.current?.focus();
+              }
+            }}
+          >
+            {/* 点预设不关面板：换色要能当场在正文里比效果，关掉再开反而多两步 */}
+            <div className="rail-hl-swatches">
+              {HIGHLIGHT_PRESETS.map((preset) => (
+                <button
+                  key={preset.bg}
+                  type="button"
+                  className={`rail-hl-swatch${hl === preset.bg ? ' active' : ''}`}
+                  style={{ background: preset.bg }}
+                  aria-label={`高亮色：${preset.name}`}
+                  aria-pressed={hl === preset.bg}
+                  title={preset.name}
+                  onClick={() => { applyHighlight(preset.bg); setHl(preset.bg); }}
+                />
+              ))}
+            </div>
+            <label className="rail-hl-custom">
+              <span>自定义</span>
+              <input
+                type="color"
+                value={hl}
+                aria-label="自定义高亮色"
+                onChange={(event) => { applyHighlight(event.target.value); setHl(event.target.value); }}
+              />
+            </label>
+          </div>
+        )}
+      </div>
       <button
         className="rail-btn"
         data-tip={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
         aria-label="切换主题"
         aria-pressed={theme === 'dark'}
-        onClick={() => {
+        onClick={(event) => {
           const next: Theme = theme === 'dark' ? 'light' : 'dark';
-          applyTheme(next);
+          // 传点击坐标：core/theme.ts 据此做一次从按钮扩散的圆形揭示
+          applyTheme(next, { x: event.clientX, y: event.clientY });
           setTheme(next);
         }}
         >

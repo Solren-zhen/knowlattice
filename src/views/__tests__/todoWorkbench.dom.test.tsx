@@ -70,7 +70,7 @@ describe('工作台外壳', () => {
     expect(screen.queryByPlaceholderText(/加一条/)).toBeNull(); // 待办页的内容收起来了
 
     fireEvent.click(tab('统计'));
-    expect(screen.getByText('近 7 天专注趋势')).toBeTruthy();
+    expect(screen.getByText('近 14 天专注趋势')).toBeTruthy();
     expect(screen.getByText('待办完成率')).toBeTruthy();
   });
 
@@ -250,7 +250,8 @@ describe('统计页', () => {
     expect(screen.getByText('50%')).toBeTruthy();          // 1/2 完成率
     expect(document.querySelectorAll('.wb-heat__col')).toHaveLength(12);
     expect(document.querySelectorAll('.wb-heat__col .wb-heat__cell')).toHaveLength(84);
-    // 今天的柱子有 2 个专注周期
-    expect((document.querySelector('.wb-trend__item:last-child') as HTMLElement).title).toContain('2 个专注周期');
+    // 折线按真实数据画：14 个数据点，默认选中最后一天（今天），读数是它的真实值
+    expect(document.querySelectorAll('.trend-dot')).toHaveLength(14);
+    expect(document.querySelector('.trend-readout')?.textContent).toContain('2个周期');
   });
 });

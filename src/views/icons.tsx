@@ -365,6 +365,19 @@ export const IconLogo = ({ size = 24 }: P) => {
   );
 };
 
+/** 晶格标（首屏徽标 / 面板品牌行）：六边形晶胞 + 三根向外的键 + 三个节点。
+    与 IconLogo（深色砖 + 发光节点的品牌砖）分工不同：这个是纯 currentColor
+    的线条标，压在彩色胶囊或淡底上都能用，14~18px 下仍认得出是「晶格」。 */
+export const IconLattice = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <path d="M12 5.8 17.37 8.9 17.37 15.1 12 18.2 6.63 15.1 6.63 8.9Z" />
+    <path d="M12 5.8V2.6M6.63 15.1 4.2 16.5M17.37 15.1 19.8 16.5" />
+    <circle cx="12" cy="2.6" r="1.25" {...solid} />
+    <circle cx="4.2" cy="16.5" r="1.25" {...solid} />
+    <circle cx="19.8" cy="16.5" r="1.25" {...solid} />
+  </svg>
+);
+
 /** 导航历史：后退 / 前进 */
 export const IconBack = ({ size = 15 }: P) => (
   <svg {...base(size)}>

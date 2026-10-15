@@ -22,16 +22,28 @@ import { rebuildLinkIndex, updateLinksForPath, backlinks, type LinkIndex } from 
 import { exportSrsState, importSrsState } from './srs';
 import { exportQbanks, importQbanks } from './qbank';
 import { exportQuestionStats, importQuestionStats } from './qbankStats';
+import { exportStars, importStars, type StarMap } from './qbankStarred';
 import { exportCalibration, importCalibration } from './qbankCalib';
 import { loadMistakes, importMistakes } from './mistakes';
 import { exportTodos, importTodos } from './todos';
 import { exportCardEdits, importCardEdits } from './cardEdits';
+import { exportNoteMedia, importNoteMedia } from './noteMedia';
+import { findOrphanAttachments as findOrphans } from './attachmentOrphans';
+import { exportNoteStyles, importNoteStyles } from './mindmapNodeStyles';
+import { exportMarks, importMarks } from './mindmapMarks';
+import { exportMindMapPrefs, importMindMapPrefs } from './mindmapPrefs';
+import { exportPlan, importPlan } from './reviewPlan';
+import { exportReminder, importReminder } from './reminder';
+import { exportRecall, importRecall } from './localRecall';
+import { exportExamHistory, importExamHistory } from './examHistory';
+import { exportDaily, importDaily } from './dailyPractice';
 import { exportDays, importDays } from './stats';
 import { exportPomodoros, importPomodoros } from './pomodoro';
 import { pushSnapshot } from './history';
 import { repairMarkdown, type MarkdownRepairChange } from './markdownRepair';
 import { exportPathwayTemplates, importPathwayTemplates } from './pathwayTemplates';
 import { enqueueWrite } from './writeQueue';
+import { planMerge, formatConflictStamp, pickNewObjectKeys, pickNewListItems, type ExistingFile } from './restoreMerge';
 import { toast } from './feedback';
 
 export interface TreeNode {
@@ -51,10 +63,25 @@ export interface ImportResult {
   failed: number;
   repaired?: number;
   repairedFiles?: MarkdownRepairFile[];
-  /** 本次导入覆盖掉的已存在路径（笔记与附件分列）。
-   *  供调用方弹「已覆盖 N 篇现有笔记」确认——恢复备份是覆盖性写，
-   *  用户应当知道哪些现有文件被换掉了。 */
+  /** 本次**真正被覆盖**的现有路径（笔记与附件分列）。
+   *  「只补不覆盖」后这里**恒为空数组**：恢复 / 导入不再替换现有文件——内容不同时把来源那一篇
+   *  另存到冲突目录、内容相同则跳过，附件则原样保留。保留该字段是为了不改既有字段语义
+   *  （ChapterTree 仍在读它）。 */
   overwritten?: string[];
+  /** 新增（真正写入）的**笔记**篇数。 */
+  addedNotes?: number;
+  /** 因「路径已存在且内容不同」而**另存**到冲突目录的笔记篇数。 */
+  conflictNotes?: number;
+  /** 冲突另存的**目标路径**（可追溯地亮给用户：哪几篇被另存了）。 */
+  conflictFiles?: string[];
+  /** 因「路径已存在且内容完全相同」而跳过的笔记篇数。 */
+  unchangedNotes?: number;
+  /** 附件：新写入的个数。 */
+  addedAttachments?: number;
+  /** 附件：因已存在而保留跳过的个数（现有笔记引用的就是现有附件，替换会改历史笔记的显示）。 */
+  skippedAttachments?: number;
+  /** 各 localStorage 存储的逐条合并计数（键已存在则保留现有值，只补新键）。 */
+  storeMerges?: Array<{ name: string; added: number; kept: number }>;
 }
 
 /** 只接受 vault 内的 POSIX 相对路径；导入备份与未来的 Tauri 文件适配器共用。 */
@@ -245,6 +272,141 @@ function repairCount(files: MarkdownRepairFile[]): number {
   return files.reduce((sum, file) => sum + file.changes.reduce((n, c) => n + c.count, 0), 0);
 }
 
+/**
+ * 打开库时的 Markdown 格式自动修复（幂等：只有实际发生变化的文件才写盘）。
+ *
+ * 为什么不做成菜单里的一次性动作：格式修复属于**维护**，不是用户操作——用户既不知道
+ * 自己哪篇笔记坏在哪，也没理由记住「要去点一下」。放在加载路径上，每次打开库顺带扫一遍：
+ * 坏的那一次修好，之后各次都只是一遍内存扫描、零写盘。
+ *
+ * 就地改 `fileMap`（此时调用方还没 setDocs）：避免「先发布一份坏内容、再发一次事件修正」
+ * 的中间态。写失败的文件保持磁盘原样、报告里如实扣掉。
+ */
+async function repairNotesOnLoad(fileMap: Map<string, string>): Promise<ImportResult> {
+  const source = [...fileMap.entries()]
+    .filter(([path]) => path.toLowerCase().endsWith('.md'))
+    .map(([path, content]) => ({ path, content }));
+  const repaired = repairEntries(source);
+  if (repaired.repairedFiles.length === 0) {
+    return { ok: 0, failed: 0, repaired: 0, repairedFiles: [] };
+  }
+  const changed = repaired.entries.filter((entry) =>
+    repaired.repairedFiles.some((file) => file.path === entry.path)
+  );
+  const failedPaths = await writeMany(changed);
+  const failedSet = new Set(failedPaths);
+  const okFiles = changed.filter((entry) => !failedSet.has(entry.path));
+  for (const file of okFiles) fileMap.set(file.path, file.content);
+  const repairedFiles = repaired.repairedFiles.filter((file) => !failedSet.has(file.path));
+  return {
+    ok: okFiles.length,
+    failed: failedPaths.length,
+    repaired: repairCount(repairedFiles),
+    repairedFiles,
+  };
+}
+
+/** localStorage 存储的合并计数（报告用） */
+interface StoreMerge { name: string; added: number; kept: number }
+
+/**
+ * 对象型 localStorage 存储的「只补不覆盖」合并：读出当前快照 → 只挑**新键** → 交给该存储
+ * 自己的导入器落盘。
+ *
+ * 为什么不直接整块 setItem 覆盖：① 存储自己的导入器带着各自的校验与兜底（core/srs、
+ * core/cardEdits、core/noteMedia 等），复用它们才不会在恢复路径上分叉出第二套解析；
+ * ② 那些导入器多是「同键覆盖」语义，直接喂整包会把用户现有值盖掉——先过滤成「只含新键」
+ * 再喂，天然碰不到现有键，等价于「键已存在则保留现有值」。
+ *
+ * `wholeReplace`：少数导入器（如 core/qbankCalib 的 importCalibration）用它收到的对象
+ * **重建**整份存储，只传新键会把现有键整批抹掉；此时补上现有值（现有优先）再喂，既留旧又增新。
+ */
+async function mergeObjectStore(
+  name: string,
+  incoming: unknown,
+  snapshot: Record<string, unknown>,
+  apply: (payload: Record<string, unknown>) => unknown,
+  wholeReplace = false,
+): Promise<StoreMerge> {
+  const { fresh, added, kept } = pickNewObjectKeys(incoming, snapshot);
+  if (added > 0) await apply(wholeReplace ? { ...(incoming as Record<string, unknown>), ...snapshot } : fresh);
+  return { name, added, kept };
+}
+
+/**
+ * 数组型 localStorage 存储的「只补不覆盖」合并：按身份键（id 等）滤出现有键之外的条目再落盘。
+ * 未提供身份键的条目按新增处理（见 pickNewListItems）：判不了重时宁可可多不能漏。
+ */
+async function mergeListStore(
+  name: string,
+  incoming: unknown,
+  existingKeys: ReadonlySet<string>,
+  keyOf: (item: Record<string, unknown>) => string | undefined,
+  apply: (fresh: Record<string, unknown>[]) => unknown,
+): Promise<StoreMerge> {
+  const { fresh, added, kept } = pickNewListItems(incoming, existingKeys, keyOf);
+  if (added > 0) await apply(fresh);
+  return { name, added, kept };
+}
+
+/**
+ * 题库统计是 (题库 → 题目 → 值) 的两层对象：按 (题库, 题目) 逐键过滤，现有键保留、只补新键。
+ * 与对象型存储同一纪律——现有键的值原样留着，不因为导入而被旧备份冲回去。
+ */
+function pickNewQuestionStats(
+  incoming: unknown,
+  existing: Record<string, Record<string, unknown>>,
+): { fresh: Record<string, Record<string, unknown>>; added: number; kept: number } {
+  const fresh: Record<string, Record<string, unknown>> = {};
+  let added = 0;
+  let kept = 0;
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return { fresh, added, kept };
+  for (const [bank, questions] of Object.entries(incoming as Record<string, unknown>)) {
+    if (!questions || typeof questions !== 'object' || Array.isArray(questions)) continue;
+    const existingBank = existing[bank] ?? {};
+    const target: Record<string, unknown> = {};
+    for (const [qid, stat] of Object.entries(questions as Record<string, unknown>)) {
+      if (Object.prototype.hasOwnProperty.call(existingBank, qid)) {
+        kept++;
+        continue;
+      }
+      target[qid] = stat;
+      added++;
+    }
+    if (Object.keys(target).length > 0) fresh[bank] = target;
+  }
+  return { fresh, added, kept };
+}
+
+/**
+ * 收藏题与题库统计同形（题库 → 题目 → 值），走同一套「逐键只补不覆盖」：
+ * 本地已收藏的题保持收藏，备份里多出来的题补上；已被取消收藏的题不会被旧备份复活。
+ */
+function pickNewStars(
+  incoming: unknown,
+  existing: StarMap,
+): { fresh: StarMap; added: number; kept: number } {
+  const fresh: StarMap = {};
+  let added = 0;
+  let kept = 0;
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return { fresh, added, kept };
+  for (const [bank, questions] of Object.entries(incoming as Record<string, unknown>)) {
+    if (!questions || typeof questions !== 'object' || Array.isArray(questions)) continue;
+    const existingBank = existing[bank] ?? {};
+    const target: Record<string, true> = {};
+    for (const qid of Object.keys(questions as Record<string, unknown>)) {
+      if (Object.prototype.hasOwnProperty.call(existingBank, qid)) {
+        kept++;
+        continue;
+      }
+      target[qid] = true;
+      added++;
+    }
+    if (Object.keys(target).length > 0) fresh[bank] = target;
+  }
+  return { fresh, added, kept };
+}
+
 /** 只反映会影响名称解析和 PDF 目标列表的元数据；正文普通改动不应触发全库索引重建。 */
 function linkMetadataSignature(path: string, content: string | undefined): string {
   if (!path.endsWith('.md')) return '';
@@ -404,7 +566,20 @@ const normCreated = (s: string) => s.replace(/^created: .*$/m, 'created:');
 export function useVault() {
   const [docs, setDocs] = useState<Map<string, string>>(new Map());
   const docsRef = useRef(docs);
-  useEffect(() => { docsRef.current = docs; }, [docs]);
+  /**
+   * 改 docs 的**唯一入口**：先写 ref，再 setState。
+   *
+   * 为什么不能靠「useEffect 同步 ref」：effect 跑在渲染提交之后，于是存在一个
+   * 「界面已经显示加载完成（loaded=true）、docsRef 还是旧值（空表）」的窗口。恢复 / 导入的
+   * 查重读的正是 docsRef：落在这个窗口里时，每一篇现有笔记都会命中「存在但内容拿不到」这条
+   * 保守分支，被各自另存一份 `恢复冲突/…` 副本（真机上表现为「刚打开库就恢复 → 莫名多出一堆
+   * 冲突副本」；测试里表现为 conflictNotes 偶发从 1 变 2）。
+   * 所以：ref 一律先写，state 只负责渲染。
+   */
+  const applyDocs = useCallback((next: Map<string, string>) => {
+    docsRef.current = next;
+    setDocs(next);
+  }, []);
   const [structureDocs, setStructureDocs] = useState<Map<string, string>>(new Map());
   /** 二进制附件：path → Blob（与笔记分库，避免保存时整库拷贝大图片） */
   const [attachments, setAttachments] = useState<Map<string, Blob>>(new Map());
@@ -417,6 +592,10 @@ export function useVault() {
   /** 链接索引：state 持有（替换 ref，规避 render 期访问 ref）。日常保存就地增量更新
    *  （updateLinksForPath），依赖 docs/索引身份的消费者（图谱、反链）随 docs 变化重算。 */
   const [linkIndex, setLinkIndex] = useState<LinkIndex>(() => ({ outgoing: new Map(), incoming: new Map() }));
+
+  /** 打开库时**自动**修正的 Markdown 格式报告（没有可修的为 null）。只用于界面显示明细，
+   *  不是用户要点一下的动作——真正的修复在加载 effect 里做，见 repairNotesOnLoad。 */
+  const [autoRepair, setAutoRepair] = useState<ImportResult | null>(null);
   /** Blob 对象 URL 缓存：同一附件只 createObjectURL 一次 */
   const attachmentUrlCache = useRef(new Map<string, string>());
   /** 各路径「我们上次看到的磁盘 mtime」。写盘前比对它来发现外部改动（外部编辑器 /
@@ -436,19 +615,26 @@ export function useVault() {
       const attachmentMap = await adapter.readAllAttachments();
 
       // 迁移旧版（v1）把 dataURL 附件塞在 files store 里的数据：转为 Blob 放 attachments store
-      const legacyMoved: Array<{ path: string; blob: Blob }> = [];
+      const legacyMoved: Array<{ path: string; blob: Blob; raw: string }> = [];
       for (const [p, content] of fileMap) {
         if (!p.startsWith('_attachments/')) continue;
         const blob = dataUrlToBlob(content);
         if (blob) {
-          legacyMoved.push({ path: p, blob });
+          legacyMoved.push({ path: p, blob, raw: content });
           attachmentMap.set(p, blob);
           fileMap.delete(p);
         }
         // 转换失败的旧数据暂时留在 docs 里，readFile 仍可当 dataURL 渲染，避免丢图
       }
       for (const a of legacyMoved) {
-        await adapter.writeAttachment(a.path, a.blob).catch(() => {});
+        try {
+          await adapter.writeAttachment(a.path, a.blob);
+        } catch {
+          // 新位置写失败（配额 / IO）：把旧 dataURL 记录放回 docs。否则下面的 remove 会
+          // 删掉唯一那份数据 —— 上面「避免丢图」的承诺落空，图永久消失且没有任何报错。
+          fileMap.set(a.path, a.raw);
+          continue;
+        }
         await adapter.remove(a.path).catch(() => {});
       }
 
@@ -464,8 +650,15 @@ export function useVault() {
         fileMap.set(ONBOARD_PATH, ONBOARD_CONTENT);
       }
       if (cancelled) return;
+
+      // Markdown 格式自动修复：打开库即静默跑一遍（幂等，只写实际变化的文件）。
+      // 不做成「⋯」菜单里的一次性动作：格式修复是**维护**，用户既不知道哪篇坏在哪，
+      // 也没理由记住「要去点一下」；修过一次之后，此后每次打开都只是一遍内存扫描、零写盘。
+      const repair = await repairNotesOnLoad(fileMap);
+      if (repair.repaired || repair.failed) setAutoRepair(repair);
+      if (cancelled) return;
       setLinkIndex(rebuildLinkIndex(fileMap));
-      setDocs(fileMap);
+      applyDocs(fileMap);
       setStructureDocs(fileMap);
       setAttachments(attachmentMap);
       setLoaded(true);
@@ -480,7 +673,7 @@ export function useVault() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, applyDocs]);
 
   /** 重新加载知识库（错误页的「重试」按钮） */
   const retryLoad = useCallback(() => {
@@ -551,15 +744,14 @@ export function useVault() {
       await adapter.write(safePath, content);
       await syncDiskMtime(safePath);
       const next = new Map(docsRef.current).set(safePath, content);
-      docsRef.current = next;
-      setDocs(next);
+      applyDocs(next);
       updateLinksForPath(linkIndex, safePath, content);
       if (structureChanged) {
         setStructureDocs(next);
       }
       void pushSnapshot(safePath, content);
     });
-  }, [linkIndex, keepExternalEdit, syncDiskMtime]);
+  }, [linkIndex, keepExternalEdit, syncDiskMtime, applyDocs]);
 
   /** 删除：先落盘、再改内存；失败抛出且内存保持原样（不会再「删了重启又回来」）。
    *  同样进同路径写队列：避免「删除刚完成、自动保存的 rename 又把文件写回来」。 */
@@ -571,13 +763,12 @@ export function useVault() {
       diskMtimesRef.current.delete(safePath); // 文件没了，基线一并作废
       const next = new Map(docsRef.current);
       next.delete(safePath);
-      docsRef.current = next;
-      setDocs(next);
+      applyDocs(next);
       if (safePath.endsWith('.md')) setStructureDocs(next);
       updateLinksForPath(linkIndex, safePath, '');
       setCurrentPath((cur) => (cur === safePath ? null : cur));
     });
-  }, [linkIndex]);
+  }, [linkIndex, applyDocs]);
 
   /** 批量删除：落盘分批限流（避免一次发几千个 IndexedDB 事务），返回**删失败的路径**。
    *  内存只删真正删成功的：失败的留在树里，用户看得见「没删掉」，而不是被蒙住。 */
@@ -596,13 +787,12 @@ export function useVault() {
       .map((entry) => entry.original));
     const next = new Map(docsRef.current);
     for (const p of del) next.delete(p);
-    docsRef.current = next;
-    setDocs(next);
+    applyDocs(next);
     if ([...del].some((p) => p.endsWith('.md'))) setStructureDocs(next);
     for (const p of del) updateLinksForPath(linkIndex, p, '');
     setCurrentPath((cur) => (cur && del.has(cur) ? null : cur));
     return failed;
-  }, [linkIndex]);
+  }, [linkIndex, applyDocs]);
 
   /** 导出全部笔记为单个 .json 备份文件（直接用内存缓存）。
    *  v7 起把二进制附件也以 dataURL 并入 files：此前新附件库只进 ZIP 导出，用户以为
@@ -621,7 +811,7 @@ export function useVault() {
     const files = [...fileMap].map(([path, content]) => ({ path, content }));
     const payload = {
       app: 'knowlattice',
-      version: 7,
+      version: 12,
       exportedAt: new Date().toISOString(),
       files,
       // v2 起随备份保存 SRS 复习调度进度（旧版备份无此字段，导入时自动跳过）
@@ -629,6 +819,8 @@ export function useVault() {
       // 题库与错题一并备份（v2 增量字段，旧版本导入时忽略）
       qbanks: await exportQbanks(),
       qbankStats: await exportQuestionStats(),
+      // v11 起补上收藏/重点题：与逐题统计分开存（见 core/qbankStarred），不随备份走就会在换设备时全丢
+      stars: await exportStars(),
       mistakes: loadMistakes(),
       // v3 起补上待办与打卡：这两样此前只活在 localStorage 里，备份不到、换设备即丢
       todos: exportTodos(),
@@ -637,9 +829,32 @@ export function useVault() {
       calibration: exportCalibration(),
       // v4 起补上卡片自定义（改写正/背面、删卡）：和待办同一类问题，不随备份走就会丢
       cardEdits: exportCardEdits(),
+      // v9 起补上笔记媒体挂载（哪篇笔记配了哪个音频/字幕，见 core/noteMedia 头部说明为何存
+      // localStorage 而不写 frontmatter）。与 cardEdits 同一性质的 localStorage 小数据，
+      // 不随备份走就会在换设备时丢掉全部挂载关系——附件还在，界面却不知道该挂给谁。
+      noteMedia: exportNoteMedia(),
+      // v10 起补上思维导图的节点样式（字号/粗斜/颜色/形状，见 core/mindmapNodeStyles 头部：
+      // 与 noteMedia 同性质的 localStorage 小数据，键 = 笔记路径 → 节点文本路径）。
+      // 不随备份走就会在换设备时丢掉全部手工调过的格式。
+      mindmapStyles: exportNoteStyles(),
+      // v11 起补上思维导图的关系线与概要（core/mindmapMarks）：端点按**节点文本路径**记录，
+      // 所以笔记改名/换设备后仍能重建；同 mindmapStyles 一样是应用侧状态，正文不动。
+      mindmapMarks: exportMarks(),
+      // v12 起补上思维导图的**呈现偏好**（布局方向/主题/视图/连线/编号，core/mindmapPrefs）。
+      // 它是三类导图状态里唯一不随备份走的一份：丢了不丢数据，但换设备后每篇笔记的观感都要重设。
+      mindmapPrefs: exportMindMapPrefs(),
       // v5 起补上专注周期专注记录：工作台的「今日/累计/趋势」全靠它，丢了就等于白专注
       pomodoros: exportPomodoros(),
       pathwayTemplates: await exportPathwayTemplates(),
+      // v8 起补上复习计划/每日提醒与本地速查：又一批只活在 localStorage 里的小数据，
+      // 不随备份走就会在换设备时无声消失（计划与提醒要重设、速查答案全丢）。
+      reviewPlan: exportPlan(),
+      reminder: exportReminder(),
+      localRecall: exportRecall(),
+      // v10 起补上模拟考试成绩历史与每日一练进度：又一批只活在 localStorage 里的小数据，
+      // 不随备份走就会在换设备时无声消失（考试历史清空、每日一练连续天数归零）。
+      examHistory: exportExamHistory(),
+      daily: exportDaily(),
     };
     const blob = new Blob([JSON.stringify(payload)], {
       type: 'application/json',
@@ -652,7 +867,9 @@ export function useVault() {
     URL.revokeObjectURL(url);
   }, [docs, attachments]);
 
-  /** 从备份 .json 恢复（合并模式：同名路径覆盖，其余保留）；笔记/复习进度/题库/错题一并恢复。
+  /** 从备份 .json 恢复（**只补不覆盖**）：目标路径不存在才写入；已存在且内容不同 → 把备份里
+   *  那一篇另存到 `恢复冲突/…`（两份都留）；已存在且内容完全相同 → 跳过；附件已存在 → 保留现有。
+   *  localStorage 各存储逐条合并、键已存在保留现有值、只补新键。笔记/复习进度/题库/错题一并恢复。
    *  旧版备份里的 dataURL 附件会自动转回 Blob 附件库；恢复后直接并入内存缓存，不再全库重读存储。 */
   const importBackup = useCallback(async (text: string): Promise<ImportResult> => {
     const data = JSON.parse(text) as {
@@ -662,6 +879,7 @@ export function useVault() {
       srs?: unknown;
       qbanks?: unknown;
       qbankStats?: unknown;
+      stars?: unknown;
       mistakes?: unknown;
       todos?: unknown;
       days?: unknown;
@@ -669,6 +887,15 @@ export function useVault() {
       cardEdits?: unknown;
       pomodoros?: unknown;
       pathwayTemplates?: unknown;
+      reviewPlan?: unknown;
+      reminder?: unknown;
+      localRecall?: unknown;
+      noteMedia?: unknown;
+      mindmapStyles?: unknown;
+      mindmapMarks?: unknown;
+      mindmapPrefs?: unknown;
+      examHistory?: unknown;
+      daily?: unknown;
     };
     // 兼容旧版以 medvault 命名的备份：两版文件结构一致，只有 app 字段不同
     if ((data.app !== 'knowlattice' && data.app !== 'medvault') || !Array.isArray(data.files)) {
@@ -682,26 +909,52 @@ export function useVault() {
       valid.push({ path, content: f.content });
     }
     const notes = valid.filter((f) => !f.path.startsWith('_attachments/'));
+    // 先做格式修正，再拿**修正好之后**的内容做比对：写出去的就是这一份，只有和它相同才算「没变化」。
+    // （修正本身是幂等的，所以第二次恢复同一份备份仍能识别为「内容相同」。）
     const repaired = repairEntries(notes);
     const legacyAttachments = valid.filter((f) => f.path.startsWith('_attachments/'));
 
-    // 先记录哪些路径会被覆盖（写之前查 exists），恢复完成时随结果返回。
-    // 恢复是覆盖性写，调用方需要把「哪些现有文件被换掉」亮给用户。
-    const overwritten: string[] = [];
-    for (const f of repaired.entries) {
-      if (await adapter.exists(f.path)) overwritten.push(f.path);
-    }
-    for (const f of legacyAttachments) {
-      if (await adapter.existsAttachment(f.path)) overwritten.push(f.path);
-    }
+    // 这次恢复**一篇现有笔记都不会被覆盖**：查「路径是否存在」只为三分类
+    // （不存在→新增 / 相同→跳过 / 不同→另存冲突副本，见 core/restoreMerge）。
+    const lookup = async (path: string): Promise<ExistingFile> => {
+      // 内存是启动时 readAll 的完整快照，命中即为最新；没有才问存储层（拿不到内容时给 null，
+      // planMerge 会保守地当冲突处理，绝不会静默覆盖）。
+      const cached = docsRef.current.get(path);
+      if (cached !== undefined) return { exists: true, content: cached };
+      return { exists: await adapter.exists(path), content: null };
+    };
+    const plan = await planMerge(repaired.entries, lookup, {
+      conflictRoot: '恢复冲突',
+      conflictLabel: '恢复',
+      // 同一批共用一个时间戳：同一份备份的冲突文件名稳定可复现（不用 Math.random）。
+      timestamp: formatConflictStamp(new Date()),
+    });
 
-    const failedNotes = await writeMany(repaired.entries);
-    const failedSet = new Set(failedNotes);
+    const addFailedSet = new Set(await writeMany(plan.toAdd));
+    const conflictFailedSet = new Set(await writeMany(plan.toConflict));
+    // 只把**真正写成功**的条目并入内存：写失败的若也并入，当前会话看着一切正常、还弹
+    // 「已恢复 N 篇」，刷新后才永久缺失——这是最难事后归因的一类数据丢失。
+    const okEntries = plan.entries.filter((e) => {
+      if (e.verdict === 'add') return !addFailedSet.has(e.path);
+      if (e.verdict === 'conflict') return !conflictFailedSet.has(e.conflictPath!);
+      return false;
+    });
+    const okPaths = new Set(okEntries.map((e) => e.path));
+    const repairedFiles = repaired.repairedFiles.filter((f) => okPaths.has(f.path));
+
+    // 附件：已存在就**跳过并保留现有**（不另存副本、不覆盖）。现有笔记引用的正是现有附件，
+    // 替换会悄悄改变历史笔记的显示内容——比丢一篇笔记更隐蔽，所以这里绝不动它。
     const restoredAttachments = new Map<string, Blob>();
     /** 转不成 Blob、只能按原文当笔记文件存回去的旧附件 */
     const keptAsFile = new Set<string>();
+    let addedAttachments = 0;
+    let skippedAttachments = 0;
     let attachFailed = 0;
     for (const f of legacyAttachments) {
+      if (await adapter.existsAttachment(f.path).catch(() => false)) {
+        skippedAttachments++;
+        continue;
+      }
       const blob = dataUrlToBlob(f.content);
       try {
         if (blob) {
@@ -712,53 +965,151 @@ export function useVault() {
           await adapter.write(f.path, f.content);
           keptAsFile.add(f.path);
         }
+        addedAttachments++;
       } catch (e) {
         console.error('附件恢复失败：', f.path, e);
         attachFailed++;
       }
     }
-    if (data.srs) importSrsState(data.srs);
-    if (data.qbanks) await importQbanks(data.qbanks);
-    if (data.qbankStats) await importQuestionStats(data.qbankStats);
-    if (data.mistakes) importMistakes(data.mistakes);
-    if (data.todos) importTodos(data.todos);
-    if (data.days) importDays(data.days);
-    if (data.calibration) importCalibration(data.calibration);
-    if (data.cardEdits) importCardEdits(data.cardEdits);
-    if (data.pomodoros) importPomodoros(data.pomodoros);
-    if (data.pathwayTemplates) await importPathwayTemplates(data.pathwayTemplates);
 
-    // 并入内存缓存 + 增量更新链接索引
-    // 只把真正写成功的并入内存：写失败的如果也进内存，当前会话看着一切正常、还弹
-    // 「已恢复 N 篇」，刷新后才永久缺失——这是最难事后归因的一类数据丢失。
-    const okNotes = repaired.entries.filter((f) => !failedSet.has(f.path));
-    const repairedFiles = repaired.repairedFiles.filter((f) => !failedSet.has(f.path));
+    // ---- localStorage 各存储：逐条合并、键已存在则保留现有值、只补新键；逐存储报告「新增/已存在」----
+    // 每个 if 把关：缺字段直接跳过——v1–v9 旧备份照旧能恢复成功，不会被误判成「格式不正确」。
+    const storeMerges: StoreMerge[] = [];
+    if (data.srs) {
+      storeMerges.push(await mergeObjectStore('复习调度', data.srs, exportSrsState(), (p) => { importSrsState(p); }));
+    }
+    if (data.qbanks) {
+      const cur = await exportQbanks();
+      storeMerges.push(await mergeListStore('题库', data.qbanks, new Set(cur.map((b) => b.name)), (it) => (typeof it.name === 'string' ? it.name : undefined), (p) => importQbanks(p)));
+    }
+    if (data.qbankStats) {
+      // 题库统计是 (题库 → 题目 → 值) 两层对象：按 (题库,题目) 键过滤，现有键保留、只补新键
+      const cur = await exportQuestionStats();
+      const { fresh, added, kept } = pickNewQuestionStats(data.qbankStats, cur);
+      if (added > 0) await importQuestionStats(fresh);
+      storeMerges.push({ name: '题库统计', added, kept });
+    }
+    if (data.stars) {
+      // 收藏题同样是 (题库 → 题目) 两层：逐键只补不覆盖，已有键保留、只补新键
+      const cur = await exportStars();
+      const { fresh, added, kept } = pickNewStars(data.stars, cur);
+      if (added > 0) await importStars(fresh);
+      storeMerges.push({ name: '收藏题', added, kept });
+    }
+    if (data.mistakes) {
+      storeMerges.push(await mergeObjectStore('错题', data.mistakes, loadMistakes(), (p) => { importMistakes(p); }));
+    }
+    if (data.todos) {
+      const cur = exportTodos();
+      storeMerges.push(await mergeListStore('待办', data.todos, new Set(cur.map((t) => t.id)), (it) => (typeof it.id === 'string' ? it.id : undefined), (p) => importTodos(p)));
+    }
+    if (data.days) {
+      storeMerges.push(await mergeObjectStore('打卡', data.days, exportDays(), (p) => { importDays(p); }));
+    }
+    if (data.calibration) {
+      // importCalibration 是**整体覆盖**写（用收到的对象重建存储），所以传「现有 ∪ 新增」而非只传新键
+      storeMerges.push(await mergeObjectStore('元认知校准', data.calibration, exportCalibration(), (p) => { importCalibration(p); }, true));
+    }
+    if (data.cardEdits) {
+      storeMerges.push(await mergeObjectStore('卡片自定义', data.cardEdits, exportCardEdits(), (p) => { importCardEdits(p); }));
+    }
+    /* v9 起新增的笔记媒体挂载（音频/字幕附件，core/noteMedia）。**v8 及更早的备份没有这个字段**：
+       整段由 `if` 把关，缺字段就直接跳过，旧备份照旧导入成功，不会被判成「格式不正确」。
+       这里的键是**笔记路径**；该路径此刻在不在库里无所谓——备份里提到的笔记可能还没恢复
+       过来、或已改名（noteMedia.ts 头部写明：键即路径，改名等于换键，旧挂载变孤儿）。所以
+       不按「当前库是否有该路径」过滤、更不因此报错：等那个路径回来就能用上。 */
+    if (data.noteMedia) {
+      storeMerges.push(await mergeObjectStore('笔记媒体', data.noteMedia, exportNoteMedia(), (p) => { importNoteMedia(p); }));
+    }
+    /* v10 起新增的思维导图节点样式（core/mindmapNodeStyles）。**v9 及更早的备份没有这个字段**：
+       整段由 `if` 把关，缺字段直接跳过。键是「笔记路径 → 节点文本路径」，与笔记当前在不在库里
+       无关（备份里的笔记可能还没恢复过来、或已改名），所以同样不按当前库过滤。 */
+    if (data.mindmapStyles) {
+      storeMerges.push(await mergeObjectStore('导图样式', data.mindmapStyles, exportNoteStyles(), (p) => { importNoteStyles(p); }));
+    }
+    /* v11 起新增的关系线/概要（core/mindmapMarks）。v10 及更早的备份没有这个字段：整段由 if 把关。 */
+    if (data.mindmapMarks) {
+      storeMerges.push(await mergeObjectStore('导图标记', data.mindmapMarks, exportMarks(), (p) => { importMarks(p); }));
+    }
+    /* v12 起新增的导图偏好（布局/主题/视图/连线/编号，core/mindmapPrefs）。v11 及更早的备份没有这个
+       字段：整段由 if 把关。当初有意不接（理由写在那个文件头里）——它丢了不丢数据，但换了设备
+       每篇笔记的观感都要一篇篇重设，而形状与 core/noteMedia 完全一致，接一行就够。 */
+    if (data.mindmapPrefs) {
+      storeMerges.push(await mergeObjectStore('导图偏好', data.mindmapPrefs, exportMindMapPrefs(), (p) => { importMindMapPrefs(p); }));
+    }
+    if (data.pomodoros) {
+      const cur = exportPomodoros();
+      storeMerges.push(await mergeListStore('专注记录', data.pomodoros, new Set(cur.map((r) => r.id)), (it) => (typeof it.id === 'string' ? it.id : undefined), (p) => importPomodoros(p)));
+    }
+    if (data.pathwayTemplates) {
+      const cur = await exportPathwayTemplates();
+      storeMerges.push(await mergeListStore('路径模板', data.pathwayTemplates, new Set(cur.map((t) => t.id)), (it) => (typeof it.id === 'string' ? it.id : undefined), (p) => importPathwayTemplates(p)));
+    }
+    // 复习计划 / 每日提醒是**单例配置**（没有「键」）：已经设过就保留现有、不覆盖；没设过才用备份里的
+    if (data.reviewPlan) {
+      const cur = exportPlan();
+      const configured = Boolean(cur.examDate || cur.examLabel || cur.dailyCap);
+      storeMerges.push(configured
+        ? { name: '复习计划', added: 0, kept: 1 }
+        : { name: '复习计划', added: importPlan(data.reviewPlan) ? 1 : 0, kept: 0 });
+    }
+    if (data.reminder) {
+      const cur = exportReminder();
+      const configured = cur.enabled || Boolean(cur.lastFired);
+      storeMerges.push(configured
+        ? { name: '每日提醒', added: 0, kept: 1 }
+        : { name: '每日提醒', added: importReminder(data.reminder) ? 1 : 0, kept: 0 });
+    }
+    if (data.localRecall) {
+      storeMerges.push(await mergeObjectStore('本地速查', data.localRecall, exportRecall(), (p) => { importRecall(p); }));
+    }
+    if (data.examHistory) {
+      const cur = exportExamHistory();
+      storeMerges.push(await mergeListStore('考试历史', data.examHistory, new Set(cur.map((r) => r.id)), (it) => (typeof it.id === 'string' ? it.id : undefined), (p) => importExamHistory(p)));
+    }
+    if (data.daily) {
+      storeMerges.push(await mergeObjectStore('每日一练', data.daily, exportDaily(), (p) => { importDaily(p); }));
+    }
+
+    // 并入内存缓存 + 增量更新链接索引（新增的与冲突另存的都算「这次写进去的」）
     const next = new Map(docsRef.current);
-    for (const f of okNotes) next.set(f.path, f.content);
+    for (const e of okEntries) next.set(e.verdict === 'conflict' ? e.conflictPath! : e.path, e.content);
     for (const f of legacyAttachments) {
       if (keptAsFile.has(f.path)) next.set(f.path, f.content);
     }
-    docsRef.current = next;
-    setDocs(next);
+    applyDocs(next);
     setAttachments((prev) => {
       const next = new Map(prev);
       for (const [path, blob] of restoredAttachments) next.set(path, blob);
       return next;
     });
-    for (const f of okNotes) updateLinksForPath(linkIndex, f.path, f.content);
-    if (okNotes.length > 0) {
+    for (const e of okEntries) updateLinksForPath(linkIndex, e.verdict === 'conflict' ? e.conflictPath! : e.path, e.content);
+    if (okEntries.length > 0) {
       setStructureDocs(next);
     }
+    const addedNotes = okEntries.filter((e) => e.verdict === 'add').length;
+    const conflictFiles = okEntries.filter((e) => e.verdict === 'conflict').map((e) => e.conflictPath!);
     return {
-      ok: okNotes.length,
-      failed: failedSet.size + attachFailed + invalidFiles,
+      ok: addedNotes,
+      failed: addFailedSet.size + conflictFailedSet.size + attachFailed + invalidFiles,
       repaired: repairCount(repairedFiles),
       repairedFiles,
-      overwritten,
+      // 只补不覆盖后不会再覆盖任何现有文件，恒为空数组（保留字段不改既有语义）
+      overwritten: [],
+      addedNotes,
+      conflictNotes: conflictFiles.length,
+      conflictFiles,
+      unchangedNotes: plan.unchanged,
+      addedAttachments,
+      skippedAttachments,
+      storeMerges,
     };
-  }, [linkIndex]);
+  }, [linkIndex, applyDocs]);
 
-  /** 导入 md 文件夹（相对路径入库，保留目录结构）；返回真实成功/失败篇数 */
+  /** 导入 md 文件夹 / 资料导入通道（**只补不覆盖**）：目标路径不存在才写入；已存在且内容不同 →
+   *  把来源那一篇另存到 `导入冲突/…`（两份都留）；内容完全相同 → 跳过。返回真实成功/失败篇数。
+   *  为什么这条通道也改成只补不覆盖：它是「导入别人 / 别处的文件」的入口，用户自己改过的笔记
+   *  不能被一份外来文件整篇替换（此前的覆盖写是真实丢数据风险，且不推历史快照、覆盖后不可恢复）。 */
   const importMdFiles = useCallback(async (files: Array<{ path: string; content: string }>): Promise<ImportResult> => {
     const valid: Array<{ path: string; content: string }> = [];
     let invalidFiles = 0;
@@ -767,56 +1118,50 @@ export function useVault() {
       if (!p || !p.toLowerCase().endsWith('.md') || typeof f.content !== 'string') { invalidFiles++; continue; }
       valid.push({ path: p, content: f.content });
     }
+    // 与 importBackup 同一套规则与命名（复用 core/restoreMerge），只是根目录标成「导入冲突」
     const repaired = repairEntries(valid);
-    const failedPaths = await writeMany(repaired.entries);
-    const failedSet = new Set(failedPaths);
-    const okFiles = repaired.entries.filter((f) => !failedSet.has(f.path));
-    const repairedFiles = repaired.repairedFiles.filter((f) => !failedSet.has(f.path));
+    const lookup = async (path: string): Promise<ExistingFile> => {
+      const cached = docsRef.current.get(path);
+      if (cached !== undefined) return { exists: true, content: cached };
+      return { exists: await adapter.exists(path), content: null };
+    };
+    const plan = await planMerge(repaired.entries, lookup, {
+      conflictRoot: '导入冲突',
+      conflictLabel: '导入',
+      // 同一批共用一个时间戳：稳定可复现，不用 Math.random
+      timestamp: formatConflictStamp(new Date()),
+    });
+    const addFailedSet = new Set(await writeMany(plan.toAdd));
+    const conflictFailedSet = new Set(await writeMany(plan.toConflict));
+    // 只把真正写成功的并入内存（写失败的不进内存，避免「看着成功、刷新后缺失」）
+    const okEntries = plan.entries.filter((e) => {
+      if (e.verdict === 'add') return !addFailedSet.has(e.path);
+      if (e.verdict === 'conflict') return !conflictFailedSet.has(e.conflictPath!);
+      return false;
+    });
+    const okPaths = new Set(okEntries.map((e) => e.path));
+    const repairedFiles = repaired.repairedFiles.filter((f) => okPaths.has(f.path));
     const next = new Map(docsRef.current);
-    for (const f of okFiles) next.set(f.path, f.content);
-    docsRef.current = next;
-    setDocs(next);
-    for (const f of okFiles) updateLinksForPath(linkIndex, f.path, f.content);
-    if (okFiles.length > 0) {
+    for (const e of okEntries) next.set(e.verdict === 'conflict' ? e.conflictPath! : e.path, e.content);
+    applyDocs(next);
+    for (const e of okEntries) updateLinksForPath(linkIndex, e.verdict === 'conflict' ? e.conflictPath! : e.path, e.content);
+    if (okEntries.length > 0) {
       setStructureDocs(next);
     }
+    const addedNotes = okEntries.filter((e) => e.verdict === 'add').length;
+    const conflictFiles = okEntries.filter((e) => e.verdict === 'conflict').map((e) => e.conflictPath!);
     return {
-      ok: okFiles.length,
-      failed: failedPaths.length + invalidFiles,
+      ok: addedNotes,
+      failed: addFailedSet.size + conflictFailedSet.size + invalidFiles,
       repaired: repairCount(repairedFiles),
       repairedFiles,
+      overwritten: [],
+      addedNotes,
+      conflictNotes: conflictFiles.length,
+      conflictFiles,
+      unchangedNotes: plan.unchanged,
     };
-  }, [linkIndex]);
-
-  /** 主动扫描并修复已有 Markdown，只写入实际发生变化的文件。 */
-  const repairExistingMarkdown = useCallback(async (): Promise<ImportResult> => {
-    const source = [...docsRef.current.entries()]
-      .filter(([path]) => path.toLowerCase().endsWith('.md'))
-      .map(([path, content]) => ({ path, content }));
-    const repaired = repairEntries(source);
-    const changed = repaired.entries.filter((entry) =>
-      repaired.repairedFiles.some((file) => file.path === entry.path)
-    );
-    const failedPaths = await writeMany(changed);
-    const failedSet = new Set(failedPaths);
-    const okFiles = changed.filter((entry) => !failedSet.has(entry.path));
-    const repairedFiles = repaired.repairedFiles.filter((file) => !failedSet.has(file.path));
-    if (okFiles.length === 0) {
-      return { ok: 0, failed: failedPaths.length, repaired: 0, repairedFiles: [] };
-    }
-    const next = new Map(docsRef.current);
-    for (const file of okFiles) next.set(file.path, file.content);
-    docsRef.current = next;
-    setDocs(next);
-    setStructureDocs(next);
-    for (const file of okFiles) updateLinksForPath(linkIndex, file.path, file.content);
-    return {
-      ok: okFiles.length,
-      failed: failedPaths.length,
-      repaired: repairCount(repairedFiles),
-      repairedFiles,
-    };
-  }, [linkIndex]);
+  }, [linkIndex, applyDocs]);
 
   /** 保存图片附件（Blob 存入独立 attachments store），返回 vault 相对路径；写失败抛出 */
   const saveAttachment = useCallback(async (filename: string, blob: Blob): Promise<string> => {
@@ -826,6 +1171,86 @@ export function useVault() {
     setAttachments((prev) => new Map(prev).set(path, blob));
     return path;
   }, []);
+
+  /**
+   * 列出「没有任何笔记引用」的附件（只算、不删）。判据见 core/attachmentOrphans。
+   * 读的是**内存快照**（attachments 的键 = 全部附件，docsRef = 全部正文），与界面上看到的一致，
+   * 不会因为磁盘上的脏数据多报或漏报。
+   */
+  const findOrphanAttachments = useCallback(
+    // async 是刻意的：界面按 Promise 用它，而且下面要读题库存储（IndexedDB）
+    async () => {
+      const extra: string[] = [];   // 附件路径（结构化引用）
+      const texts: string[] = [];   // 用户写的文字（可能贴着附件路径）
+      // ① 音频/字幕：挂载关系在 localStorage（core/noteMedia），**正文里没有任何字符串**。
+      //    漏掉这一条 → 用户挂着的音频/字幕会被列成「未被引用」，一确认就删掉，正文里的播放条当场断。
+      for (const m of Object.values(exportNoteMedia())) {
+        if (m.audio) extra.push(m.audio);
+        if (m.subtitle) extra.push(m.subtitle);
+      }
+      // ② 题库：题干图/选项图是结构化引用；题干、选项、答案与解析里的文字也可能贴着附件路径。
+      for (const bank of await exportQbanks()) {
+        for (const q of bank.questions ?? []) {
+          if (q.image) extra.push(q.image);
+          for (const img of q.optionImages ?? []) if (img) extra.push(img);
+          texts.push(q.stem ?? '', q.answerText ?? '', ...(q.options ?? []));
+          for (const e of q.explanations ?? []) texts.push(e?.text ?? '');
+          for (const n of q.optionNotes ?? []) if (n) texts.push(n);
+        }
+      }
+      // ③ 通路模板与卡片自定义里存着用户写的 markdown/文字（模板正文、卡片正反面），同样可能引用附件。
+      //    判定的方向是「宁可少删一个孤儿」：多算一处引用，最坏只是少清理掉一个文件。
+      for (const t of await exportPathwayTemplates()) texts.push(t.markdown ?? '');
+      for (const c of Object.values(exportCardEdits())) texts.push(c.front ?? '', c.back ?? '');
+      return findOrphans([...attachments.keys()], [...docsRef.current.values(), ...texts], extra);
+    },
+    [attachments],
+  );
+
+  /**
+   * 真删附件（返回值里给出删失败的清单）。
+   *
+   * 两道护栏都为了「绝不误删笔记」：
+   *   ① 只接受 `_attachments/` 下的路径——这个入口只该删附件，路径再校验一道，将来某次调用
+   *      即使把笔记路径传进来，也删不掉正文；
+   *   ② 拒绝含 `..` 的路径（在 safeVaultPath 之外再挡一次纵深）。
+   * 写盘成功才动内存（与 noteMedia「只并入真正写成功的」同一原则），并顺手释放对象 URL：
+   * 否则删掉的文件还会继续占着 blob 引用。
+   */
+  const removeAttachments = useCallback(
+    async (paths: string[]): Promise<{ removed: number; failed: string[] }> => {
+      const safe = [...new Set(paths)].filter(
+        (p) => typeof p === 'string' && p.startsWith('_attachments/') && !p.includes('..'),
+      );
+      const failed: string[] = [];
+      const done: string[] = [];
+      for (const p of safe) {
+        try {
+          await adapter.removeAttachment(p);
+          done.push(p);
+        } catch {
+          failed.push(p);
+        }
+      }
+      if (done.length) {
+        const gone = new Set(done);
+        setAttachments((prev) => {
+          const next = new Map(prev);
+          for (const p of gone) next.delete(p);
+          return next;
+        });
+        for (const p of gone) {
+          const url = attachmentUrlCache.current.get(p);
+          if (url) {
+            URL.revokeObjectURL(url);
+            attachmentUrlCache.current.delete(p);
+          }
+        }
+      }
+      return { removed: done.length, failed };
+    },
+    [],
+  );
 
   /** 新建笔记走模板，自动填 chapter/frontmatter（M1 验收项） */
   const createNote = useCallback(
@@ -997,8 +1422,7 @@ export function useVault() {
     if (okNotes.length > 0) {
       const next = new Map(docsRef.current);
       for (const f of okNotes) next.set(f.path, f.content);
-      docsRef.current = next;
-      setDocs(next);
+      applyDocs(next);
       setStructureDocs(next);
       for (const f of okNotes) updateLinksForPath(linkIndex, f.path, f.content);
     }
@@ -1010,7 +1434,7 @@ export function useVault() {
       });
     }
     return { notes: okNotes.length, attachments: migratedBlobs.size, failed: failedSet.size + attachFailed };
-  }, [linkIndex]);
+  }, [linkIndex, applyDocs]);
 
   /** 所有可用链接名（文件名 + 标题 + alias 去重），供 [[ 自动补全。仅 .md 参与。
    *
@@ -1066,12 +1490,17 @@ export function useVault() {
     removeMany,
     createNote,
     saveAttachment,
+    /** 「清理未引用的附件」用：先算清单（只算不删），用户确认后再走 removeAttachments */
+    findOrphanAttachments,
+    removeAttachments,
     readFile,
     exportAll,
     exportMdFolder,
     importBackup,
     importMdFiles,
-    repairExistingMarkdown,
+    /** 打开库时**自动**修正的 Markdown 格式报告（没有可修的为 null）。界面只拿它显示明细，
+     *  不再是用户要点一下的动作——见 repairNotesOnLoad。 */
+    autoRepair,
     migrateFromBrowser,
     changeVaultFolder,
     /** 当前 vault 目录（桌面端 = 默认根名或用户所选绝对路径；浏览器端 null），设置入口展示用 */

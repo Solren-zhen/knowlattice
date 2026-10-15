@@ -6,7 +6,7 @@
  * 片段就永远定位到开头——高亮更是无从谈起（那时压根没有高亮）。
  */
 import { describe, expect, it } from 'vitest';
-import { expandQuery, SYNONYM_TERM_COUNT } from '../medSynonyms';
+import { expandQuery, synonymTermCount } from '../medSynonyms';
 import { buildSnippet, locateAll, segment, titleHits } from '../searchHit';
 
 describe('expandQuery（语义近似）', () => {
@@ -33,7 +33,7 @@ describe('expandQuery（语义近似）', () => {
   });
 
   it('词表是真实存在的数据，不是空壳', () => {
-    expect(SYNONYM_TERM_COUNT).toBeGreaterThan(100);
+    expect(synonymTermCount()).toBeGreaterThan(100);
   });
 });
 

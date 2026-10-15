@@ -9,10 +9,14 @@
  * 刻意不做 IRT/CAT（题库没有难度标定数据，标定本身要几千次真实作答）也不做遗传算法组卷
  * （「N 题不重复 + 按章节配比」用加权随机就够，上进化算法是过度工程）。
  */
-import type { QuizBank, QuizQuestion } from './qbank';
+import { chaptersOf, type QuizBank, type QuizQuestion } from './qbank';
 import { isDue, statOf, type QStat, type StatsMap } from './qbankStats';
+import { isStarred, type StarMap } from './qbankStarred';
+import {
+  difficultyBand, isHighFreq, statusTagOf, type DifficultyBand, type QStatusTag, type TagContext,
+} from './qbankTags';
 
-export type ComposeScope = 'all' | 'new' | 'wrong' | 'due';
+export type ComposeScope = 'all' | 'new' | 'wrong' | 'due' | 'starred';
 export type ComposeOrder = 'shuffle' | 'chapter' | 'interleave';
 export type ComposeType = 'choice' | 'recall';
 
@@ -25,6 +29,15 @@ export interface ComposeRules {
   types: ComposeType[];
   scope: ComposeScope;
   order: ComposeOrder;
+  /**
+   * 只抽这些状态标签（新题/易错/在学/已掌握）；空数组 = 不限。
+   * 标签信号来自 core/qbankTags，与逐题历史同源，不额外编造数据。
+   */
+  tags?: QStatusTag[];
+  /** 只抽这些难度档（FSRS difficulty 分档）；空数组 = 不限。'unknown' = 还没做过 */
+  difficulty?: DifficultyBand[];
+  /** 只抽高频考点章节（章节题量达 75 分位及以上）；需要传 TagContext 才生效 */
+  highFreqOnly?: boolean;
 }
 
 export const DEFAULT_RULES: ComposeRules = {
@@ -33,6 +46,9 @@ export const DEFAULT_RULES: ComposeRules = {
   types: [],
   scope: 'all',
   order: 'shuffle',
+  tags: [],
+  difficulty: [],
+  highFreqOnly: false,
 };
 
 const DAY = 86_400_000;
@@ -108,13 +124,29 @@ export function filterPool(
   stats: StatsMap,
   bank: string,
   now = Date.now(),
+  stars: StarMap = {},
+  tagCtx?: TagContext,
 ): QuizQuestion[] {
   const chapters = new Set(rules.chapters);
   const types = new Set(rules.types);
+  const tagSet = new Set(rules.tags ?? []);
+  const diffSet = new Set(rules.difficulty ?? []);
+  // 成员判定：章节筛选问的是「这道题属不属于所选章节」，多章节题任一章节命中就该被选中
+  // （热力图已经按 chaptersOf 把两章都算过，这里只看 chapter 会让另一章筛不到它）。
+  // 没有 chapters 的题 chaptersOf 退回 [chapter]；两处都空时折成 [''] —— 与旧代码
+  // `chapters.has(q.chapter ?? '')` 逐字等价（空章节仍作为「未标注」那一档参与筛选，不新开档位）。
+  const inSelectedChapters = (q: QuizQuestion): boolean => {
+    const keys = chaptersOf(q);
+    return (keys.length ? keys : ['']).some((c) => chapters.has(c));
+  };
   return questions.filter((q) => {
-    if (chapters.size && !chapters.has(q.chapter ?? '')) return false;
+    if (chapters.size && !inSelectedChapters(q)) return false;
     if (types.size && !types.has(q.type)) return false;
     const s = statOf(stats, bank, q.id);
+    // 考点标签 / 难度：只在真的选了才过滤（空集合 = 不限，与章节口径一致）
+    if (tagSet.size && !tagSet.has(statusTagOf(s))) return false;
+    if (diffSet.size && !diffSet.has(difficultyBand(s))) return false;
+    if (rules.highFreqOnly && tagCtx && !isHighFreq(q, tagCtx)) return false;
     switch (rules.scope) {
       case 'new':
         return !s;
@@ -122,6 +154,9 @@ export function filterPool(
         return !!s && s.wrong > 0;
       case 'due':
         return !!s && isDue(s, now);
+      case 'starred':
+        // 收藏与「做没做过」正交：没作答过的题只要是重点也照样出现（与 qbankStats 分开存的用意）
+        return isStarred(stars, bank, q.id);
       default:
         return true;
     }
@@ -135,8 +170,10 @@ export function composeQuestions(
   stats: StatsMap,
   now = Date.now(),
   rnd: () => number = Math.random,
+  stars: StarMap = {},
+  tagCtx?: TagContext,
 ): QuizQuestion[] {
-  const pool = filterPool(bank.questions, rules, stats, bank.name, now);
+  const pool = filterPool(bank.questions, rules, stats, bank.name, now, stars, tagCtx);
   const k = rules.count > 0 ? Math.min(rules.count, pool.length) : pool.length;
   const picked = weightedPick(pool, (q) => weightOf(statOf(stats, bank.name, q.id), now), k, rnd);
   if (rules.order === 'chapter') return sortByChapter(picked);
@@ -145,6 +182,7 @@ export function composeQuestions(
 }
 
 export function sortByChapter(questions: QuizQuestion[]): QuizQuestion[] {
+  // 展示（排序）：只决定先后，一题必须落在唯一的位置上 —— 多章节题按主章节排（chapter 已是 chapters[0]），不做成员展开
   return [...questions].sort(
     (a, b) => chapterCompare(a.chapter ?? '', b.chapter ?? '') || chapterCompare(a.stem, b.stem),
   );
@@ -169,6 +207,7 @@ export function interleaveByChapter(
   // chapter 名在编译期不可知，且需要按首次出现顺序稳定迭代 → 动态键的 Map
   const buckets = new Map<string, QuizQuestion[]>();
   for (const q of questions) {
+    // 展示（主章节桶）：交错要求**每题只落一个桶**（展开成多个桶会把同一题排两遍），所以按主章节分桶
     const key = q.chapter ?? '';
     const bucket = buckets.get(key);
     if (bucket) bucket.push(q);
@@ -183,6 +222,7 @@ export function interleaveByChapter(
     let max = 0;
     let picks: ChapterBucket[] = [];
     for (const g of groups) {
+      // 展示：比较的是上面那个「主章节桶」的名字，与分桶口径保持一致
       if (!allowSame && g.chapter === skip) continue;
       const left = g.items.length - g.at;
       if (left <= 0) continue;
@@ -200,19 +240,25 @@ export function interleaveByChapter(
     const q: QuizQuestion | null = takeBiggest(last, false) ?? takeBiggest(null, true);
     if (!q) break;
     out.push(q);
+    // 展示：记下上一题的主章节桶，供下一轮 skip 用（与分桶口径一致）
     last = q.chapter ?? '';
   }
   return out;
 }
 
-/** 章节清单（组题弹窗用）：按自然序，带每章题数 */
+/** 章节清单（组题弹窗用）：按自然序，带每章题数（多章节题在每个所属章节里各计一次，口径同 filterPool 的筛选） */
 export function chapterCounts(questions: QuizQuestion[]): Array<{ chapter: string; count: number }> {
   const m = new Map<string, number>();
   for (const q of questions) {
-    const c = q.chapter ?? '';
-    m.set(c, (m.get(c) ?? 0) + 1);
+    // 成员判定（与 filterPool 的章节筛选同一口径）：多章节题在每个所属章节里各计一次。
+    // 弹窗的章节 chip 就是从这里来的，只计主章节会让「跨章题的另一章节」在选择器里
+    // 根本没有入口 —— 热力图按 chaptersOf 把那一章标成薄弱，用户却筛不到它，两边口径就对不上。
+    // 没有 chapters 的题仍只计一次（chapter 为空则计到 '' 那一档），与旧行为逐字相同。
+    const keys = chaptersOf(q);
+    for (const c of keys.length ? keys : ['']) m.set(c, (m.get(c) ?? 0) + 1);
   }
   return [...m]
     .map(([chapter, count]) => ({ chapter, count }))
+    // 展示（排序）：对章节名做自然序排序，与成员判定无关
     .sort((a, b) => chapterCompare(a.chapter, b.chapter));
 }

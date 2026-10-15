@@ -302,7 +302,8 @@ describe('AI patch 宽容匹配与写入可见化', () => {
     void fetchMock;
   });
 
-  it('自动应用落盘时弹 toast，用户能看见笔记已被修改', async () => {
+  it('yolo 落盘时弹 toast，用户能看见笔记已被修改', async () => {
+    localStorage.setItem('knowlattice-ai-agent-prefs', JSON.stringify({ yolo: true }));
     const fetchMock = stubFetch([
       async () => sseResponse(patchCallChunks('c1', '心肌收缩泵血。', '自动应用的内容')),
       async () => sseResponse(finalChunks('第二轮结束。')),
@@ -311,7 +312,6 @@ describe('AI patch 宽容匹配与写入可见化', () => {
     const onSave = vi.fn(async (p: string, c: string) => { docs.set(p, c); });
     render(<AiAgentPanel docs={docs} onSave={onSave} onClose={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '自动应用' }));
     await sendMessage('改一下');
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     await waitFor(() => {
@@ -392,22 +392,28 @@ describe('Claudian 式交互', () => {
     expect(body.messages.find((m) => m.role === 'user')?.content).toBe('请整理：心衰治疗');
   });
 
-  it('只读模式：请求不带写入工具，系统提示注明只读', async () => {
+  it('read 模式（默认）：系统提示要求写入先出 diff 等确认，工具集不缩水', async () => {
     const fetchMock = stubFetch([async () => sseResponse(finalChunks('只读回答。'))]);
     renderPanel();
 
-    fireEvent.click(screen.getByRole('button', { name: '只读' }));
+    // 默认即 read，不必先点开关；开关的 aria-pressed 必须如实反映当前档位
+    expect(screen.getByRole('button', { name: 'read' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'yolo' }).getAttribute('aria-pressed')).toBe('false');
     await sendMessage('帮我看看');
     await waitFor(() => expect(screen.getByText('只读回答。')).toBeTruthy());
 
     const body = await firstBody(fetchMock);
     const names = (body.tools ?? []).map((t) => t.function.name);
+    // read 档也保留写入工具：diff 预览＋人工确认才是它的写入路径，
+    // 拿掉工具等于连这条路一起砍了，那是删功能不是收紧权限。
     expect(names).toContain('read_note');
-    expect(names.some((n) => n.startsWith('propose_'))).toBe(false);
-    expect(body.messages[0].content).toContain('只读模式');
+    expect(names.some((n) => n.startsWith('propose_'))).toBe(true);
+    expect(body.messages[0].content).toContain('read 模式');
+    expect(body.messages[0].content).toContain('等用户点「应用」');
   });
 
-  it('自动应用：patch 跳过确认直接写入，卡片标记已自动应用', async () => {
+  it('yolo：patch 跳过确认直接写入，卡片标记已自动应用', async () => {
+    localStorage.setItem('knowlattice-ai-agent-prefs', JSON.stringify({ yolo: true }));
     const fetchMock = stubFetch([
       async () => sseResponse(patchCallChunks('c1', '心肌收缩泵血。', '自动应用的内容')),
       async () => sseResponse(finalChunks('第二轮结束。')),
@@ -418,7 +424,6 @@ describe('Claudian 式交互', () => {
       <AiAgentPanel docs={docs} onSave={onSave} onClose={vi.fn()} />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '自动应用' }));
     await sendMessage('改一下');
     // 没有点「应用修改」：提案直接被写入
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -426,8 +431,8 @@ describe('Claudian 式交互', () => {
     void fetchMock;
   });
 
-  it('自主模式：新建笔记免确认直接写入，卡片标记已自动应用', async () => {
-    localStorage.setItem('knowlattice-ai-agent-prefs', JSON.stringify({ readonly: false, autoApply: false, autonomous: true }));
+  it('yolo：新建笔记免确认直接写入，卡片标记已自动应用', async () => {
+    localStorage.setItem('knowlattice-ai-agent-prefs', JSON.stringify({ yolo: true }));
     const fetchMock = stubFetch([
       async () => sseResponse([dataLine({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'n1', function: { name: 'propose_note_create', arguments: '{"path":"解剖/心包.md","content":"# 心包\\n浆膜包裹心脏。"}' } }] } }] })]),
       async () => sseResponse(finalChunks('新建完成。')),
@@ -440,6 +445,48 @@ describe('Claudian 式交互', () => {
     expect(onSave).toHaveBeenCalledWith('解剖/心包.md', '# 心包\n浆膜包裹心脏。');
     expect(await screen.findByText('✓ 已自动应用（历史版本可回溯）')).toBeTruthy();
     void fetchMock;
+  });
+
+  it('模式切换：read/yolo 互斥，切到 yolo 先弹一次确认，取消则留在 read', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'yolo' }));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'read' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'yolo' }).getAttribute('aria-pressed')).toBe('false');
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'yolo' }));
+    expect(screen.getByRole('button', { name: 'yolo' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'read' }).getAttribute('aria-pressed')).toBe('false');
+    expect(JSON.parse(localStorage.getItem('knowlattice-ai-agent-prefs')!)).toEqual({ yolo: true });
+
+    // 退回 read 是收紧权限，不必再问一次
+    fireEvent.click(screen.getByRole('button', { name: 'read' }));
+    expect(screen.getByRole('button', { name: 'read' }).getAttribute('aria-pressed')).toBe('true');
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    confirmSpy.mockRestore();
+  });
+
+  it('旧版三档偏好迁移：autonomous 归到 yolo，只读/自动应用不误升权限', () => {
+    const seed = (p: Record<string, boolean>) =>
+      localStorage.setItem('knowlattice-ai-agent-prefs', JSON.stringify(p));
+
+    // 老「自动应用」只让 patch 免确认，语义已不存在；当成 yolo 会悄悄放宽权限
+    seed({ readonly: false, autoApply: true, autonomous: false });
+    renderPanel();
+    expect(screen.getByRole('button', { name: 'read' }).getAttribute('aria-pressed')).toBe('true');
+    cleanup();
+
+    seed({ readonly: true, autoApply: false, autonomous: false });
+    renderPanel();
+    expect(screen.getByRole('button', { name: 'read' }).getAttribute('aria-pressed')).toBe('true');
+    cleanup();
+
+    seed({ readonly: false, autoApply: false, autonomous: true });
+    renderPanel();
+    expect(screen.getByRole('button', { name: 'yolo' }).getAttribute('aria-pressed')).toBe('true');
   });
 
   it('提示键：propose_card_hints 出 diff 卡，应用后属性键插进小节标题后', async () => {
@@ -679,8 +726,8 @@ describe('流式输出与视口', () => {
 });
 
 describe('同一轮多处写入', () => {
-  it('自主模式下同一轮连续两处 patch：第二处基于第一处写入后的正文，不会把第一处覆盖掉', async () => {
-    localStorage.setItem('knowlattice-ai-agent-prefs', JSON.stringify({ readonly: false, autoApply: false, autonomous: true }));
+  it('yolo 下同一轮连续两处 patch：第二处基于第一处写入后的正文，不会把第一处覆盖掉', async () => {
+    localStorage.setItem('knowlattice-ai-agent-prefs', JSON.stringify({ yolo: true }));
     const fetchMock = stubFetch([
       async () => sseResponse(patchCallChunks('p1', '心肌收缩泵血。', '心肌收缩泵血，维持循环。')),
       async () => sseResponse(patchCallChunks('p2', '瓣膜防止倒流。', '瓣膜防止血液倒流。')),
@@ -820,19 +867,24 @@ describe('上下文预算 / 引用核验 / 面板细节', () => {
     await sendMessage('你好');
     await waitFor(() => expect(screen.getByText('第一条回答。')).toBeTruthy());
 
-    // 需要有第二个会话，删除按钮才可用；切回有内容的那个
-    fireEvent.click(screen.getByRole('button', { name: '新对话' }));
+    // 会话弹层里新建第二个会话，再切回有内容的那个
+    const openSwitcher = () => fireEvent.click(screen.getByTitle('切换会话'));
+    openSwitcher();
+    fireEvent.click(screen.getByRole('button', { name: '＋ 新对话' }));
     const firstId = (JSON.parse(localStorage.getItem(SESSIONS_KEY)!) as Array<{ id: string }>)[0].id;
-    fireEvent.change(screen.getByLabelText('切换会话'), { target: { value: firstId } });
+    openSwitcher();
+    fireEvent.click(screen.getByText('你好', { selector: '.agent-session-title' }));
 
     const ids = () => (JSON.parse(localStorage.getItem(SESSIONS_KEY)!) as Array<{ id: string }>).map((s) => s.id);
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    fireEvent.click(screen.getByRole('button', { name: '删除当前会话' }));
+    openSwitcher();
+    fireEvent.click(document.querySelector('.agent-session-row.on .agent-session-act.danger')!);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(ids()).toContain(firstId);
 
     confirmSpy.mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: '删除当前会话' }));
+    // 弹层在删除被拒绝后仍然开着，直接再点同一个删除按钮
+    fireEvent.click(document.querySelector('.agent-session-row.on .agent-session-act.danger')!);
     expect(ids()).not.toContain(firstId);
     confirmSpy.mockRestore();
     void fetchMock;

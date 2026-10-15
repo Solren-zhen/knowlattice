@@ -23,13 +23,15 @@ interface Props {
   readFile: (path: string) => string | undefined;
   /** 打开 / 创建该结构的笔记（走编辑器） */
   onOpenNote: (organ: ManifestOrgan) => void;
+  /** 把这个结构写成一张复习卡（见 core/cardSnippets.ts）；不传则不显示入口 */
+  onMakeCard?: (organ: ManifestOrgan) => void;
   /** 卡片正文里的 [[双链]] 点击 */
   onOpenLink: (name: string) => void;
   onClose: () => void;
 }
 
 export default function AnatomyNoteCard({
-  organ, anchor, stage, resolve, readFile, onOpenNote, onOpenLink, onClose,
+  organ, anchor, stage, resolve, readFile, onOpenNote, onMakeCard, onOpenLink, onClose,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [zhOrgans, setZhOrgans] = useState<Map<string, string> | null>(null);
@@ -135,6 +137,15 @@ export default function AnatomyNoteCard({
         >
           {content !== null ? '在编辑器中打开 →' : '创建笔记 →'}
         </button>
+        {onMakeCard && (
+          <button
+            className="btn-small anatomy-note-card__card-btn"
+            onClick={() => onMakeCard(organ)}
+            title="把这个结构写成一张复习卡（落到「解剖复习卡」笔记的一个小节，进现有复习队列）"
+          >
+            加入复习卡
+          </button>
+        )}
         <span className="anatomy-note-card__path muted" title={notePath ?? ''}>
           {notePath ?? '（尚未创建）'}
         </span>

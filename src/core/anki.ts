@@ -4,25 +4,51 @@
  * - .apkg：真 Anki 包（sql.js 构建 collection.anki2 + JSZip 打包）
  */
 import { parseFrontmatter } from './parser';
-import type { QuizBank } from './qbank';
+import { hasCloze, toAnkiCloze } from './cloze';
+import { correctIndices, explanationsOf, type QuizBank } from './qbank';
 import initSqlJs from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 
-/** markdown → Anki 卡片背面用的纯文本（保留换行为 <br>，剥离语法符号） */
-function mdToText(md: string): string {
-  return md
-    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '') // 去 frontmatter
+/**
+ * markdown → Anki 字段用的纯文本（保留换行为 <br>，剥离语法符号）。
+ * keepCloze = true 时先把手写的 `{{答案}}` 转成 Anki 挖空标记 `{{c1::答案}}`，
+ * 并**保留花括号与冒号**——否则刚转好的标记会被下一行的"剥离语法符号"顺手删掉，
+ * 导出的卡看起来正常、挖空却全没了（最难发现的一类"看起来成功"）。
+ */
+function mdToText(md: string, keepCloze = false): string {
+  const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, ''); // 去 frontmatter
+  const text = keepCloze ? toAnkiCloze(body) : body;
+  return text
     .replace(/^#{1,6}\s+/gm, '')                    // 标题符
     .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, t: string, a?: string) => a ?? t) // 双链→名字
-    .replace(/[*_`>{}[\]|]/g, '')                  // 常用语法符号
+    .replace(keepCloze ? /[*_`>[\]|]/g : /[*_`>{}[\]|]/g, '') // 语法符号（挖空卡保留 {} 与 :）
     .replace(/\n+/g, '<br>')                        // 换行 → <br>
     .replace(/\t/g, ' ')
     .trim();
 }
 
-/** 标签字段：Anki 用空格分隔 */
+/**
+ * 章节标签前缀。**必须**写成 `章节:xxx` 而不是平铺一个裸标签，否则「导出 → 再导入」会丢章节：
+ * Anki 的 tags 是纯文本，没有字段结构；core/ankiImport.ts 的 chapterOf 只认显式的
+ * `章节:` / `chapter:` / `科目:` 标记（刻意不做模糊猜测——猜错会把统计热力图分错组，
+ * 而分错组的图看起来完全正常）。平铺的 `生理学` 再导回来只是一条普通标签，
+ * 没有任何依据能断定它是章节，于是章节静默归零。
+ *
+ * 取舍：别人的 Anki 里会多出一个带冒号的标签。它就是一个普通标签（Anki 标签允许 `:`），
+ * 检索/筛选照常可用；最坏情况是被当成一个自建分类标签，比"章节无声丢失"轻得多。
+ * 空格必须处理：Anki 用空格分隔标签，含空格的标签会被拆成两个（去空格会拼成新词，
+ * 换 `_` 至少还看得出是同一个词组），所以这里把空白统一换成 `_`。
+ */
+const CHAPTER_TAG_PREFIX = '章节:';
+
+/** 章节名 → 可用的 Anki 标签片段（空白换 `_`；章节为空时由调用方过滤掉） */
+function chapterTag(chapter: string): string {
+  return `${CHAPTER_TAG_PREFIX}${chapter.trim().replace(/\s+/g, '_')}`;
+}
+
+/** 标签字段：Anki 用空格分隔（其它 tags 原样保留，章节以 `章节:` 前缀标明，见上） */
 function tagsLine(tags: string[], chapter: string): string {
-  return [...new Set([...tags, chapter].filter(Boolean))].join(' ');
+  return [...new Set([...tags, chapter.trim() ? chapterTag(chapter) : ''].filter(Boolean))].join(' ');
 }
 
 /** 每张卡的 {front, back, tags} → TSV 行（字段内不能含 \n 与 \t） */
@@ -55,19 +81,31 @@ export function notesToAnki(docs: Map<string, string>, paths?: string[]): string
 /** 题库 → 题目卡（正面=题干+选项，背面=答案+解析） */
 export function bankToAnki(bank: QuizBank): string {
   const rows = bank.questions.map((q) => {
-    const front =
+    const frontBase =
       q.type === 'choice'
         ? `${q.stem}\n${q.options.map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`).join('\n')}`
         : q.stem;
+    // 共用题干（A3/A4）：病例原文必须一起导出，否则导到 Anki 的每个小问都是无头案
+    const front = q.groupStem
+      ? `【共用题干${q.groupTotal ? ` · 第 ${q.groupNo ?? 1}/${q.groupTotal} 问` : ''}】${q.groupStem}\n\n${frontBase}`
+      : frontBase;
+    // 正确答案的字母：多选（X 型）必须**全列出来**——只印 answer 那个下标会给出一个错的答案
+    const letters = correctIndices(q)
+      .map((i) => String.fromCharCode(65 + i))
+      .join('、');
     const back =
-      q.type === 'choice'
-        ? `答案：${String.fromCharCode(65 + q.answer)}. ${q.answerText}`
-        : `答案：${q.answerText}`;
-    const full = (q.explanation ? `${back}<br>解析：${q.explanation}` : back).replace(/[#*`>{}[\]|]/g, '');
+      q.type === 'choice' ? `答案：${letters}. ${q.answerText}` : `答案：${q.answerText}`;
+    // 一题多套解析全部带上（带来源名）：换一份解析不该把上一份丢掉
+    const expl = explanationsOf(q)
+      .map((e) => `<br>解析${e.source ? `（${e.source}）` : ''}：${e.text}`)
+      .join('');
+    const full = (expl ? `${back}${expl}` : back).replace(/[#*`>{}[\]|]/g, '');
     return {
       front,
       back: full,
-      tags: tagsLine([q.chapter ?? '', q.note ?? ''].filter(Boolean), q.chapter ?? ''),
+      // 章节只走 tagsLine 的 `章节:` 通道：以前这里还把 q.chapter 当普通 tag 传一遍，
+      // 同一个章节会以裸标签 + 有前缀两种形式各出现一次，纯属噪声（Anki 里多一条无意义的标签）。
+      tags: tagsLine([q.note ?? ''].filter(Boolean), q.chapter ?? ''),
     };
   });
   return toTsv(rows);
@@ -126,7 +164,12 @@ export async function buildApkgBytes(
   const list = paths ?? [...docs.keys()].filter((p) => p.endsWith('.md'));
   const now = Math.floor(Date.now() / 1000);
   const mid = 1725000000000;
+  /** Cloze 卡型 id：与 Basic 相邻但不同号，避免撞上用户既有集合里的模型 */
+  const midCloze = mid + 1;
 
+  // 两个卡型：Basic（普通笔记）+ Cloze（含 {{挖空}} 的笔记，语法见 core/cloze.ts）。
+  // 两型同放一个 .apkg 是 Anki 的常态（一个包本来就支持多模型），
+  // 所以不需要为挖空单独导一个文件。
   const models = {
     [mid]: {
       id: mid, name: '晶格 Basic', type: 0, mod: now, usn: 0, sortf: 0, did: 1,
@@ -134,6 +177,21 @@ export async function buildApkgBytes(
       flds: [
         { name: '正面', ord: 0, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
         { name: '背面', ord: 1, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
+      ],
+      css: '', latexPre: '\\documentclass[12pt]{article}\\special{papersize=89mm,127mm}\\usepackage[utf8]{inputenc}', latexPost: '\\end{document}', latexsvg: false,
+      req: [[0, 'any', [0]]], tags: [],
+    },
+    [midCloze]: {
+      id: midCloze, name: '晶格 Cloze', type: 1, mod: now, usn: 0, sortf: 0, did: 1,
+      tmpls: [{
+        name: 'Cloze', ord: 0,
+        qfmt: '{{cloze:文本}}',
+        afmt: '{{cloze:文本}}<br><br><span style="color:#888">{{说明}}</span>',
+        did: null, bqfmt: '', bafmt: '', bfield: '',
+      }],
+      flds: [
+        { name: '文本', ord: 0, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
+        { name: '说明', ord: 1, sticky: false, rtl: false, font: 'Arial', size: 20, media: [] },
       ],
       css: '', latexPre: '\\documentclass[12pt]{article}\\special{papersize=89mm,127mm}\\usepackage[utf8]{inputenc}', latexPost: '\\end{document}', latexsvg: false,
       req: [[0, 'any', [0]]], tags: [],
@@ -168,27 +226,40 @@ export async function buildApkgBytes(
   const cardStmt = db.prepare("INSERT INTO cards VALUES (?,?,1,0,?,0,0,0,0,0,0,0,0,0,0,0,0,'')");
 
   let count = 0;
-  for (const p of list) {
-    const content = docs.get(p) ?? '';
-    const { meta } = parseFrontmatter(content);
-    const front = cardFront(content, p);
-    const back = mdToText(content);
-    const nid = Date.now() * 1000 + count;
-    const guid = Math.random().toString(36).slice(2, 12);
-    const flds = `${front}\u001f${back}`;
-    const tags = ` ${tagsLine(meta.tags, meta.chapter)} `;
-    noteStmt.run([nid, guid, mid, now, tags, flds, front.toLowerCase(), csum32(front)]);
-    cardStmt.run([nid * 10, nid, now]);
-    count++;
+  // 无论中途抛不抛，两个 statement 与 sql.js 的 wasm 堆都要还回去（与 core/ankiImport 的
+  // 读路径「finally { db.close() }」同一条纪律）。泄漏只在「批量导出、长时间不关应用」时
+  // 才看得出来，所以用 finally 把它变成结构上的保证，而不是靠每条路径记得收尾。
+  try {
+    for (const p of list) {
+      const content = docs.get(p) ?? '';
+      const { meta, title } = parseFrontmatter(content);
+      const tags = ` ${tagsLine(meta.tags, meta.chapter)} `;
+      const nid = Date.now() * 1000 + count;
+      const guid = Math.random().toString(36).slice(2, 12);
+      // 含 {{挖空}} 的笔记走 Cloze 卡型：标记必须转成 {{c1::…}} 并保留，
+      // 否则 Anki 里就是一段没有挖空的普通文字（导出的卡"看起来正常"，挖空却丢了）。
+      // 不含挖空的笔记这条路径**完全不变**，仍是晶格 Basic 卡。
+      const isCloze = hasCloze(content);
+      const first = isCloze ? mdToText(content, true) : cardFront(content, p);
+      // Cloze 卡的第二字段放"出处"：挖空卡正面就是条文本身，不再需要属性键提示
+      const second = isCloze ? (title ? `出自：${title}` : p) : mdToText(content);
+      const flds = `${first}\u001f${second}`;
+      // Anki 的排序字段与校验和用"去标记后的纯文本"：保留 {{c1::}} 会让校验和随标记变动
+      const sfld = isCloze ? first.replace(/\{\{c\d+::|\}\}/g, '') : first;
+      noteStmt.run([nid, guid, isCloze ? midCloze : mid, now, tags, flds, sfld.toLowerCase(), csum32(sfld)]);
+      cardStmt.run([nid * 10, nid, now]);
+      count++;
+    }
+    const bytes = db.export();
+    const { default: JSZip } = await import('jszip');
+    const zip = new JSZip();
+    zip.file('collection.anki2', bytes);
+    zip.file('media', '{}');
+    const ab = await zip.generateAsync({ type: 'arraybuffer' });
+    return { bytes: new Uint8Array(ab), count };
+  } finally {
+    noteStmt.free();
+    cardStmt.free();
+    db.close();
   }
-  noteStmt.free();
-  cardStmt.free();
-  const bytes = db.export();
-
-  const { default: JSZip } = await import('jszip');
-  const zip = new JSZip();
-  zip.file('collection.anki2', bytes);
-  zip.file('media', '{}');
-  const ab = await zip.generateAsync({ type: 'arraybuffer' });
-  return { bytes: new Uint8Array(ab), count };
 }

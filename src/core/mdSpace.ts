@@ -5,14 +5,17 @@
  * spaces inside Chinese words, before punctuation, and
  * between CJK and Latin. normalizePdfSelection already strips those, but it
  * must not damage Markdown structure (heading or list markers, code spans,
- * table pipes), so this module protects those parts first and cleans only the
- * text runs.
+ * table pipes) nor **math spans** ($…$ / $$…$$) — collapsing spaces inside a
+ * formula (or running the "PO 2 → PO2" sub/superscript fixup on it) turns the
+ * formula into garbage. So this module protects those parts first and cleans
+ * only the text runs.
  */
 
 const FENCE = /^\s*(```|~~~)/;
 const HEADING = /^\s*#{1,6}\s/;
 const STRUCT_PREFIX = /^(\s*(?:[-*+]|\d+[.)]|>)\s+)/;
-const INLINE_PROTECT = /( ?`[^`]*` ?| ?\[[^\]]*\]\([^)]*\) ?)/g;
+// 代码片段、链接、行内/行间公式一律先摘出来，避免被下面的中文空白清理与上下标修补误伤
+const INLINE_PROTECT = /( ?`[^`]*` ?| ?\[[^\]]*\]\([^)]*\) ?| ?\$\$[^$\n]+\$\$ ?| ?\$[^$\n]+\$ ?)/g;
 
 /** Collapse stray whitespace in text runs while keeping Markdown syntax. */
 export function normalizeMarkdownSpacing(md: string): string {

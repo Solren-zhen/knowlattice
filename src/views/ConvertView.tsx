@@ -2,10 +2,10 @@
  * 格式转换：PDF / Word(.docx) → Markdown（纯前端离线，core/convert）。
  * 面板模式与 DraftGen 一致：转换 → 预览/编辑 → 复制 / 下载 / 入库为笔记。
  */
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEsc, escThenClose } from './useEsc';
 import MarkdownIt from 'markdown-it';
-import { docxToMarkdown, pdfToMarkdown, type ConvertResult } from '../core/convert';
+import { ATTACH_DIR, docxToMarkdown, pdfToMarkdown, type ConvertedImage, type ConvertResult } from '../core/convert';
 import { anydocErrorCode, anydocToMarkdown } from '../core/anydoc';
 import { ocrPdfToMarkdown } from '../core/ocr';
 import { netErrorHint } from '../core/netError';
@@ -19,10 +19,13 @@ const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
 interface Props {
   /** 入库：保存完整 md 笔记，返回路径 */
   onSave: (dir: string, title: string, content: string) => Promise<string>;
+  /** 落库内嵌图片（与 Editor 贴图同一个入口），返回 vault 相对路径。
+   *  故意设成必填：留成可选就等于允许「图片静默丢失」那条老路重新出现。 */
+  onAttach: (filename: string, blob: Blob) => Promise<string>;
   onClose: () => void;
 }
 
-export default function ConvertView({ onSave, onClose }: Props) {
+export default function ConvertView({ onSave, onAttach, onClose }: Props) {
   // Esc 关闭；焦点在可编辑的转换结果里时先退出输入框，再按一次才关——避免未入库的结果丢掉
   useEsc(escThenClose(onClose));
   const [busy, setBusy] = useState(false);
@@ -38,6 +41,27 @@ export default function ConvertView({ onSave, onClose }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const savingRef = useRef(false);
+
+  /** docx 抽出的内嵌图片（尚未落库）：正文里已写成 _attachments/<filename> */
+  const [images, setImages] = useState<ConvertedImage[]>([]);
+  /** 预览用的 blob URL：这些图还没落库，vault 解析不到，直接渲染会得到一排碎图。
+   *  在 useMemo 里建（渲染期派生）而不是 effect + setState：后者要多一轮渲染，
+   *  也会踩 react(set-state-in-effect)。回收单独放 effect —— 只 revoke、不 setState。 */
+  const imageUrls = useMemo(() => {
+    const urls = new Map<string, string>();
+    for (const img of images) urls.set(img.filename, URL.createObjectURL(img.blob));
+    return urls;
+  }, [images]);
+  useEffect(() => () => { for (const u of imageUrls.values()) URL.revokeObjectURL(u); }, [imageUrls]);
+
+  /** 预览正文：把 _attachments/<name> 换成本次转换内存里的 blob URL */
+  const previewMarkdown = useMemo(() => {
+    if (!images.length) return markdown;
+    return markdown.replace(/\]\((_attachments\/[^)\s]+)\)/g, (whole, p: string) => {
+      const url = imageUrls.get(p.slice(ATTACH_DIR.length));
+      return url ? `](${url})` : whole;
+    });
+  }, [markdown, images, imageUrls]);
 
   const convert = async (file: File) => {
     if (busy) return;
@@ -74,6 +98,7 @@ export default function ConvertView({ onSave, onClose }: Props) {
       }
       setResult(r);
       setMarkdown(r.markdown);
+      setImages(r.images ?? []);
       setTitle(r.title);
       setUsedEngine(r.engine ?? 'builtin');
       setElapsed(performance.now() - started);
@@ -117,8 +142,26 @@ export default function ConvertView({ onSave, onClose }: Props) {
     const t = title.trim() || result?.title || '未命名';
     savingRef.current = true;
     try {
+      // 附件必须先落库、再写笔记：笔记一旦写下去就引用了这些路径，
+      // 顺序反了会留下「笔记在、图不在」的碎图状态（正是原来图片全丢的表现）。
+      let attached = 0;
+      const failed: string[] = [];
+      for (const img of images) {
+        try {
+          await onAttach(img.filename, img.blob);
+          attached += 1;
+        } catch {
+          failed.push(img.filename);
+        }
+      }
       const path = await onSave(dir.trim(), t, markdown);
-      toast(`已入库：${path}`, 'ok');
+      if (failed.length) {
+        toast(`已入库：${path}；但有 ${failed.length} 张图片写入失败，正文对应位置会显示为空缺，可再点一次「存为笔记」重试`, 'err', 9000);
+      } else if (attached) {
+        toast(`已入库：${path}（含 ${attached} 张图片）`, 'ok', 4200);
+      } else {
+        toast(`已入库：${path}`, 'ok');
+      }
       onClose();
     } catch (e) {
       toast(netErrorHint(e), 'err');
@@ -189,9 +232,12 @@ export default function ConvertView({ onSave, onClose }: Props) {
             <div className="convert-meta">
               <span className="convert-file">{result.title}</span>
               <span className="muted">{markdown.length} 字符</span>
+              {/* 图片数必须当场显示：原来图片是在转换过程中被静默丢掉的，
+                  用户只能等打开笔记才发现。 */}
+              {images.length > 0 && <span className="muted">{images.length} 张图片</span>}
               <span className="muted">{usedEngine}{elapsed > 0 ? ' - ' + (elapsed / 1000).toFixed(2) + 's' : ''}</span>
               <span className="spacer" />
-              <button className="btn-small" onClick={() => { setResult(null); setMarkdown(''); }}>
+              <button className="btn-small" onClick={() => { setResult(null); setMarkdown(''); setImages([]); }}>
                 换个文件
               </button>
             </div>
@@ -201,7 +247,7 @@ export default function ConvertView({ onSave, onClose }: Props) {
             </div>
             {showPreview ? (
               <div className="convert-preview-scroll">
-                <div className="preview" dangerouslySetInnerHTML={{ __html: md.render(stripPageAnchors(markdown)) }} />
+                <div className="preview" dangerouslySetInnerHTML={{ __html: md.render(stripPageAnchors(previewMarkdown)) }} />
               </div>
             ) : (
               <textarea

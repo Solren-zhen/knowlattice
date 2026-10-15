@@ -10,15 +10,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { renderMarkdown } from '../core/markdown';
 import { FORMAT_KEYS } from '../core/formatKeys';
-import { IconFile, IconLink, IconSave, IconSearch } from './icons';
+import { IconFile, IconFwd, IconLattice, IconLink, IconSave, IconSearch } from './icons';
 
 /** markdown-it 实例已移至 core/markdown.ts 懒加载（首屏入口包不含它） */
 
-/** 四个行内格式键的展示文案，从 FORMAT_KEYS 推出来——键位只此一处定义，
- *  改键不会再漏改首页提示（mdFormat 的注释把「内置使用说明」也算在四处同源之内）。
- *  label 形如 'Alt+A'，取 '+' 后半段拼成 'A S Z X'。 */
-const FORMAT_HINT = `Alt/⌥ + ${(['bold', 'highlight', 'italic', 'wiki'] as const)
-  .map((k) => FORMAT_KEYS[k].label.split('+')[1])
+/** 行内格式键的展示文案，从 FORMAT_KEYS 推出——键位只此一处定义，
+ *  改键/加键都不会再漏改首页提示（见 core/formatKeys.ts 顶部与 mdFormat 的相关注释）。
+ *  直接遍历 FORMAT_KEYS 而不是手写键名数组：手写的那份在新增「挖空（Alt+C）」时
+ *  就漏掉了，正是 previewHero 那条「提示与 FORMAT_KEYS 同源」的测试把它抓出来的。
+ *  label 形如 'Alt+A'，取 '+' 后半段，按定义顺序拼成 'A S Z X C'。 */
+const FORMAT_HINT = `Alt/⌥ + ${Object.values(FORMAT_KEYS)
+  .map((k) => k.label.split('+')[1])
   .join(' ')}`;
 
 function escapeHtml(s: string): string {
@@ -154,22 +156,33 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
     // 长度按词计数、忽略分隔符）。40+ 字的文案在两列网格里会被撑成三行、
     // 右边缘参差，首屏被拉长。设计理由（为什么这四个键要挤在左手）属于 README，不属于首屏。
     return (
-      <div className="preview placeholder">
-        <div className="hero-badge">晶格 · KnowLattice</div>
-        <h1 className="hero-title">你的知识库，从这里开始</h1>
-        <p className="hero-sub">笔记沉淀知识 · 层级梳理思路 · 双链串联全局</p>
-        <div className="hero-proof" aria-label="KnowLattice 特性">
+      <div className="preview placeholder" data-stagger>
+        {/* 品牌锁定：晶格图腾与字标同一行。
+            旧版是「浮动图腾 + 大写字母距的渐变胶囊」，渐变 / 外发光 / uppercase tracking
+            三件套凑齐，正是通用生成器的签名；这里只留一行安静的字标。
+            图腾也不再无限呼吸：动效只传达状态，装饰性循环不留给首屏。 */}
+        <div className="hero-brand" data-reveal>
+          <span className="hero-lattice" aria-hidden="true"><IconLattice size={22} /></span>
+          <span className="hero-wordmark">晶格 · KnowLattice</span>
+        </div>
+        <h1 className="hero-title" data-reveal>你的知识库，从这里开始</h1>
+        <p className="hero-sub" data-reveal>笔记沉淀知识 · 层级梳理思路 · 双链串联全局</p>
+        {/* 三条能力做成一行发丝分隔的元数据，不再做成三枚各自配色的胶囊：
+            同一屏出现三种强调色会破坏「全站一个强调色」，层级反而散掉。 */}
+        <div className="hero-proof" data-reveal aria-label="KnowLattice 特性">
           <span><IconSave /> 本地优先</span>
           <span><IconFile /> Markdown 存储</span>
           <span><IconLink /> 全库互联</span>
         </div>
-        <div className="hero-cta">
-          <button className="btn-primary hero-primary" onClick={onSearch}>
+        <div className="hero-cta" data-reveal>
+          <button className="btn-primary hero-primary" data-magnet onClick={onSearch}>
             <IconSearch /> 快速搜索 <kbd>Ctrl K</kbd>
+            {/* 「按钮里的按钮」：尾随箭头自成一个圆形，悬停时向右上轻移（高级 CTA 的通用细节） */}
+            <span className="btn-trail" aria-hidden="true"><IconFwd size={13} /></span>
           </button>
           <button className="btn hero-graph" onClick={onGraph}>知识图谱</button>
         </div>
-        <div className="teach-steps">
+        <div className="teach-steps" data-reveal>
           <div className="teach-step"><kbd>回车</kbd><span>续写下一条</span></div>
           <div className="teach-step"><kbd>Tab</kbd><span>缩进成子要点</span></div>
           <div className="teach-step"><kbd>[[</kbd><span>链接到其他笔记</span></div>
@@ -177,7 +190,7 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
           {/* 第 5 条跨两列：5 个格子在 2 列网格里必然剩一个孤儿格，索性让它整行 */}
           <div className="teach-step wide"><kbd>右键</kbd><span>打开 / 删除整篇笔记</span></div>
         </div>
-        <p className="muted shortcut-hint">
+        <p className="muted shortcut-hint" data-reveal>
           <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存 · <kbd>Alt</kbd>+<kbd>←→</kbd> 后退前进
         </p>
       </div>

@@ -5,6 +5,9 @@ import { defineConfig } from 'vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // dev server 端口钉死 5173：tauri.conf.json 的 devUrl 是静态字符串，而 Vite 在 5173
+  // 被占用时会自动顺移到 5174 —— 那时 `npm run tauri dev` 连的是一个空窗口。
+  server: { port: 5173, strictPort: true },
   // 相对 base：适配 GitHub Pages 子路径（https://<user>.github.io/<repo>/）
   // 部署到根路径的时同样可用，本地 dev 不受影响。
   base: './',

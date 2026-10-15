@@ -10,6 +10,8 @@
  * 文件末尾另附 `FORMAT_KEYS`：四个格式命令的键位定义，界面提示与快捷键绑定同源。
  */
 
+import { isWholeCloze } from './cloze';
+
 export interface MdEdit {
   changes: Array<{ from: number; to: number; insert: string }>;
   selection: { anchor: number; head: number };
@@ -104,8 +106,55 @@ export function wikiLink(doc: string, from: number, to: number): MdEdit {
 }
 
 /**
+ * 挖空（cloze）：`{{答案}}` ⇄ `答案`。
+ *
+ * 为什么不复用 toggleMark：那个函数假定开闭标记**相同**（`**` / `==` / `*`），
+ * 而挖空是 `{{` … `}}` —— 用同一段代码会把 `}}` 当标记去查找，永远匹配不上。
+ *
+ * 行为与「加粗 / 高亮」严格一致（这是使用者的既定预期，不能因为换了语法就变）：
+ *   - 选区正好是一整处挖空 → 去掉包裹；
+ *   - `{{` `}}` 紧贴选区外侧 → 去掉包裹；
+ *   - 否则包一层；空选区插入 `{{挖空内容}}` 并选中占位文字，直接打字即可替换。
+ *
+ * "什么算一处挖空"由 core/cloze.ts 的 isWholeCloze 判定，
+ * 保证「编辑器做出来的挖空」与「复习界面认得的挖空」是同一套语法。
+ * 复习呈现见 core/cloze.ts 的 maskCloze / revealCloze。
+ */
+export function toggleCloze(doc: string, from: number, to: number): MdEdit {
+  if (from > to) [from, to] = [to, from];
+  const selected = doc.slice(from, to);
+
+  if (isWholeCloze(selected)) {
+    const inner = selected.slice(2, -2);
+    return { changes: [{ from, to, insert: inner }], selection: { anchor: from, head: from + inner.length } };
+  }
+
+  const outerFrom = from - 2;
+  if (outerFrom >= 0 && doc.slice(outerFrom, from) === '{{' && doc.slice(to, to + 2) === '}}') {
+    return {
+      changes: [
+        { from: outerFrom, to: from, insert: '' },
+        { from: to, to: to + 2, insert: '' },
+      ],
+      selection: { anchor: outerFrom, head: outerFrom + selected.length },
+    };
+  }
+
+  const text = selected.length > 0 ? selected : '挖空内容';
+  const insert = `{{${text}}}`;
+  return {
+    changes: [{ from, to, insert }],
+    selection:
+      selected.length > 0
+        ? { anchor: from + insert.length, head: from + insert.length }
+        : { anchor: from + 2, head: from + 2 + text.length },
+  };
+}
+
+/**
  * 键位定义已移到 `./formatKeys`（叶子模块，没有依赖）——首页在入口包里也要读这张表，
  * 留在这里会把整个 mdFormat 拖进首屏。这里重新导出，老引用（Editor.tsx 等）不用改。
  */
+
 export { FORMAT_KEYS } from './formatKeys';
 export type { FormatKey } from './formatKeys';

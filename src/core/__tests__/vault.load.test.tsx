@@ -43,6 +43,8 @@ function Probe() {
       <span data-testid="state">{!v.loaded ? 'loading' : v.loadError ? 'error' : 'ok'}</span>
       <span data-testid="msg">{v.loadError ?? ''}</span>
       <span data-testid="docs">{v.docs.size}</span>
+      {/* 打开库时自动修正的明细篇数：空串 = 这次打开没有任何需要修的地方 */}
+      <span data-testid="repair">{v.autoRepair ? String(v.autoRepair.repairedFiles?.length ?? 0) : ''}</span>
       <button onClick={v.retryLoad}>重试</button>
     </div>
   );
@@ -108,5 +110,32 @@ describe('useVault 加载', () => {
     await waitFor(() => expect(state()).toBe('error'));
 
     expect(h.write).not.toHaveBeenCalled();
+  });
+
+  it('打开库时自动修复 Markdown：只写回真正变化的那一篇，用户不用点任何菜单项', async () => {
+    // 表格行首多余的 `\|`（见 core/markdownRepair）：在外部编辑器里粘出来的常见坏格式
+    const broken = '\\| A | B |\n| --- | --- |\n\\| x | y |\n';
+    h.readAll = async () => new Map([['01-生理/a.md', broken]]);
+
+    render(<Probe />);
+    await waitFor(() => expect(state()).toBe('ok'));
+
+    await waitFor(() => expect(h.write).toHaveBeenCalledTimes(1));
+    const call = h.write.mock.calls[0] as unknown as [string, string];
+    expect(call[0]).toBe('01-生理/a.md');
+    expect(call[1]).toBe('| A | B |\n| --- | --- |\n| x | y |\n');
+    // 是同一篇被改写，不是变成两篇
+    expect(screen.getByTestId('docs').textContent).toBe('1');
+    expect(screen.getByTestId('repair').textContent).toBe('1');
+  });
+
+  it('没有需要修复的格式就一次盘都不写（自动修复不能变成每次打开都整库重写）', async () => {
+    h.readAll = async () => new Map([['01-生理/a.md', '# A\n']]);
+
+    render(<Probe />);
+    await waitFor(() => expect(state()).toBe('ok'));
+
+    expect(h.write).not.toHaveBeenCalled();
+    expect(screen.getByTestId('repair').textContent).toBe('');
   });
 });
