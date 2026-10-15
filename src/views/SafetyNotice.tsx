@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useEsc, escThenClose } from './useEsc';
-import { checkForUpdate, isDesktopApp, type PdfUpdate } from '../core/updater';
+import {
+  checkForUpdate,
+  installUpdate,
+  isDesktopApp,
+  subscribeUpdate,
+  updateState,
+} from '../core/updater';
 import { IconClose, IconInfo } from './icons';
 
 interface Props {
@@ -10,11 +16,10 @@ interface Props {
 export default function SafetyNotice({ onClose }: Props) {
   useEsc(escThenClose(onClose));
   const legalUrl = `${import.meta.env.BASE_URL}legal.md`;
-  // 桌面版：版本显示与手动检查更新（启动时 App.tsx 已自动检查过一次）
+  // 版本与更新：状态全部来自 core/updater 的共享 store（右下角更新卡片读的是同一份）。
+  // 这里只负责「显示 + 手动触发一次检查/安装」，不再自己维护一份进度。
   const [version, setVersion] = useState('');
-  const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'downloading' | 'upToDate' | 'error'>('idle');
-  const [pct, setPct] = useState<number | null>(null);
-  const [pending, setPending] = useState<PdfUpdate | null>(null);
+  const upd = useSyncExternalStore(subscribeUpdate, updateState);
 
   useEffect(() => {
     if (!isDesktopApp()) return;
@@ -25,17 +30,6 @@ export default function SafetyNotice({ onClose }: Props) {
       } catch { /* 忽略 */ }
     })();
   }, []);
-
-  const checkNow = async () => {
-    setUpdateState('checking');
-    const res = await checkForUpdate();
-    if (!res) { setUpdateState('upToDate'); return; }
-    setPending(res);
-    setUpdateState('downloading');
-    setPct(null);
-    await res.install((p) => setPct(p));
-    // install 完成后应用会自动重启，不会走到这里
-  };
 
   return (
     <div className="notice-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -64,19 +58,30 @@ export default function SafetyNotice({ onClose }: Props) {
               <p>当前为网页版，无自动更新。桌面版会自动检查新版本（更新经签名校验，来源 GitHub Releases）。</p>
             ) : (
               <>
-                <p>当前版本 {version || '…'}{pct !== null && pct < 100 ? ` · 下载 ${pct}%` : ''}</p>
-                <button
-                  className="btn-small"
-                  disabled={updateState === 'checking' || updateState === 'downloading'}
-                  onClick={() => void checkNow()}
-                >
-                  {updateState === 'checking' ? '检查中…'
-                    : updateState === 'downloading' ? `下载中… ${pct !== null ? pct + '%' : ''}`
-                    : '检查更新'}
-                </button>
-                {updateState === 'upToDate' && <p className="muted">已是最新版本</p>}
-                {updateState === 'error' && <p className="muted">检查失败，请确认网络后重试</p>}
-                {pending && updateState === 'downloading' && <p className="muted">新版本 v{pending.version} 下载完成后将自动安装</p>}
+                <p>当前版本 {version || '…'}</p>
+                <div className="notice-actions">
+                  <button
+                    className="btn-small"
+                    disabled={upd.phase === 'checking' || upd.phase === 'downloading' || upd.phase === 'installing'}
+                    onClick={() => void checkForUpdate({ manual: true })}
+                  >
+                    {upd.phase === 'checking' ? '检查中…'
+                      : upd.phase === 'downloading' ? `下载中… ${upd.pct !== null ? upd.pct + '%' : ''}`
+                      : upd.phase === 'installing' ? '安装中…'
+                      : '检查更新'}
+                  </button>
+                  {upd.phase === 'available' && (
+                    <button className="btn-small" onClick={() => void installUpdate()}>
+                      下载并安装 v{upd.version}
+                    </button>
+                  )}
+                </div>
+                {upd.phase === 'current' && <p className="muted">已是最新版本</p>}
+                {upd.phase === 'error' && <p className="muted">检查失败：{upd.error}</p>}
+                {upd.phase === 'available' && (
+                  <p className="muted">发现新版本 v{upd.version}，安装后应用会自动重启（右下角更新卡片也可操作）。</p>
+                )}
+                {upd.phase === 'installing' && <p className="muted">正在安装，完成后应用会自动重启。</p>}
               </>
             )}
           </section>
