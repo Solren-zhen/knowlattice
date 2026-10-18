@@ -106,6 +106,15 @@ export const IconGraph = ({ size = 15 }: P) => (
   </svg>
 );
 
+/** 插入图片：相框 + 山与太阳 */
+export const IconImage = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <rect x="3.2" y="4.4" width="17.6" height="15.2" rx="3.2" {...wash} fillOpacity={0.12} />
+    <circle cx="9.2" cy="9.8" r="1.6" />
+    <path d="M4.6 17.2l4.4-4.4 3.4 3.4 3-3 4 4" />
+  </svg>
+);
+
 /** 间隔复习：两张叠放的记忆卡 */
 export const IconCards = ({ size = 15 }: P) => (
   <svg {...base(size)}>

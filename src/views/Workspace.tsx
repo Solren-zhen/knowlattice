@@ -8,7 +8,8 @@ import { isTauri } from '../storage/tauriEnv';
 import { noteTemplate, parseFrontmatterCached, type NoteType } from '../core/parser';
 import { appendExcerpt } from '../core/noteGen';
 import { loadCards, noteStatus, srsStats } from '../core/srs';
-import { parseOutline } from '../core/outline';
+import { parseOutline, splitHeadingAnchor, headingLineByAnchor } from '../core/outline';
+import { isImagePath } from '../core/imageRef';
 import OutlinePanel from './OutlinePanel';
 // 音频条 + 字幕轨：打开笔记就可能用到，依赖很小（core/subtitle + icons），不单独拆 chunk
 import MediaTrack from './MediaTrack';
@@ -82,7 +83,7 @@ import StudyReportPanel from './StudyReportPanel';
 import MedicalPathwayBuilder from './MedicalPathwayBuilder';
 import {
   IconSave, IconTrash, IconChevron, IconBack, IconFwd, IconSearch,
-  IconFolder, IconLink, IconClose, IconPlay, IconChart,
+  IconFolder, IconLink, IconClose, IconPlay, IconChart, IconImage,
 } from './icons';
 import Rail from './Rail';
 import { clickable } from './a11y';
@@ -140,7 +141,11 @@ export default function Workspace() {
   /** 统一导入面板：自动识别格式 + 批量 */
   const [importOpen, setImportOpen] = useState(false);
   const [pathwayOpen, setPathwayOpen] = useState(false);
-  const pathwayInsertRef = useRef<((markdown: string) => void) | null>(null);
+  /** 编辑器注册的「在光标处插入 Markdown」句柄（医学通路插入与「插入图片」共用；
+   *  插入时会自动补前后空行，见 Editor 里注册的那段） */
+  const editorInsertRef = useRef<((markdown: string) => void) | null>(null);
+  /** 从磁盘插入图片用的文件选择框 */
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   /** 目录卡片显隐（导航轨「目录」按钮切换，窄屏可收起给正文让位） */
@@ -163,7 +168,7 @@ export default function Workspace() {
   const [nav, setNav] = useState<{ stack: string[]; idx: number }>({ stack: [], idx: -1 });
   /** 本页目录：随草稿实时解析（打字即更新）；activeHeading = 光标所在小节的标题行号 */
   const [activeHeading, setActiveHeading] = useState<number | null>(null);
-  /** 编辑器注册的「跳转到行」实现（本页目录点击用），模式同 pathwayInsertRef */
+  /** 编辑器注册的「跳转到行」实现（本页目录点击用），模式同 editorInsertRef */
   const outlineJumpRef = useRef<((line: number) => void) | null>(null);
   /** 根节点：右侧 AI 面板让位时要量导航轨实际宽度（见下面的 ResizeObserver） */
   const appRef = useRef<HTMLDivElement>(null);
@@ -377,20 +382,24 @@ export default function Workspace() {
     }
   });
 
-  /** 点击双链：存在则跳转；不存在则提示创建占位笔记（M3 灰色占位逻辑） */
+  /** 点击双链：存在则跳转；不存在则提示创建占位笔记（M3 灰色占位逻辑）。
+   *  `[[笔记#小节]]` 还能定位：先按目标打开笔记，等大纲就绪后跳到那一节（见 pendingAnchor）。 */
   const handleOpenLink = useCallback(
     async (name: string) => {
-      const resolved = vault.resolveLink(name);
+      const { target, anchor } = splitHeadingAnchor(name);
+      const resolved = vault.resolveLink(target);
       if (resolved) {
         openNote(resolved);
+        // 锚点统一交给 pendingAnchor：同一篇笔记时它下一帧就跳，跨笔记时等目标笔记的大纲就绪再跳
+        if (anchor) setPendingAnchor({ path: resolved, anchor });
         return;
       }
       if (await confirmBox({
-        title: `创建「${name}」？`,
+        title: `创建「${target}」？`,
         detail: '这个双链还没有对应的笔记',
         okText: '创建',
       })) {
-        void handleCreate('', name);
+        void handleCreate('', target);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -417,6 +426,48 @@ export default function Workspace() {
     setDraftText('');
     setDraftOpen(true);
   }, []);
+
+  /**
+   * 从磁盘插入图片：先落进 `_attachments/`（保留原文件名，与挂音频/字幕同一口径），
+   * 再在光标处插入 `![](路径)`。粘贴/拖拽之外的第二条路——手里已经有一张图、
+   * 或者想批量插几张时，不必先去截图或拖窗口。
+   *
+   * 同名附件自动让位（`图.png` → `图-1.png`），不静默覆盖用户已有的图；
+   * 避开换成任何后缀都不撞名的极端情况时宁可报错，也不回退成覆盖。
+   */
+  const insertImages = useCallback(async (files: File[]) => {
+    if (!vault.currentPath) { toast('请先打开一篇笔记，再插入图片', 'info'); return; }
+    // 编辑器未就绪就整批不做：落盘后却插不进正文，等于凭空多出几张没人引用的附件。
+    // 收进局部常量：await 之后 ref.current 的类型守卫失效，直接调用会被 TS 判为可能为 null。
+    const insert = editorInsertRef.current;
+    if (!insert) { toast('编辑器还在加载，请稍后再插入图片', 'info'); return; }
+    let ok = 0;
+    for (const file of files) {
+      // 认扩展名也认 MIME：部分系统（尤其 Linux/老旧浏览器）对 .webp/.avif 给的是空 type
+      if (!file.type.startsWith('image/') && !isImagePath(file.name)) continue;
+      // 附件名只用文件名本身：路径分隔符会破坏 vault 路径，前导点会变成隐藏文件
+      const raw = file.name.replace(/[/\\]/g, '_').replace(/^\.+/, '_').trim();
+      const ext = file.type.split('/')[1] || 'png';
+      let name = raw || `image-${Date.now()}.${ext}`;
+      if (vault.hasAttachment(`_attachments/${name}`)) {
+        const dot = name.lastIndexOf('.');
+        const stem = dot > 0 ? name.slice(0, dot) : name;
+        const tail = dot > 0 ? name.slice(dot) : '';
+        const free = Array.from({ length: 200 }, (_, i) => `${stem}-${i + 1}${tail}`)
+          .find((cand) => !vault.hasAttachment(`_attachments/${cand}`));
+        if (!free) { toast(`插入图片失败：${name} 的同名文件太多，请先改个名字`, 'err'); continue; }
+        name = free;
+      }
+      try {
+        const path = await vault.saveAttachment(name, file);
+        insert(`![](${path})`);
+        ok += 1;
+      } catch (err) {
+        toast(`插入图片失败：${(err as Error).message}`, 'err');
+      }
+    }
+    if (ok > 1) toast(`已插入 ${ok} 张图片`, 'ok');
+  }, [vault]);
 
   /** 回到主界面（欢迎页）：先把未保存改动落盘，再清空当前笔记。
    *  医学通路工作区会整屏替换三栏布局，必须一并退出，否则点了按钮界面纹丝不动。 */
@@ -684,6 +735,17 @@ export default function Workspace() {
   // 本页目录：读草稿（未保存内容）而不是 docs——打字时目录即时跟上。
   // 无标题的笔记返回空数组，大纲区整个不渲染。
   const outline = useMemo(() => parseOutline(draft ?? ''), [draft]);
+
+  /** `[[笔记#小节]]` 待跳转的锚点：笔记打开后正文是异步进来的，等大纲（读草稿）就绪再跳一次 */
+  const [pendingAnchor, setPendingAnchor] = useState<{ path: string; anchor: string } | null>(null);
+  useEffect(() => {
+    if (!pendingAnchor) return;
+    if (pendingAnchor.path !== activePath || outline.length === 0) return;
+    // 锚点找不到（标题被改过、或 `^块引用` 我们没有块级索引）就只打开笔记，不猜一行跳
+    const line = headingLineByAnchor(outline, pendingAnchor.anchor);
+    if (line !== null) outlineJumpRef.current?.(line);
+    setPendingAnchor(null);
+  }, [pendingAnchor, activePath, outline]);
 
   /* ── 笔记级音频 + 字幕（I1）────────────────────────────────────────────
    * 放在这里而不是文件顶部：要用到 activePath（上面）与 readFile（上面的 `const readFile = vault.readFile`），又必须在下两处
@@ -1052,7 +1114,7 @@ export default function Workspace() {
             onClose={() => setPathwayOpen(false)}
             onInsert={(markdown) => {
               if (!vault.currentPath) { toast('请先打开一篇笔记，再插入通路图', 'info'); return false; }
-              if (pathwayInsertRef.current) { pathwayInsertRef.current(markdown); return true; }
+              if (editorInsertRef.current) { editorInsertRef.current(markdown); return true; }
               toast('编辑器还在加载，请稍后再插入', 'info'); return false;
             }}
           />
@@ -1160,6 +1222,26 @@ export default function Workspace() {
                 >
                   思维导图
                 </button>
+                {/* 插入图片：从磁盘选，落进 _attachments/ 后插到光标处 */}
+                <button
+                  className="btn-icon"
+                  onClick={() => imageInputRef.current?.click()}
+                  data-tip="插入图片（从磁盘选，存进本库 _attachments/）"
+                  aria-label="插入图片"
+                >
+                  <IconImage />
+                </button>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    void insertImages([...(e.target.files ?? [])]);
+                    e.target.value = '';
+                  }}
+                />
                 {/* 笔记级音频 + 字幕：按钮只负责唤醒隐藏的文件选择框（原生选择器支持多选） */}
                 <button
                   className="btn-icon"
@@ -1278,7 +1360,7 @@ export default function Workspace() {
                     setAiOpen(false); // 与 AI 助手面板互斥（共用同一块让位空间）
                     setAgentOpen(true);
                   }}
-                  onPathwayReady={(insert) => { pathwayInsertRef.current = insert; }}
+                  onPathwayReady={(insert) => { editorInsertRef.current = insert; }}
                   headingLines={outline.map((o) => o.line)}
                   onActiveHeading={setActiveHeading}
                   onJumpReady={(jump) => { outlineJumpRef.current = jump; }}
@@ -1367,6 +1449,7 @@ export default function Workspace() {
           docs={vault.docs}
           resolve={vault.resolveLink}
           onOpenLink={handleOpenLink}
+          readFile={readFile}
           onClose={() => setReviewOpen(false)}
           onAskAi={askAgent}
           onOpenPath={(p) => {

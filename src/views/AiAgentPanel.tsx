@@ -100,17 +100,27 @@ export type QuoteSelection = {
 /** 流式正文也吃 markdown 排版：防抖 250ms 渲染（markdown-it 懒加载，首条消息后常驻内存） */
 function useDeferredMarkdown(text: string): string {
   const [html, setHtml] = useState('');
+  const [debouncedText, setDebouncedText] = useState(text);
+
+  // 防抖：text 变化 250ms 后才更新 debouncedText
   useEffect(() => {
-    if (!text) { setHtml(''); return; }
-    let alive = true;
-    const timer = setTimeout(() => {
-      renderMarkdown(text)
-        .then((h) => { if (alive) setHtml(h); })
-        .catch(() => { /* 渲染失败保持纯文本展示 */ });
-    }, 250);
-    return () => { alive = false; clearTimeout(timer); };
+    const timer = setTimeout(() => setDebouncedText(text), 250);
+    return () => clearTimeout(timer);
   }, [text]);
-  return html;
+
+  // 渲染：只在防抖后的文本变化时执行
+  useEffect(() => {
+    if (!debouncedText) return; // 空文本不触发渲染，html 保持原值或初始值
+
+    let alive = true;
+    renderMarkdown(debouncedText)
+      .then((h) => { if (alive) setHtml(h); })
+      .catch(() => { /* 渲染失败保持纯文本展示 */ });
+    return () => { alive = false; };
+  }, [debouncedText]);
+
+  // 派生状态：text 为空时直接返回空字符串，不通过 effect
+  return text ? html : '';
 }
 
 /** 引用核验徽标：把回答里 “…”〔…〕 形式的引用逐条与库内原文比对，展示四档结论。
@@ -950,9 +960,12 @@ export default function AiAgentPanel({
     let answerAccum = '';
     // 停顿看门狗：连接卡死时流不会给出任何事件（这不是「模型在思考」，思考会走 thinking 增量），
     // 面板会一直停在「停止」按钮上等下去。任何事件都会刷新 lastEventRef。
+    // 例外：等用户在提案卡上点「应用/拒绝」时没有流事件是正常的——读 diff、想清楚都可能超过
+    // 阈值，绝不能当成连接卡死杀掉整个任务；有 pendingRef 待裁决时就一直续命等下去。
     let stalled = false;
     lastEventRef.current = Date.now();
     const watchdog = window.setInterval(() => {
+      if (pendingRef.current.size > 0) { lastEventRef.current = Date.now(); return; }
       if (Date.now() - lastEventRef.current > STALL_IDLE_MS) { stalled = true; ctrl.abort(); }
     }, 5_000);
 

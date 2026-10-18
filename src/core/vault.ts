@@ -42,6 +42,8 @@ import { exportPomodoros, importPomodoros } from './pomodoro';
 import { pushSnapshot } from './history';
 import { repairMarkdown, type MarkdownRepairChange } from './markdownRepair';
 import { exportPathwayTemplates, importPathwayTemplates } from './pathwayTemplates';
+import { attachmentCandidates, basenameIndex } from './imageRef';
+import { splitHeadingAnchor } from './outline';
 import { enqueueWrite } from './writeQueue';
 import { planMerge, formatConflictStamp, pickNewObjectKeys, pickNewListItems, type ExistingFile } from './restoreMerge';
 import { toast } from './feedback';
@@ -596,8 +598,34 @@ export function useVault() {
   /** 打开库时**自动**修正的 Markdown 格式报告（没有可修的为 null）。只用于界面显示明细，
    *  不是用户要点一下的动作——真正的修复在加载 effect 里做，见 repairNotesOnLoad。 */
   const [autoRepair, setAutoRepair] = useState<ImportResult | null>(null);
-  /** Blob 对象 URL 缓存：同一附件只 createObjectURL 一次 */
+  /**
+   * Blob 对象 URL 缓存：同一附件只 createObjectURL 一次。
+   *
+   * 必须成对回收，否则会出两种错：
+   * ① **陈旧**——同一个路径被重新写入（重名重传、导入覆盖）后，缓存里还是旧 Blob 的
+   *    URL，界面会一直显示旧图，磁盘上其实已经是新图。所以 saveAttachment 落盘后要先
+   *    把该路径的 URL 吊销掉，下次读取自然重建。
+   * ② **泄漏**——URL 句柄不会自己回收，整库重载 / 组件卸载时要统一吊销。
+   * 只缓存「读到过」的附件，数量上限约等于用户实际浏览过的附件数；Blob 本身本来就在
+   * attachments 里常驻，所以这里不额外占图片内存，也就没必要做 LRU 淘汰——
+   * 淘汰反而会让仍在页面上的 <img> 变成破图。
+   */
   const attachmentUrlCache = useRef(new Map<string, string>());
+
+  /** 吊销某路径缓存的对象 URL（若存在）。改附件内容前后都要调用 */
+  const revokeAttachmentUrl = useCallback((path: string) => {
+    const url = attachmentUrlCache.current.get(path);
+    if (!url) return;
+    URL.revokeObjectURL(url);
+    attachmentUrlCache.current.delete(path);
+  }, []);
+
+  /** 吊销全部：整库重载或卸载时用，避免 URL 句柄越积越多 */
+  const revokeAllAttachmentUrls = useCallback(() => {
+    for (const url of attachmentUrlCache.current.values()) URL.revokeObjectURL(url);
+    attachmentUrlCache.current.clear();
+  }, []);
+
   /** 各路径「我们上次看到的磁盘 mtime」。写盘前比对它来发现外部改动（外部编辑器 /
    *  另一个窗口 / 同步盘）：不一致就先留档再覆盖，绝不静默吃掉别人的内容。 */
   const diskMtimesRef = useRef(new Map<string, number>());
@@ -660,6 +688,9 @@ export function useVault() {
       setLinkIndex(rebuildLinkIndex(fileMap));
       applyDocs(fileMap);
       setStructureDocs(fileMap);
+      // 整库重载会把 attachments 整个换掉：旧 URL 指向旧 Blob，必须先全部吊销再装载，
+      // 否则重载后图片仍显示重载前的版本。
+      revokeAllAttachmentUrls();
       setAttachments(attachmentMap);
       setLoaded(true);
     })().catch((e) => {
@@ -673,7 +704,10 @@ export function useVault() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey, applyDocs]);
+  }, [reloadKey, applyDocs, revokeAllAttachmentUrls]);
+
+  /** 卸载时吊销所有缓存的附件对象 URL（URL 句柄不会自己回收） */
+  useEffect(() => revokeAllAttachmentUrls, [revokeAllAttachmentUrls]);
 
   /** 重新加载知识库（错误页的「重试」按钮） */
   const retryLoad = useCallback(() => {
@@ -1163,14 +1197,20 @@ export function useVault() {
     };
   }, [linkIndex, applyDocs]);
 
-  /** 保存图片附件（Blob 存入独立 attachments store），返回 vault 相对路径；写失败抛出 */
+  /**
+   * 保存图片附件（Blob 存入独立 attachments store），返回 vault 相对路径；写失败抛出。
+   *
+   * 同名覆盖（重名重传、从磁盘再插一次同名图）必须先把该路径缓存的对象 URL 吊销：
+   * 否则 Blob 已经换成新的，界面读到的还是旧 URL，图不会更新——用户会以为没插进去。
+   */
   const saveAttachment = useCallback(async (filename: string, blob: Blob): Promise<string> => {
     const path = safeVaultPath(`_attachments/${filename}`);
     if (!path) throw new Error('附件路径不安全');
     await adapter.writeAttachment(path, blob);
+    revokeAttachmentUrl(path);
     setAttachments((prev) => new Map(prev).set(path, blob));
     return path;
-  }, []);
+  }, [revokeAttachmentUrl]);
 
   /**
    * 列出「没有任何笔记引用」的附件（只算、不删）。判据见 core/attachmentOrphans。
@@ -1239,17 +1279,11 @@ export function useVault() {
           for (const p of gone) next.delete(p);
           return next;
         });
-        for (const p of gone) {
-          const url = attachmentUrlCache.current.get(p);
-          if (url) {
-            URL.revokeObjectURL(url);
-            attachmentUrlCache.current.delete(p);
-          }
-        }
+        for (const p of gone) revokeAttachmentUrl(p);
       }
       return { removed: done.length, failed };
     },
-    [],
+    [revokeAttachmentUrl],
   );
 
   /** 新建笔记走模板，自动填 chapter/frontmatter（M1 验收项） */
@@ -1309,31 +1343,62 @@ export function useVault() {
   /** 名称 -> 路径 解析：文件名 / 一级标题 / alias 都能命中（不区分大小写） */
   const resolveLink = useCallback(
     (name: string): string | null => {
-      const key = name.trim().toLowerCase();
+      // `笔记#小节` 也是合法目标：查名之前先摘掉锚点（锚点由打开笔记时跳转用，见 splitHeadingAnchor）
+      const key = splitHeadingAnchor(name).target.toLowerCase();
       if (!key) return null;
       return nameIndex.get(key) ?? null;
     },
     [nameIndex]
   );
 
-  /** vault 路径 → 可渲染内容：.md 返回文本，附件返回 Blob 对象 URL（惰性创建并缓存） */
+  /** 附件库的「文件名 → 唯一路径」索引（重名记 null）：只写文件名找图时用，跟 attachments 身份一起换 */
+  const attachmentByName = useMemo(() => basenameIndex(attachments.keys()), [attachments]);
+
+  /** 当前笔记所在目录（带尾斜杠）：`fig/x.png` 这种与笔记同级的引用按它解析 */
+  const currentDir = useMemo(() => {
+    const path = currentPath ?? '';
+    const cut = path.lastIndexOf('/');
+    return cut === -1 ? '' : path.slice(0, cut + 1);
+  }, [currentPath]);
+
+  /**
+   * vault 路径 → 可渲染内容：.md 返回文本，附件返回 Blob 对象 URL（惰性创建并缓存）。
+   * 找附件按 Obsidian 的顺序试候选（原路径 → `_attachments/` 前缀 → 笔记同目录
+   * → 全库唯一同名单文件），
+   * 这样从 Obsidian 搬过来的 `![[fig/x.png]]`、`![[x.png]]` 都能渲染，而不是显示成「图片未导入」。
+   */
   const readFile = useCallback(
     (path: string): string | undefined => {
       const text = docs.get(path);
       if (text !== undefined) return text;
-      const blob = attachments.get(path);
-      if (!blob) return undefined;
-      let url = attachmentUrlCache.current.get(path);
-      if (!url) {
-        url = URL.createObjectURL(blob);
-        attachmentUrlCache.current.set(path, url);
+      for (const cand of attachmentCandidates(path, attachmentByName, currentDir)) {
+        const blob = attachments.get(cand);
+        if (!blob) continue;
+        let url = attachmentUrlCache.current.get(cand);
+        if (!url) {
+          url = URL.createObjectURL(blob);
+          attachmentUrlCache.current.set(cand, url);
+        }
+        return url;
       }
-      return url;
+      return undefined;
     },
-    [docs, attachments]
+    [docs, attachments, attachmentByName, currentDir]
   );
 
-  /** 导出为 md 文件夹(.zip)：真实 Markdown 目录结构，可直接用 Obsidian/记事本打开（数据永不锁定） */
+
+  /**
+   * 附件是否已存在（同名查重用）：只查，不建对象 URL。
+   *
+   * 为什么单独开一个：插入图片时要用它判断「这个名字是否已被占用」，
+   * 借 readFile 来判会顺手为一张可能永远不会显示的图创建并缓存一个 blob URL。
+   * 候选顺序与 readFile 保持一致，避免「查重说没有、显示却有」的错位。
+   */
+  const hasAttachment = useCallback(
+    (path: string): boolean =>
+      attachmentCandidates(path, attachmentByName, currentDir).some((cand) => attachments.has(cand)),
+    [attachments, attachmentByName, currentDir]
+  );
   const exportMdFolder = useCallback(async () => {
     const { default: JSZip } = await import('jszip');
     const zip = new JSZip();
@@ -1494,6 +1559,7 @@ export function useVault() {
     findOrphanAttachments,
     removeAttachments,
     readFile,
+    hasAttachment,
     exportAll,
     exportMdFolder,
     importBackup,

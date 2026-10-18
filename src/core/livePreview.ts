@@ -20,10 +20,12 @@
 import { EditorState, StateEffect, StateField, RangeSet, type Extension, type Range } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import { isPathwayLang, renderPathwaySvg } from './pathway';
+import { IMAGE_EXT_RE, parseEmbedSpec, type EmbedSize } from './imageRef';
+import { CALLOUT_RE, calloutLabel, isKnownCalloutType, parseCallout } from './callout';
 
 export type ReadFileFn = (path: string) => string | undefined;
 
-const imgExtRe = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+const imgExtRe = IMAGE_EXT_RE;
 
 // ---------- 渲染小部件 ----------
 
@@ -241,23 +243,32 @@ class TableWidget extends WidgetType {
   }
 }
 
-/** 图片部件：真实 <img>（dataURL 经 vault readFile 解析）；block 装饰时独占整行 */
+/** 图片部件：真实 <img>（dataURL 经 vault readFile 解析）；block 装饰时独占整行。
+ *  尺寸来自 Obsidian 的 `![[图.png|300]]` / `|640x480`，只设宽高、不锁死比例
+ *  （.lp-img 的 max-width:100% 仍能在窄列里把它等比压小）。 */
 class ImgWidget extends WidgetType {
   private src: string;
   private alt: string;
-  constructor(src: string, alt: string) {
+  private size: EmbedSize;
+  constructor(src: string, alt: string, size: EmbedSize = {}) {
     super();
     this.src = src;
     this.alt = alt;
+    this.size = size;
   }
   ignoreEvent() { return false; }
-  eq(o: ImgWidget) { return o.src === this.src && o.alt === this.alt; }
+  eq(o: ImgWidget) {
+    return o.src === this.src && o.alt === this.alt
+      && o.size.width === this.size.width && o.size.height === this.size.height;
+  }
   toDOM() {
     const img = document.createElement('img');
     img.className = 'lp-img';
     img.src = this.src;
     img.alt = this.alt;
     img.loading = 'lazy';
+    if (this.size.width) img.style.width = `${this.size.width}px`;
+    if (this.size.height) img.style.height = `${this.size.height}px`;
     return img;
   }
 }
@@ -418,12 +429,12 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
       const to = start + c.to;
       switch (c.kind) {
         case 'embed': {
-          const name = c.a.trim();
-          if (imgExtRe.test(name)) {
-            const data = resolveImage(name);
-            pushReplace(f, to, data ? new ImgWidget(data, c.b || name) : new EmbedMissingWidget(name));
+          const spec = parseEmbedSpec(`${c.a.trim()}${c.b ? `|${c.b}` : ''}`);
+          if (imgExtRe.test(spec.name)) {
+            const data = resolveImage(spec.name);
+            pushReplace(f, to, data ? new ImgWidget(data, spec.alt, spec.size) : new EmbedMissingWidget(spec.name));
           } else {
-            pushReplace(f, to, new WikiWidget(c.b || name, name));
+            pushReplace(f, to, new WikiWidget(c.b || spec.name, spec.name));
           }
           break;
         }
@@ -445,11 +456,15 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
 
   /** 有序列表自动编号状态：同层级连续行递增 */
   let ordered: { indent: number; num: number } | null = null;
+  /** 当前 callout 的类型（`> [!warning] 标题` 起头，随后的 `>` 行都算它的正文） */
+  let calloutType: string | null = null;
 
   for (let ln = 1; ln <= doc.lines; ln++) {
     const line = doc.line(ln);
     const t = line.text;
     if (!t.trim()) { ordered = null; continue; }
+    // callout 只在连续的 `>` 行里延续：空行或其他块一到就结束
+    if (!t.startsWith('>')) calloutType = null;
 
     // 光标行：结构源码照旧显示（#、-、表格便于编辑），但行内标记仍然渲染——
     // 标记符只是被吃掉的零宽字符、内容照旧可编辑，所以 ** 在任何行都不会露出来。
@@ -539,8 +554,31 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
     // 引用 >
     if (t.startsWith('>')) {
       const contentStart = line.from + QUOTE_RE.exec(t)![0].length;
+      const callout = parseCallout(t);
+      if (callout) {
+        // `> [!warning] 标题`：语法标记换成类型胶囊（标题文字保留可编辑），整块上色。
+        // 折叠标记 `-`/`+` 一并吃掉，但用箭头如实标出来：编辑器里正文是源码，
+        // 不能真的收起（收起了就没法编辑），靠箭头提示「预览里这块是折叠的」。
+        const m = CALLOUT_RE.exec(t)!;
+        const markerLen = m[0].length - (m[3] ?? '').length;
+        const chip = `lp-callout-chip ${isKnownCalloutType(callout.type) ? `lp-callout-${callout.type}` : 'lp-callout-default'}`;
+        const chipText = callout.fold
+          ? `${calloutLabel(callout.type)} ${callout.fold === 'closed' ? '▸' : '▾'}`
+          : calloutLabel(callout.type);
+        pushReplace(line.from, line.from + markerLen, new HtmlWidget(chipText, chip));
+        ranges.push(Decoration.line({ class: `lp-quote-line lp-callout-head ${chip}` }).range(line.from));
+        pushMark(line.from + markerLen, line.to, 'lp-callout-title');
+        inlineMarks(t.slice(markerLen), line.from + markerLen, ln === activeLine);
+        calloutType = callout.type;
+        ordered = null;
+        continue;
+      }
       pushReplace(line.from, contentStart, new HtmlWidget('▍', 'lp-quote-mark'));
-      ranges.push(Decoration.line({ class: 'lp-quote-line' }).range(line.from));
+      // 上一条 callout 的正文延续（颜色跟着类型走）
+      const bodyCls = calloutType
+        ? ` lp-callout-body ${isKnownCalloutType(calloutType) ? `lp-callout-${calloutType}` : 'lp-callout-default'}`
+        : '';
+      ranges.push(Decoration.line({ class: `lp-quote-line${bodyCls}` }).range(line.from));
       pushMark(contentStart, line.to, 'lp-quote-text');
       inlineMarks(t.slice(contentStart - line.from), contentStart);
       ordered = null;
@@ -573,9 +611,9 @@ function buildSet(state: EditorState, getReadFile?: () => ReadFileFn | undefined
     const embedLine = EMBED_LINE_RE.exec(t);
     const imgLine = IMG_LINE_RE.exec(t);
     if (embedLine && imgExtRe.test(embedLine[1].trim())) {
-      const name = embedLine[1].trim();
-      const data = resolveImage(name);
-      pushReplace(line.from, line.to, data ? new ImgWidget(data, embedLine[2] || name) : new EmbedMissingWidget(name), true);
+      const spec = parseEmbedSpec(`${embedLine[1].trim()}${embedLine[2] ? `|${embedLine[2]}` : ''}`);
+      const data = resolveImage(spec.name);
+      pushReplace(line.from, line.to, data ? new ImgWidget(data, spec.alt, spec.size) : new EmbedMissingWidget(spec.name), true);
       ordered = null;
       continue;
     }

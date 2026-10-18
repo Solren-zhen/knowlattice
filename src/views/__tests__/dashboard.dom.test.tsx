@@ -8,7 +8,15 @@ describe('学习统计面板', () => {
   beforeEach(() => localStorage.clear());
   afterEach(cleanup);
 
+  /** 本地时区的今天（与 core/stats 的 localDate 同口径） */
+  function todayKey(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
   it('显示每日学习次数，并提供直接练题的下一步操作', async () => {
+    // 有学习记录时才画柱状图；全零走空态（见下一条用例）
+    localStorage.setItem('knowlattice-days', JSON.stringify({ [todayKey()]: 3 }));
     const onOpenReview = vi.fn();
     const onOpenQuiz = vi.fn();
     render(
@@ -24,6 +32,18 @@ describe('学习统计面板', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '导入题库' }));
     await waitFor(() => expect(onOpenQuiz).toHaveBeenCalledOnce());
     expect(onOpenReview).not.toHaveBeenCalled();
+  });
+
+  it('最近 7 天没有记录时展示空态，而不是七根几乎看不见的空柱', () => {
+    render(
+      <Dashboard docs={new Map()} onClose={vi.fn()} onOpenReview={vi.fn()} onOpenQuiz={vi.fn()} />,
+    );
+
+    const section = screen.getByRole('region', { name: '近 7 天学习' });
+    expect(
+      within(section).getByText('最近 7 天还没有学习记录：完成一次复习或练题，这里就会长出柱子。'),
+    ).toBeTruthy();
+    expect(within(section).queryAllByRole('listitem')).toHaveLength(0);
   });
 
   it('有未学习的新卡时优先把用户送进复习队列', async () => {

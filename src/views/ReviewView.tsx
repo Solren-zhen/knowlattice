@@ -30,6 +30,8 @@ interface Props {
   docs: Map<string, string>;
   resolve: (name: string) => string | null;
   onOpenLink: (name: string) => void;
+  /** vault 路径 → 可渲染内容：卡片正文里的图片（`![[图.png|300]]`）靠它解析 */
+  readFile?: (path: string) => string | undefined;
   onClose: () => void;
   onOpenPath: (path: string) => void;
   /** 与 AI 笔记联动：把这张复习卡交给 AI 讲透；不传则不显示入口 */
@@ -49,7 +51,7 @@ function keyLabel(key: string, docs: Map<string, string>): string {
   return head ? `${name} · ${head}` : name;
 }
 
-export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, onOpenPath, onAskAi }: Props) {
+export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile, onClose, onOpenPath, onAskAi }: Props) {
   // 全库建卡（纯函数，一篇笔记可能出多张）→ 套上自定义正/背面、剔除已删的卡
   const [edits, setEdits] = useState<CardEditMap>(() => loadCardEdits());
   const cards = useMemo(() => applyCardEdits(buildCards(paths, docs), edits), [paths, docs, edits]);
@@ -314,7 +316,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
           <details className="card-edit-orig">
             <summary>看笔记原文（只读）</summary>
             <div className="review-back">
-              <Preview content={card.body} resolve={resolve} onOpenLink={onOpenLink} />
+              <Preview content={card.body} resolve={resolve} onOpenLink={onOpenLink} readFile={readFile} />
             </div>
           </details>
         </div>
@@ -381,7 +383,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
                       挖空回忆 · {clozeCount} 处
                     </div>
                     <div className="review-back">
-                      <Preview content={clozeMasked} resolve={resolve} onOpenLink={onOpenLink} />
+                      <Preview content={clozeMasked} resolve={resolve} onOpenLink={onOpenLink} readFile={readFile} />
                     </div>
                   </div>
                 )}
@@ -402,7 +404,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, onClose, 
             <>
               <hr />
               <div className="review-back">
-                <Preview content={backRevealed} resolve={resolve} onOpenLink={onOpenLink} />
+                <Preview content={backRevealed} resolve={resolve} onOpenLink={onOpenLink} readFile={readFile} />
               </div>
               <div className="review-meta muted">
                 {cardCount

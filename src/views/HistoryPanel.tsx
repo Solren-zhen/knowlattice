@@ -2,7 +2,7 @@
  * 历史版本面板：查看当前笔记的历史快照并一键恢复；
  * 同时列出「已删除笔记」的残留快照，误删的笔记可从这里找回（core/history）。
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useEsc, escThenClose } from './useEsc';
 import { listSnapshots, listSnapshotPaths, type Snapshot } from '../core/history';
 import { toast, confirmBox } from '../core/feedback';
@@ -31,23 +31,34 @@ export default function HistoryPanel({ currentPath, existingPaths, onRestore, on
   const [preview, setPreview] = useState<Snapshot | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  const load = useCallback(async () => {
-    const [cur, allPaths] = await Promise.all([
-      currentPath ? listSnapshots(currentPath) : Promise.resolve<Snapshot[]>([]),
-      listSnapshotPaths(),
-    ]);
-    const del = new Map<string, Snapshot[]>();
-    for (const p of allPaths.keys()) {
-      if (p === currentPath || existingPaths.has(p)) continue;
-      del.set(p, await listSnapshots(p));
-    }
-    setCurrent(cur);
-    setDeleted(del);
-    setPreview(null);
-    setLoaded(true);
-  }, [currentPath, existingPaths]);
+  // 加载历史快照：依赖变化时触发
+  useEffect(() => {
+    let cancelled = false;
 
-  useEffect(() => { void load(); }, [load]);
+    (async () => {
+      const [cur, allPaths] = await Promise.all([
+        currentPath ? listSnapshots(currentPath) : Promise.resolve<Snapshot[]>([]),
+        listSnapshotPaths(),
+      ]);
+
+      if (cancelled) return;
+
+      const del = new Map<string, Snapshot[]>();
+      for (const p of allPaths.keys()) {
+        if (p === currentPath || existingPaths.has(p)) continue;
+        del.set(p, await listSnapshots(p));
+      }
+
+      if (cancelled) return;
+
+      setCurrent(cur);
+      setDeleted(del);
+      setPreview(null);
+      setLoaded(true);
+    })().catch(console.error);
+
+    return () => { cancelled = true; };
+  }, [currentPath, existingPaths]);
 
   const restore = async (snap: Snapshot, deletedNote: boolean) => {
     const ok = await confirmBox({

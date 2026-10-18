@@ -20,6 +20,7 @@ import { docxToMarkdown, pdfToMarkdown, type ConvertedImage } from '../core/conv
 import { apkgSummary, apkgToVaultFiles, readAnkiTsv, readApkg } from '../core/ankiImport';
 import { datasetToVaultFiles, detectDataset } from '../core/datasetImport';
 import type { VaultFile } from '../core/importToVault';
+import { isImagePath } from '../core/imageRef';
 import { toast } from '../core/feedback';
 import { IconConvert, IconClose, IconRestore } from './icons';
 import Loading from './Loading';
@@ -236,24 +237,42 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
   };
 
   /**
-   * 整个文件夹批量导入（webkitdirectory）：只吃 .md——文件夹里混着的图片、pdf、附件跳过。
+   * 整个文件夹批量导入（webkitdirectory）：吃 .md + 图片（png/jpg/gif/webp/svg/bmp/avif），
+   * 其余（pdf/附件）跳过。
    * 路径取 webkitRelativePath 并**去掉顶层文件夹名**，与目录树「导入 md 文件夹」同一口径，
    * 落到同一批路径规则上；一次 onImportMd 写完整批（走「只补不覆盖」）。
+   *
+   * 图片按同样的相对路径落到 `_attachments/` 下（`fig/x.png` → `_attachments/fig/x.png`）：
+   * 这是从 Obsidian 搬库不断图的关键 —— 笔记里写的 `![[fig/x.png|300]]` 正是按
+   * 「原路径 → 加 _attachments/ 前缀」找图（见 core/imageRef），目录结构保住就能直接命中，
+   * 不需要改写任何正文。
    */
   const runFolder = async (files: File[]) => {
     if (busy) return;
     const notes = files.filter((f) => /\.(md|markdown)$/i.test(f.name));
     if (!notes.length) { toast('这个文件夹里没有 Markdown 笔记（.md）', 'info', 6000); return; }
+    const images = files.filter((f) => isImagePath(f.name));
     setBusy(true);
     setReport(null);
+    const relPath = (f: File) => ((f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name).replace(/^[^/]+\//, '');
+    let attachOk = 0;
+    let attachFailed = 0;
+    if (images.length) {
+      setProgress(`写入 ${images.length} 张图片…`);
+      for (const f of images) {
+        const path = relPath(f);
+        if (!path) continue;
+        // 单张失败不打断整批：报告里说清几张没写进去，笔记照旧导入
+        try { await onAttach(path, f); attachOk++; } catch { attachFailed++; }
+      }
+    }
     setProgress(`读取 ${notes.length} 篇…`);
     const list: VaultFile[] = [];
     const seen = new Set<string>();
     let dupSkipped = 0;
     let mojibake = 0;
     for (const f of notes) {
-      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-      const path = rel.replace(/^[^/]+\//, '');
+      const path = relPath(f);
       if (!path) continue;
       // 同名路径只留第一篇，但**要报出来**：静默丢掉第二篇，用户以后无从追查「我明明导了两个文件夹」
       if (seen.has(path)) { dupSkipped++; continue; }
@@ -265,10 +284,18 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
     try {
       const r = await onImportMd(list);
       setReport([{
-        file: `文件夹（${list.length} 篇 Markdown）`, kind: 'note-md', ok: r.failed === 0,
-        detail: `批量写入：新增 ${r.ok} 篇${r.failed ? `，${r.failed} 篇写入失败` : ''}${dupSkipped ? `；${dupSkipped} 篇同名路径已跳过` : ''}${mojibake ? `；⚠ ${mojibake} 篇疑似非 UTF-8（内容可能是乱码）` : ''}`,
+        file: `文件夹（${list.length} 篇 Markdown${attachOk ? ` + ${attachOk} 张图片` : ''}）`, kind: 'note-md',
+        ok: r.failed === 0 && !attachFailed,
+        detail: `批量写入：新增 ${r.ok} 篇${r.failed ? `，${r.failed} 篇写入失败` : ''}`
+          + `${attachOk ? `；图片 ${attachOk} 张已落到 _attachments/` : ''}`
+          + `${attachFailed ? `；⚠ ${attachFailed} 张图片写入失败` : ''}`
+          + `${dupSkipped ? `；${dupSkipped} 篇同名路径已跳过` : ''}`
+          + `${mojibake ? `；⚠ ${mojibake} 篇疑似非 UTF-8（内容可能是乱码）` : ''}`,
       }]);
-      toast(`导入文件夹完成：新增 ${r.ok} 篇${r.failed ? `，${r.failed} 篇失败` : ''}`, r.failed ? 'info' : 'ok', 6000);
+      toast(
+        `导入文件夹完成：新增 ${r.ok} 篇${attachOk ? `、${attachOk} 张图片` : ''}${r.failed || attachFailed ? `，${r.failed + attachFailed} 项失败` : ''}`,
+        r.failed || attachFailed ? 'info' : 'ok', 6000,
+      );
     } catch (err) {
       setReport([{ file: '文件夹导入', kind: 'note-md', ok: false, detail: (err as Error).message }]);
       toast(`导入文件夹失败：${(err as Error).message}`, 'err', 9000);
@@ -316,7 +343,7 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
             style={{ display: 'none' }}
             onChange={(e) => { void run([...(e.target.files ?? [])]); e.target.value = ''; }}
           />
-          {/* 整个文件夹：只吃 .md，走 webkitdirectory（桌面与 Chromium 系浏览器都支持） */}
+          {/* 整个文件夹：吃 .md + 图片（图片落到 _attachments/ 下同相对路径），走 webkitdirectory */}
           <input
             ref={folderRef}
             type="file"
@@ -327,7 +354,7 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
           />
           <div className="quiz-actions import-actions">
             <button className="btn-small" disabled={busy} onClick={() => fileRef.current?.click()}>选择文件（可多选）</button>
-            <button className="btn-small" disabled={busy} onClick={() => folderRef.current?.click()}>导入整个文件夹（.md）</button>
+            <button className="btn-small" disabled={busy} onClick={() => folderRef.current?.click()}>导入整个文件夹（.md + 图片）</button>
           </div>
         </div>
 

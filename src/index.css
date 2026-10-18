@@ -189,8 +189,21 @@
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
+    /* 关键帧一律压平：入场、抖动、循环位移都不该播 */
     animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    /* 延迟必须显式清零：兜底压不住 animation-delay，列表项会白等半秒 */
+    animation-delay: 0ms !important;
+    /* 过渡只保留颜色/透明度一类：transform / width / height 被摘掉，位置变化消失；
+       悬停变色、焦点描边、按下反馈仍以 120ms 过渡。
+       为什么用 transition-property 收窄而不是把 duration 压成 0.01ms：
+       后者会把 41 处 --tr-interact 的**颜色**反馈一起变成硬切 —— 那是「归零」而不是
+       「减少」（AUDIT.md §6）。收窄属性才是「保留有助于理解的过渡，去掉位置变化」。
+       注意：这里的 !important 会盖过下方各降级块里的 `transition: none`
+       （如 .glide-ink、.rail-indicator），效果是那些元素从「瞬变」变成
+       「只对颜色/透明度做 120ms 过渡」，位移仍然瞬变 —— 方向是对的。 */
+    transition-property: color, background-color, border-color, box-shadow, opacity, fill, stroke !important;
+    transition-duration: 120ms !important;
+    transition-delay: 0ms !important;
   }
 }
 
@@ -287,7 +300,9 @@ button, input, select, textarea { font: inherit; letter-spacing: inherit; }
   box-shadow: var(--shadow-xs), var(--glass-shine);
   transition: var(--tr-interact);
 }
-.btn-small { padding: 5px 12px; font-size: var(--fs-control); line-height: var(--lh-control); font-weight: var(--fw-control); }
+/* 控件标签永远单行：这些按钮不少是定高 28px 的（工具栏/面板头），一旦允许折行，
+   两行文字会撑出按钮盒子压到相邻元素上（复习页头部的「← 返回主页面」就是这样）。 */
+.btn-small { padding: 5px 12px; font-size: var(--fs-control); line-height: var(--lh-control); font-weight: var(--fw-control); white-space: nowrap; }
 /* 纯图标按钮显式声明控件级字号，避免吃 UA 默认的 13.3333px */
 .btn-icon  { width: 28px; height: 28px; padding: 0; font-size: var(--fs-control); line-height: var(--lh-control); }
 .btn-small:hover, .btn-icon:hover {
@@ -708,6 +723,101 @@ kbd {
 .editor-host .lp-quote-mark { color: var(--accent); font-weight: 700; }
 .editor-host .lp-quote-line { border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); padding-left: 10px; }
 .editor-host .lp-quote-text { color: var(--text-2); }
+
+/* ---------- Callout（Obsidian 的 > [!type] 提示块）----------
+   两边共用同一套类型 → 色相映射：每个类型只声明一次 --callout-hue，
+   胶囊/左边条/底色都读它，加类型只需补一个色相分组。
+
+   **类型色相必须写在所有基础规则之后，且带容器前缀。** 基础规则是
+   `.editor-host .lp-callout-chip`（特异性 0,2,0），类型色相若写成单类
+   `.lp-callout-warning`（0,1,0）就会被基础规则的 `--callout-hue: var(--accent)`
+   压掉——warning / danger / tip 一律显示成强调色，类型只剩文字标签。
+   现在两边同为 0,2,0，靠源码顺序取胜（见下面「类型 → 色相」段）。 */
+
+/* 编辑器实时预览：标记行换成胶囊 + 标题，正文行跟着类型上色 */
+.editor-host .lp-callout-chip {
+  --callout-hue: var(--accent);
+  display: inline-block; margin-right: 4px; padding: 1px 8px; border-radius: 999px;
+  font-size: var(--fs-micro); font-weight: 700; letter-spacing: 0.02em;
+  color: var(--callout-hue);
+  background: color-mix(in srgb, var(--callout-hue) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--callout-hue) 35%, transparent);
+}
+.editor-host .lp-callout-head, .editor-host .lp-callout-body {
+  --callout-hue: var(--accent);
+  border-left: 3px solid var(--callout-hue);
+  background: color-mix(in srgb, var(--callout-hue) 7%, transparent);
+}
+.editor-host .lp-callout-head { border-radius: 8px 8px 0 0; }
+.editor-host .lp-callout-head .lp-callout-title { font-weight: 650; padding-left: 8px; }
+
+/* 右侧预览 / 复习卡里的提示块 */
+.markdown-body .mv-callout {
+  --callout-hue: var(--accent);
+  margin: 10px 0; padding: 10px 14px; border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--callout-hue) 30%, transparent);
+  border-left: 3px solid var(--callout-hue);
+  background: color-mix(in srgb, var(--callout-hue) 7%, transparent);
+}
+.markdown-body .mv-callout-title {
+  margin: 0 0 4px; font-weight: 700; color: var(--callout-hue);
+  font-size: var(--fs-control); letter-spacing: 0.01em;
+}
+.markdown-body .mv-callout-body { margin: 0; }
+.markdown-body .mv-callout-body > p:first-child { margin-top: 0; }
+.markdown-body .mv-callout-body > p:last-child { margin-bottom: 0; }
+
+/* 折叠（Obsidian 的 `> [!type]- 标题` / `+`）：标题可点，收起时只留标题行。
+   用 class 切换而不是 <details>：markdown-it 自己收的 </blockquote> 才是
+   这段 HTML 的闭合标签，换成 <details> 会开合不配对。 */
+.markdown-body .mv-callout--fold > .mv-callout-title { cursor: pointer; user-select: none; }
+.markdown-body .mv-callout-chevron {
+  display: inline-block; margin-left: 6px; font-size: 0.85em;
+  transition: transform var(--t-fast) var(--ease);
+}
+.markdown-body .mv-callout--collapsed > .mv-callout-title .mv-callout-chevron { transform: rotate(-90deg); }
+/* 标题是 role=button（可 Tab 到），必须有可见焦点环，否则键盘用户不知道自己停在哪 */
+.markdown-body .mv-callout--fold > .mv-callout-title:focus-visible {
+  outline: 2px solid var(--callout-hue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* 收起时隐藏标题之外的所有子节点：正文可能不止一个段落（空行分隔的 callout
+   会渲染成多个 <p>/<ul>），只藏 .mv-callout-body 会漏出后面几段。 */
+.markdown-body .mv-callout--collapsed > :not(.mv-callout-title) { display: none; }
+
+/* 类型 → 色相。**必须留在上面所有基础规则之后**：两边特异性同为 0,2,0，
+   靠源码顺序压过默认值。漏掉这条顺序，所有类型都会退回强调色。 */
+.editor-host .lp-callout-note, .editor-host .lp-callout-info,
+.editor-host .lp-callout-abstract, .editor-host .lp-callout-summary,
+.editor-host .lp-callout-default, .editor-host .lp-callout-quote,
+.markdown-body .mv-callout-note, .markdown-body .mv-callout-info,
+.markdown-body .mv-callout-abstract, .markdown-body .mv-callout-summary,
+.markdown-body .mv-callout-default, .markdown-body .mv-callout-quote {
+  --callout-hue: var(--accent);
+}
+.editor-host .lp-callout-question, .editor-host .lp-callout-example, .editor-host .lp-callout-todo,
+.markdown-body .mv-callout-question, .markdown-body .mv-callout-example, .markdown-body .mv-callout-todo {
+  --callout-hue: var(--cyan-text, var(--accent));
+}
+.editor-host .lp-callout-tip, .editor-host .lp-callout-success,
+.editor-host .lp-callout-goal, .editor-host .lp-callout-check,
+.markdown-body .mv-callout-tip, .markdown-body .mv-callout-success,
+.markdown-body .mv-callout-goal, .markdown-body .mv-callout-check {
+  --callout-hue: #2f9e6f;
+}
+.editor-host .lp-callout-warning, .editor-host .lp-callout-caution,
+.editor-host .lp-callout-attention, .editor-host .lp-callout-important,
+.markdown-body .mv-callout-warning, .markdown-body .mv-callout-caution,
+.markdown-body .mv-callout-attention, .markdown-body .mv-callout-important {
+  --callout-hue: #c98a11;
+}
+.editor-host .lp-callout-danger, .editor-host .lp-callout-error,
+.editor-host .lp-callout-failure, .editor-host .lp-callout-bug, .editor-host .lp-callout-missing,
+.markdown-body .mv-callout-danger, .markdown-body .mv-callout-error,
+.markdown-body .mv-callout-failure, .markdown-body .mv-callout-bug, .markdown-body .mv-callout-missing {
+  --callout-hue: var(--danger, #d14343);
+}
 /* 行内样式 */
 .editor-host .lp-bold { font-weight: 700; }
 .editor-host .lp-italic { font-style: italic; }
@@ -790,6 +900,16 @@ kbd {
   border: 1px solid var(--border);
   box-shadow: var(--shadow-md);
   margin: 6px 0;
+}
+/* 图片缺失（右侧预览）：与实时预览里的 .lp-embed-missing 同一副样子，别让它变成破图图标 */
+.markdown-body .mv-img-missing {
+  display: inline-block;
+  color: var(--text-2);
+  background: var(--panel);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  font-size: 0.9em;
 }
 /* 分割线 */
 .editor-host .lp-hr {
@@ -1150,7 +1270,6 @@ a.wikilink.missing::after {
   border: 1px solid var(--border-strong);
   overflow: hidden;
   display: flex; flex-direction: column;
-  animation: pop-in var(--t-med) var(--ease-back);
 }
 @keyframes pop-in {
   from { opacity: 0; transform: translateY(-12px) scale(0.96); }
@@ -1829,7 +1948,7 @@ a.wikilink.missing::after {
   background: currentColor;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 450ms var(--ease);
+  transition: opacity 120ms var(--ease);
 }
 .btn-small:active::after, .btn-icon:active::after, .btn-primary:active::after,
 .opt:active::after {
@@ -1847,9 +1966,9 @@ a.wikilink.missing::after {
 }
 .opt.wrong { animation: shake 320ms linear; } /* 抖动是左右对称往复：逐段套强缓出会「一冲一爬」，线性才干脆 */
 @keyframes mark-pop {
-  from { transform: scale(0); }
+  from { opacity: 0; transform: scale(0.9); }
   78% { transform: scale(1.14); } /* 过冲写进关键帧（一次性、幅度受控） */
-  to { transform: scale(1); }
+  to { opacity: 1; transform: scale(1); }
 }
 .opt-mark { display: inline-block; animation: mark-pop 320ms var(--ease); }
 
@@ -2494,7 +2613,10 @@ a.wikilink.missing::after {
 .dash-calib-pct { text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .dash-calib-n { text-align: right; font-size: var(--fs-micro); }
 .dash-calib-verdict { margin: 12px 0 0; font-size: var(--fs-caption); color: var(--text-2); line-height: 1.7; }
-.dash-calib-empty { margin: 0; font-size: var(--fs-caption); line-height: 1.7; }
+/* 两个模块的空态共用一套语汇：.dash-calib-empty（元认知校准）与
+   .dash-week-empty（近 7 天学习，全零时不再画七根几乎看不见的凸起） */
+.dash-calib-empty,
+.dash-week-empty { margin: 0; font-size: var(--fs-caption); line-height: 1.7; }
 
 /* ============================================================ 思维导图
    节点配色走 MindMapView.tsx 里的 theme（22 个 CSS 变量，值全部指向本项目 token，
@@ -2754,6 +2876,18 @@ a.wikilink.missing::after {
   transition: width 300ms var(--ease);
 }
 .quiz-body { padding: var(--sp-5) var(--sp-6) var(--sp-3); }
+/* 换题：极短上浮淡入，让「内容变了」被看见，但不拖慢节奏。
+   由 QuizView 的 key={idx} 触发重挂载，所以这里必须是 animation ——
+   重挂载后 transition 不会播。用既有令牌，不新增曲线/时长。
+   只有逐题渲染的两处 .quiz-body 带 key（答题 / 背题模式）；
+   加载错误态与「自动组题」表单不带 key，见 QuizView.tsx 里的注释。 */
+.quiz-body {
+  animation: quiz-step-in var(--t-fast) var(--ease-out);
+}
+@keyframes quiz-step-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 .quiz-chapter {
   display: inline-block;
   font-size: var(--fs-micro); font-weight: 600;
@@ -4280,7 +4414,6 @@ a.wikilink.missing::after {
   width: min(620px, 100%); max-height: min(720px, 88vh); overflow: auto;
   background: var(--bg-raised); color: var(--text); border: 1px solid var(--border-strong);
   border-radius: var(--r-lg); box-shadow: var(--shadow-modal);
-  animation: modal-in var(--t-slow) var(--ease-back);
 }
 .notice-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -4467,7 +4600,7 @@ a.wikilink.missing::after {
 .rail-home:hover { color: var(--accent); background: var(--accent-soft); }
 .rail-home > svg { width: 22px; height: 22px; }
 /* 品牌标：同时是「回到主界面」按钮 */
-.rail-logo, .rail-home {
+.rail-home {
   width: 40px; height: 40px; border-radius: 13px;
   border: none; padding: 0; background: transparent;
   display: flex; align-items: center; justify-content: center;
@@ -4475,10 +4608,14 @@ a.wikilink.missing::after {
   cursor: pointer;
   transition: var(--tr-interact);
 }
-.rail-logo svg { width: 34px; height: 34px; filter: drop-shadow(0 3px 12px rgba(79, 70, 229, 0.45)); transition: filter var(--t-fast) var(--ease); }
-.rail-logo:hover { transform: translateY(-1px) scale(1.06); }
-.rail-logo:hover svg { filter: drop-shadow(0 6px 20px rgba(79, 70, 229, 0.65)); }
-.rail-logo:active { transform: scale(0.95); }
+/* 按下反馈：与 .rail-btn:active 同一套按压令牌（42px 图标按钮档）。
+   历史遗留：下面这几条规则原先写在 .rail-logo 上，而全仓库没有任何元素使用该类名，
+   所以这个按钮一直没有按下态。已删除死规则并改挂到真正在用的 .rail-home。 */
+.rail-home:active {
+  transform: scale(var(--press-scale-sm));
+  box-shadow: var(--press-inset);
+  transition-duration: var(--press-dur);
+}
 .rail-sep { width: 26px; height: 1px; background: var(--border); margin: 7px 0; flex-shrink: 0; }
 .rail-group-divider { width: 42px; height: 1px; margin: 7px 0; flex-shrink: 0; background: var(--border); }
 /* 上组滚动容器：窗口变矮时只有这一组滚，下组（AI/草稿/PDF/转换/字体/主题）钉在底部。
@@ -4514,11 +4651,18 @@ a.wikilink.missing::after {
 .rail--expanded .rail-label { display: inline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); font-weight: 500; }
 .rail--expanded .rail-home { margin-bottom: 2px; }
 .rail--expanded .rail-section-label { display: block; width: 100%; padding: 8px 10px 3px; color: var(--muted); font-size: var(--fs-micro); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
-.rail--expanded .rail-section-label--bottom { flex-shrink: 0; }
 .rail--expanded .rail-sep, .rail--expanded .rail-group-divider { width: 100%; }
 .rail--expanded .rail-group-divider { position: relative; display: flex; align-items: center; justify-content: center; margin: 9px 0 3px; }
 .rail--expanded .rail-group-divider span { display: inline; position: absolute; padding: 0 8px; background: var(--bg-raised); color: var(--muted); font-size: var(--fs-micro); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
 .rail--expanded .rail-scroll { align-items: stretch; gap: 3px; }
+/* 展开态入口有 20 个，行高 42 → 34：同一个窗口能多露出 3~4 行，
+   钉住的底部（字体/高亮/主题）也跟着变矮，滚动窗口更大。收起态图标钮保持 42px。 */
+.rail--expanded .rail-home,
+.rail--expanded .rail-btn { height: 34px; }
+/* 展开态把滚动条加粗到 8px：轨宽 208px 放得下，而 5px 的细条在浅色玻璃底上几乎看不见，
+   用户不会知道「工具」组下面还有入口。 */
+.rail--expanded .rail-scroll { scrollbar-width: auto; }
+.rail--expanded .rail-scroll::-webkit-scrollbar { width: 8px; }
 .rail--expanded .rail-btn.on::before { left: -11px; }
 .rail--expanded .rail-font-wrap { width: 100%; align-self: stretch; }
 .rail--expanded .rail-flyout { left: calc(100% + 4px); }
@@ -4533,7 +4677,6 @@ a.wikilink.missing::after {
 .rail-btn:hover {
   background: var(--panel-deep); color: var(--text);
   box-shadow: var(--shadow-xs);
-  transform: translateY(-1px) scale(1.02);
 }
 .rail-btn:active {
   transform: translateY(0) scale(var(--press-scale-sm));
@@ -4621,12 +4764,12 @@ a.wikilink.missing::after {
 /* 窗口不够高时收紧一档：不收紧时整条轨要 963px，常见的 900px 视口就得滚；
    收紧后约 840px，900 / 860 都不用滚。再矮的窗口由 .rail-scroll 滚动兜底。
    图标仍保持 38px 可点区，只是比 42px 略紧凑。
-   位置必须放在 .rail-btn / .rail-logo 等基础规则**之后**：媒体查询不加权重，
+   位置必须放在 .rail-btn / .rail-home 等基础规则**之后**：媒体查询不加权重，
    同权重下靠后的规则获胜，放前面会被 42px 那几条直接盖掉。 */
 @media (max-height: 980px) {
   .rail { padding: 10px 0 8px; }
   .rail-scroll { gap: 3px; }
-  .rail-logo, .rail-home { margin-bottom: 6px; }
+  .rail-home { margin-bottom: 6px; }
   .rail-btn { width: 38px; height: 38px; border-radius: 11px; }
   .rail-btn svg { width: 18px; height: 18px; }
   .rail-sep { margin: 5px 0; }
@@ -4708,6 +4851,16 @@ a.wikilink.missing::after {
 }
 .toolbar-search kbd { margin-left: -1px; }
 
+/* 顶栏（后退/保存/关联/思维导图…）在窗口不够宽时整行折到第二行，
+   而不是让控件横穿出编辑列、压在右侧「关联」卡片上。nowrap 只管单个控件内部
+   不折行（见上面 .editor-toolbar 的注释），控件之间是否换行由这条决定：
+   实测顶栏控件合计 ~573px，1108px 窗口下编辑列只有 428px，不给换行就会压到右栏。
+   flex-wrap 只在放不下时才生效，宽窗口仍然是一行——所以原先 900px 的「降级第三级」
+   折行规则也并进这一条，不再需要单独的断点。 */
+@media (max-width: 1280px) {
+  .editor-toolbar { flex-wrap: wrap; row-gap: 6px; }
+}
+
 /* 窄屏压缩：优先保证编辑区宽度（目录/关联卡片按比例收窄），并收起工具栏搜索文字 */
 @media (max-width: 1240px) {
   .c-tree { flex-basis: 214px; }
@@ -4730,11 +4883,6 @@ a.wikilink.missing::after {
   .editor-toolbar .toolbar-divider,
   .editor-toolbar .word-count { display: none; }
 }
-/* 降级第三级：确实放不下了就折成两行，绝不再压缩控件 */
-@media (max-width: 900px) {
-  .editor-toolbar { flex-wrap: wrap; row-gap: 6px; }
-}
-
 /* ============================================================ Hero 空状态（首屏欢迎页）
    直接落在装饰背景之上（不套白色卡片），由 .welcome-stage 负责在整片工作区居中。
    中心区域刻意留白，正文周围再补一层极淡柔光，保证任何背景下文字都清晰。 */
@@ -4975,7 +5123,6 @@ a.wikilink.missing::after {
   border-radius: 20px;
   box-shadow: var(--shadow-modal), var(--glass-shine), 0 0 0 1px var(--border);
   overflow-x: hidden; overflow-y: auto;
-  animation: pop-in var(--t-slow) var(--ease-back);
 }
 .panel__head {
   flex: none; display: flex; align-items: center; gap: var(--sp-3);
@@ -5876,6 +6023,24 @@ html.no-motion .stagger-item,
 html.no-motion .press-released { animation: none; }
 html.no-motion [data-tilt-active] { transform: none; }
 
+/* ---- 6. 常驻循环动画的降级（第 006 项）----
+   这四处是 infinite 循环，而全局兜底只压 animation-duration，**压不住迭代次数**：
+   每一圈被压到 0.01ms 之后循环仍在继续。所以必须显式关掉。
+   这四处此前不在任何一个 reduced-motion 块里，而仓库主动关掉了 ring-spin /
+   glow-breathe / update-notice-sweep / agent-coach-pulse / agent-typing —— 这里补齐。
+   保留 agent-caret（.agent-msg.streaming::after）：它表达「仍在流式输出」，
+   属于状态而非装饰，按 §6「保留有助于理解的过渡」留下。 */
+@media (prefers-reduced-motion: reduce) {
+  .dirty-dot { animation: none; }
+  .quiz-progress i { animation: none; }
+  .loading::after,
+  .loading-inline__bar { animation: none; }
+}
+html.no-motion .dirty-dot,
+html.no-motion .quiz-progress i,
+html.no-motion .loading::after,
+html.no-motion .loading-inline__bar { animation: none; }
+
 /* ============================================================ 思维导图
    本轮追加（只追加，不改动上面任何规则）：
      ① .mindmap-toolbar —— 顶部「布局 / 主题」预设条，复用 .chip / .btn-small，不新造控件视觉；
@@ -6284,6 +6449,42 @@ html.no-morph ::view-transition-new(root) { animation: none !important; }
 .dash-weak-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: 13px; }
 .dash-weak-chip { padding: 2px 8px; border-radius: 999px; background: var(--danger-soft); color: var(--danger-text); }
 
+/* 成就（学习统计页）：21 个的网格。未解锁压暗、图标去色、给进度条；
+   本次新解锁的加一圈主色辉光（与同时弹出的 toast 呼应）。
+   等级不另设色相 —— 本项目的色板是单一极光靛蓝族，只靠 --accent 的深浅表达层级。 */
+.dash-ach { margin: 14px 0; }
+.dash-ach h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); display: flex; align-items: baseline; gap: 8px; }
+.dash-ach-count { font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.dash-ach-empty { margin: 0 0 8px; font-size: var(--fs-caption); line-height: 1.7; }
+.dash-ach-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+.dash-ach-item {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 9px 10px; border-radius: var(--r-md);
+  border: 1px solid var(--border); background: var(--bg-raised);
+  opacity: 0.55; transition: var(--tr-interact);
+}
+.dash-ach-item.on { opacity: 1; border-color: var(--border-accent); background: var(--accent-soft); }
+.dash-ach-item.fresh { box-shadow: var(--glow-accent); }
+.dash-ach-icon { font-size: 17px; line-height: 1.2; filter: grayscale(1); }
+.dash-ach-item.on .dash-ach-icon { filter: none; }
+.dash-ach-name { font-size: var(--fs-control); font-weight: 500; }
+.dash-ach-desc { font-size: var(--fs-micro); line-height: 1.4; }
+.dash-ach-track { display: block; height: 3px; margin-top: 3px; border-radius: 999px; background: var(--panel-deep); overflow: hidden; }
+.dash-ach-track > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.dash-ach-near { margin: 8px 0 0; font-size: var(--fs-caption); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dash-ach-near-chip { padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+/* 「未记录」：该成就没有数据源，明确标出来而不是给一根永远停在 0 的进度条 */
+.dash-ach-untracked {
+  display: block; margin-top: 3px;
+  font-size: var(--fs-micro); font-style: italic;
+  opacity: 0.8;
+}
+.dash-ach-note { margin: 8px 0 0; font-size: var(--fs-micro); line-height: 1.6; opacity: 0.85; }
+/* 减少动态效果：成就格子的过渡是纯颜色/透明度，保留；只压掉新解锁的辉光脉冲 */
+@media (prefers-reduced-motion: reduce) {
+  .dash-ach-item.fresh { box-shadow: 0 0 0 1px var(--accent); }
+}
+
 /* 考试中心入口条（学习统计页） */
 .dash-exam-center { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px; margin: 12px 0; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-raised); }
 .dash-exam-center-main { display: flex; flex-direction: column; flex: 1; min-width: 180px; }
@@ -6308,7 +6509,6 @@ html.no-morph ::view-transition-new(root) { animation: none !important; }
   --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1); /* 小元素落位：一点点回弹 */
   --t-enter: 420ms;      /* 面板入场 */
   --t-reveal: 560ms;     /* 视口内显现 */
-  --t-sheen: 600ms;      /* 主按钮扫光 */
   --stagger-step: 55ms;  /* 错峰间隔 */
   --reveal-shift: 12px;  /* 显现上浮距离 */
   --reveal-scale: 0.99;  /* 显现起始缩放（几乎读不出，只让落位更「实」） */
@@ -6333,12 +6533,20 @@ html.motion-ready [data-reveal].is-revealed {
   transform: none;
 }
 
-/* ---- 3. 面板入场：上浮 + 轻微放大，软着陆 ---- */
+/* ---- 3. 面板入场：上浮 + 轻微放大，软着陆 ----
+   注意 .qs-modal（Ctrl+K 快速搜索）**不在**这里：它是 100+/天的键盘开关，
+   按 AUDIT.md §1 的频率表「命令面板：永不动画」（Raycast 同款做法），
+   所以它没有任何入场动画。
+   它必须用 :not(.qs-modal) 排除 —— Ctrl+K 的元素是 `class="panel qs-modal"`
+   （QuickSearch.tsx:162），只从选择器里摘掉 .qs-modal 是没用的，.panel 仍然命中。
+   .notice-panel 是独立的 class（SafetyNotice.tsx:36），不带 .panel。
+   另：这三类元素上曾各有一条更早的 animation 声明（pop-in / modal-in），
+   与下面这条同权重且被其覆盖，从未生效，已删除。 */
 @keyframes panel-in {
   from { opacity: 0; transform: translateY(14px) scale(0.972); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-.panel, .qs-modal, .notice-panel {
+.panel:not(.qs-modal), .notice-panel {
   animation: panel-in var(--t-enter) var(--ease-glide);
 }
 /* 形变转场期间压掉入场：形态层已在把位置与尺寸算到终点，再叠一个 panel-in 会抖两下 */
@@ -6349,46 +6557,40 @@ html.motion-ready [data-reveal].is-revealed {
    抬升与按压，两者互不覆盖（属性生效顺序 translate → rotate → scale → transform）。 */
 [data-magnet] { translate: var(--mag-x) var(--mag-y); }
 
-/* ---- 5. 主按钮扫光 + 图标动能 ----
-   扫光是纯 CSS：一道半透明白光从左侧扫到右侧，只在 hover 时经过一次；
-   overflow:hidden 把光裁在胶囊内，不产生圆角外的廉价溢光。
-   注意：::after 已被上面「按下涟漪」占用（.btn-primary::after 设了 opacity:0 且
-   :active 时 transition:none），扫光必须写在自己的 ::before 上，否则会被涟漪
-   的 opacity:0 静默吃掉、且按下时会打断过渡——这正是上一版扫光完全不生效的原因。 */
+/* ---- 5. 图标动能（主按钮扫光已下线）----
+   原先这里有一条 600ms 的主按钮扫光（--t-sheen），每次 hover 都播一遍、
+   不传达任何状态，且是全文件最长的时长，已删除。
+   .btn-primary 的 position / overflow / isolation 保留：::after 是 inset:0 的
+   绝对定位按下涟漪，需要父级 position: relative。 */
 .btn-primary { position: relative; overflow: hidden; isolation: isolate; }
-.btn-primary::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.34) 50%, transparent 62%);
-  transform: translateX(-130%);
-  transition: transform var(--t-sheen) var(--ease-glide);
-}
-.btn-primary:hover::before { transform: translateX(130%); }
-.btn-primary:disabled::before { display: none; }
 
 /* 带图标的按钮：hover 时图标轻微上抬放大，给出「可点」的动能 */
 .btn > svg, .btn-small > svg, .btn-icon > svg { transition: transform var(--t-fast) var(--ease-spring); }
 .btn:hover > svg, .btn-small:hover > svg { transform: translateY(-1px) scale(1.08); }
 
-/* ---- 6. 导航轨 hover 物理：图标上抬放大 + 标签侧移 ---- */
-.rail-btn svg { transition: transform var(--t-fast) var(--ease-spring); }
-.rail-btn:hover svg { transform: translateY(-1px) scale(1.1); }
+/* ---- 6. 导航轨 hover：只保留状态指示（底色 / 文字色 / 阴影）----
+   导航轨属于「每天数十次」的高频面（AUDIT.md §1 频率表：删掉或大幅削减）。
+   这里原先同时跑三个动效 —— 按钮抬升、图标放大到 1.1、标签侧移 2px，
+   其中图标用的是过冲 1.4 的 --ease-spring，也是全应用唯一 scale-on-hover 的地方。
+   位移已全部移除；按下态（.rail-btn:active）保留，它传达的是状态而非装饰。 */
 .rail--expanded .rail-label {
-  transition: transform var(--t-fast) var(--ease-glide), color var(--t-fast) var(--ease);
+  transition: color var(--t-fast) var(--ease);
 }
-.rail--expanded .rail-btn:hover .rail-label { transform: translateX(2px); }
 
 /* ---- 7. 降级：系统「减少动态效果」或 <html class="no-motion"> ----
    内容一律照常可见，只是不再动。延迟必须显式清零：全局兜底只压 animation-duration，
    压不住 transition-delay，否则显现项要等半秒才浮现。 */
 @media (prefers-reduced-motion: reduce) {
   html.motion-ready [data-reveal] { opacity: 1; transform: none; transition: none; }
-  .panel, .qs-modal, .notice-panel { animation: none; }
+  .panel, .notice-panel { animation: none; }
   [data-magnet] { translate: none; }
-  .btn-primary::before { transition: none; }
-  .rail-btn:hover svg,
+  /* 只保留仍在使用的图标动能（.btn / .btn-small，第 004 项没删它们）。
+     这里原有三条已随之失效的声明，已一并删除：
+       .btn-primary::before { transition: none }        —— 扫光已在 005 删除
+       .rail-btn:hover svg { transform: none }          —— 位移已在 004 删除
+       .rail--expanded .rail-btn:hover .rail-label …    —— 同上 */
   .btn:hover > svg,
-  .btn-small:hover > svg,
-  .rail--expanded .rail-btn:hover .rail-label { transform: none; }
+  .btn-small:hover > svg { transform: none; }
 }
 html.no-motion [data-reveal] { opacity: 1; transform: none; transition: none; }
 html.no-motion .panel,
@@ -6537,10 +6739,13 @@ html.no-motion .btn-primary:hover .btn-trail { transform: none; }
   box-shadow: 0 2px 10px var(--accent-soft);
   opacity: 0; pointer-events: none;
   will-change: transform;
+  /* transform-origin 必须是左上角：core/selectionGlide.ts 现在用 translate + scale
+     表达位置与尺寸，若原点在中心，scale 会把墨迹从中心放大而整体跑偏。 */
+  transform-origin: 0 0;
+  /* 只过渡 transform 与 opacity：width / height 是布局属性，
+     键盘 ↑↓ 每切一次都会触发一次布局 + 绘制（第 012 项）。 */
   transition:
     transform var(--t-med) var(--ease-spring),
-    width var(--t-med) var(--ease-spring),
-    height var(--t-med) var(--ease-spring),
     opacity var(--t-fast) var(--ease);
 }
 .todo-side__group .glide-ink { border-radius: var(--r-sm); }
@@ -6632,3 +6837,41 @@ html.no-motion .glide-ink { transition: none; }
 }
 html.no-motion .update-notice { animation: none; }
 html.no-motion .update-notice__bar.indet > i { animation: none; width: 100%; }
+
+/* ============================================================ 触控门控（第 011 项）
+   触控设备上 tap 会先触发一次 hover，位移会让内容在手指底下跳一下。
+   JS 侧早就做了同样的判断（core/motionPrefs 的 hasFinePointer，见 cardTilt.ts:45 /
+   hoverGlow.ts:54 / motionChoreography.ts:170），只有 CSS 层一直没有门控。
+
+   做法说明（与计划 011 的写法有出入，理由如下）：计划原打算就地给每条规则包一层
+   @media，但实际扫出的是 **20 条**位移类 hover（计划只列了 7 条），逐条改写既容易漏
+   又要处理「媒体查询不加权重、必须排在基础规则之后」的次序问题。这里改成在文件
+   **最末**追加一个降级块：同权重下靠后的规则获胜，所以它能覆盖上面全部 20 条，
+   且不改动任何既有规则 —— 桌面行为零风险。本仓库的既有习惯也是「本轮追加」独立区块。
+
+   注意：这里**不需要** html.no-motion 镜像。no-motion 是应用内的动效开关，
+   与「指针是否精确」是两个正交条件，互不替代。
+   颜色 / 背景 / 描边 / 阴影的 hover 反馈一律保留，只去掉位移。 */
+@media (hover: none), (pointer: coarse) {
+  .btn:hover,
+  .btn-small:hover,
+  .btn-icon:hover,
+  .btn-primary:hover,
+  .new-btn:hover,
+  .backlink-item:hover,
+  .rate:hover,
+  .mistake-item:hover,
+  .dash-bar:hover,
+  .opt:not(:disabled):hover,
+  .bank-item:hover,
+  .excerpt-item:hover,
+  .toolbar-search:hover,
+  .panel__head .btn-icon:hover,
+  .pathway-swatch:hover { transform: none; }
+
+  /* 这一条动的是 translate 属性而不是 transform，要单独压 */
+  .dash-card:hover { translate: none; }
+  .btn:hover > svg,
+  .btn-small:hover > svg { transform: none; }
+  .btn-primary:hover .btn-trail { transform: none; }
+}

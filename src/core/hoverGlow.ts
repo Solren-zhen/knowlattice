@@ -51,6 +51,32 @@ export function initHoverGlow(): () => void {
   let current: HTMLElement | null = null;
   let rect: DOMRect | null = null;
 
+  /* 每帧最多写一次：pointermove 的频率高于刷新率（125Hz 鼠标每秒可发 125+ 个事件），
+     逐事件写入会让这一行的 radial-gradient 重绘多次，而一帧只显示一次。
+     同一个仓库的 cardTilt / navIndicator / motionChoreography 都做了 rAF 门控，
+     这里此前是漏的。 */
+  let frame = 0;
+  let pending: { el: HTMLElement; x: number; y: number } | null = null;
+
+  function flush() {
+    frame = 0;
+    const p = pending;
+    pending = null;
+    if (!p) return;
+    // 排队期间可能已经熄灭（clear 摘掉了标记）：不要再把坐标写回去
+    if (!p.el.hasAttribute(GLOW_ATTR)) return;
+    p.el.style.setProperty('--glow-x', `${p.x.toFixed(1)}px`);
+    p.el.style.setProperty('--glow-y', `${p.y.toFixed(1)}px`);
+  }
+
+  function cancelPending() {
+    if (frame) {
+      cancelAnimationFrame(frame);
+      frame = 0;
+    }
+    pending = null;
+  }
+
   const enabled = () => motionAllowed() && hasFinePointer();
 
   function clear(el: HTMLElement | null) {
@@ -61,6 +87,7 @@ export function initHoverGlow(): () => void {
   }
 
   function drop() {
+    cancelPending();
     clear(current);
     current = null;
     rect = null;
@@ -83,8 +110,8 @@ export function initHoverGlow(): () => void {
     }
     if (!rect) return;
     const p = glowPoint(rect, e.clientX, e.clientY);
-    next.style.setProperty('--glow-x', `${p.x.toFixed(1)}px`);
-    next.style.setProperty('--glow-y', `${p.y.toFixed(1)}px`);
+    pending = { el: next, x: p.x, y: p.y };
+    if (!frame) frame = requestAnimationFrame(flush);
   }
 
   function onOut(e: PointerEvent) {

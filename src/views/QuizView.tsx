@@ -463,7 +463,9 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
             <button className="btn-icon" onClick={requestClose} aria-label="关闭"><IconClose /></button>
           </div>
           <div className="quiz-progress"><i style={{ width: `${((idx + 1) / session.questions.length) * 100}%` }} /></div>
-          <div className="panel__body quiz-body">
+          {/* key={idx}：换题时重挂载，让 .quiz-body 的入场动画重播 —— 否则题干/选项/解析
+              会在同一帧整体换掉（瞬移）。用 animation 而非 transition 也是因为这个原因。 */}
+          <div className="panel__body quiz-body" key={idx}>
             <div className="quiz-tagrow">
               {q.chapter && <span className="quiz-chapter">{q.chapter}</span>}
               {qTags.map((t) => <span key={t} className={`exam-tag exam-tag--${t}`}>{Q_TAG_LABELS[t]}</span>)}
@@ -549,7 +551,10 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
           </div>
           <div className="quiz-progress"><i style={{ width: `${((idx + (answered ? 1 : 0)) / session.questions.length) * 100}%` }} /></div>
 
-          <div className="panel__body quiz-body">
+          {/* key={idx}：同上，换题重挂载以重播入场动画。
+              注意另外两处 .quiz-body 不能加 key：加载/错误态（上方）与「自动组题」表单，
+              后者加 key 会在换题时清空用户已填的表单。 */}
+          <div className="panel__body quiz-body" key={idx}>
             <div className="quiz-tagrow">
               {q.chapter && <span className="quiz-chapter">{q.chapter}</span>}
               {qTags.map((t) => <span key={t} className={`exam-tag exam-tag--${t}`}>{Q_TAG_LABELS[t]}</span>)}

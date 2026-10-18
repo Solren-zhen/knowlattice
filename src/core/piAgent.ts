@@ -318,7 +318,7 @@ export async function runPiAgent(o: RunAgentOptions, deps: PiAgentDeps = {}): Pr
   const { Type } = piAi;
 
   const model = relayModel(o.settings);
-  const maxSteps = o.maxSteps ?? 16;
+  const maxSteps = o.maxSteps ?? 48;
   const signal = o.signal ?? new AbortController().signal;
 
   const baseStreamFn: StreamFn = deps.streamFn ?? ((m, ctx, opts) =>

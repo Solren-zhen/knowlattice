@@ -63,6 +63,25 @@ describe('ImportView · 自动识别后分派到既有通道', () => {
     expect(report()[0].textContent).toContain('Markdown 笔记');
   });
 
+  it('文件夹导入：图片保住相对目录落到 _attachments/，其余文件跳过', async () => {
+    const { onImportMd, onAttach, folder, report } = setup();
+    const rel = (f: File, path: string) => Object.defineProperty(f, 'webkitRelativePath', { value: path });
+    const note = md('三羧酸循环.md');
+    rel(note, '我的库/01-生化/三羧酸循环.md');
+    const png = new File([new Uint8Array([137, 80, 78, 71])], '测试图.png', { type: 'image/png' });
+    rel(png, '我的库/01-生化/fig/测试图.png');
+    const pdf = new File([new Uint8Array([1])], '讲义.pdf', { type: 'application/pdf' });
+    rel(pdf, '我的库/01-生化/讲义.pdf');
+
+    fireEvent.change(folder, { target: { files: [note, png, pdf] } });
+
+    await waitFor(() => expect(onImportMd).toHaveBeenCalled());
+    // 顶层文件夹名去掉（与笔记路径同一口径），fig/ 这类子目录原样保留
+    expect(onImportMd.mock.calls[0][0]).toEqual([{ path: '01-生化/三羧酸循环.md', content: '# 甲\n正文' }]);
+    expect(onAttach.mock.calls).toEqual([['01-生化/fig/测试图.png', png]]);
+    await waitFor(() => expect(report().some((r) => r.textContent?.includes('1 张图片'))).toBe(true));
+  });
+
   it('笔记备份走 onImportBackup（不是当笔记写）', async () => {
     const { onImportBackup, onImportMd, file } = setup();
     const backup = jsonFile('备份甲.json', { app: 'knowlattice', files: [{ path: '甲.md', content: '# 甲' }] });

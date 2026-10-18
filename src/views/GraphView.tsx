@@ -250,7 +250,9 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
         <button className="btn-small" onClick={onClose}>← 返回</button>
         <span className="panel__title graph-title">知识图谱</span>
         <span className="muted">
-          {graph.nodes.filter((n) => !n.isTag).length} 笔记 · {graph.links.length} 链接 · 拖拽布局 · 滚轮缩放 · 单击打开笔记
+          {graph.nodes.filter((n) => !n.isTag).length} 笔记 · {graph.links.length} 链接
+          {/* 没有画布时不要宣传画布上的操作 —— 拖拽/缩放/单击都无从谈起 */}
+          {graph.links.length > 0 && ' · 拖拽布局 · 滚轮缩放 · 单击打开笔记'}
         </span>
         <button
           className={`btn-small ${showHeat ? 'saved' : ''}`}
@@ -268,10 +270,26 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
         </button>
       </div>
       <div className="panel__body graph-stage">
-        {graph.nodes.length === 0 ? (
+        {/* 空态判据不能只看 nodes.length === 0：
+            只有 1 篇笔记、或若干篇但没有任何 [[双链]] / #标签 时，画布上是一颗（或几颗）
+            互不相连的孤点 —— 看不出任何关系，却占满整屏。那种情况同样应该给引导文案。
+            所以判据是「有笔记 且 有连线」，两者缺一都算空。 */}
+        {graph.nodes.length === 0 || graph.links.length === 0 ? (
           <div className="graph-empty">
-            <p>还没有可显示的笔记</p>
-            <p className="muted">创建笔记并用 [[双链]] 或 #标签 互相关联，图谱会自动生长</p>
+            {graph.nodes.length === 0 ? (
+              <>
+                <p>还没有可显示的笔记</p>
+                <p className="muted">创建笔记并用 [[双链]] 或 #标签 互相关联，图谱会自动生长</p>
+              </>
+            ) : (
+              <>
+                <p>笔记之间还没有关联</p>
+                <p className="muted">
+                  目前有 {graph.nodes.filter((n) => !n.isTag).length} 篇笔记，但没有任何 [[双链]] 把它们连起来。
+                  在笔记里写 [[另一篇笔记的标题]]，或用同一个 #标签 标记 3 篇以上，图谱就会长出来。
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div ref={containerRef} className="graph-canvas" />

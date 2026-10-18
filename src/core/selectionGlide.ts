@@ -63,6 +63,11 @@ export function initSelectionGlide(): () => void {
 
     let placed = false;
     let raf = 0;
+    /* 墨迹的基准尺寸：首次落位时定死，此后自身宽高不再变，尺寸差异交给 scale 表达。
+       为什么：过渡 width / height 是布局属性，每按一次方向键都会触发一次
+       布局 + 绘制 + 合成；换成 transform 之后全程只在合成层。 */
+    let baseW = 0;
+    let baseH = 0;
 
     function place() {
       raf = 0;
@@ -83,9 +88,16 @@ export function initSelectionGlide(): () => void {
         ink.style.transition = 'none';
         requestAnimationFrame(() => ink.style.removeProperty('transition'));
       }
-      ink.style.transform = `translate(${box.left.toFixed(2)}px, ${box.top.toFixed(2)}px)`;
-      ink.style.width = `${box.width.toFixed(2)}px`;
-      ink.style.height = `${box.height.toFixed(2)}px`;
+      if (!baseW || !baseH) {
+        baseW = Math.max(1, box.width);
+        baseH = Math.max(1, box.height);
+        ink.style.width = `${baseW.toFixed(2)}px`;
+        ink.style.height = `${baseH.toFixed(2)}px`;
+      }
+      // transform-origin 必须是 0 0（见 index.css）：否则 scale 会从中心放大，墨迹跑偏
+      ink.style.transform =
+        `translate(${box.left.toFixed(2)}px, ${box.top.toFixed(2)}px)` +
+        ` scale(${(box.width / baseW).toFixed(4)}, ${(box.height / baseH).toFixed(4)})`;
       ink.classList.add('on');
     }
 

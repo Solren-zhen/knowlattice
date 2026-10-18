@@ -14,7 +14,7 @@ export function normalizePdfSelection(value: string): string {
     .replace(/\u00a0/g, ' ')
     .replace(/\r\n?/g, '\n')
     .replace(/([A-Za-z])-[ \t]*\n[ \t]*([a-z])/g, '$1$2')
-    .replace(/\n{2,}/g, '\u0001')
+    .replace(/\n{2,}/g, String.fromCharCode(0x0001))
     .replace(/[\n\t]+/g, ' ')
     .replace(/ {2,}/g, ' ')
     .replace(new RegExp(`(${CJK_RE}) +(?=${CJK_RE})`, 'g'), '$1')
@@ -23,6 +23,6 @@ export function normalizePdfSelection(value: string): string {
     .replace(/ +([，。；：！？、）》〉」』”’,.!?;:)\]])/g, '$1')
     .replace(/([，。；：！？、）》〉」』”’,.!?;:)\]]) +(?=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])/g, '$1')
     .replace(/([（《〈「『“‘[(]) +/g, '$1')
-    .replace(/\u0001/g, '\n\n')
+    .replace(new RegExp(String.fromCharCode(0x0001), 'g'), '\n\n')
     .trim();
 }

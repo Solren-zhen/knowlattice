@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseOutline, outlineLines, activeHeadingLine } from '../outline';
+import { parseOutline, outlineLines, activeHeadingLine, splitHeadingAnchor, headingLineByAnchor } from '../outline';
 
 describe('parseOutline', () => {
   it('提取 1~4 级标题与行号（1-based）', () => {
@@ -65,5 +65,28 @@ describe('activeHeadingLine', () => {
   });
   it('无标题返回 null', () => {
     expect(activeHeadingLine([], 1)).toBeNull();
+  });
+});
+
+describe('链接锚点 [[笔记#小节]]', () => {
+  it('拆出目标与锚点；没有 # 时锚点为空', () => {
+    expect(splitHeadingAnchor('心脏#收缩期')).toEqual({ target: '心脏', anchor: '收缩期' });
+    expect(splitHeadingAnchor('心脏')).toEqual({ target: '心脏', anchor: '' });
+    // 路径式目标也照拆（锚点只取第一个 # 之后的部分）
+    expect(splitHeadingAnchor('01-生理/心脏#结构')).toEqual({ target: '01-生理/心脏', anchor: '结构' });
+  });
+
+  it('锚点按标题文本定位，空白折叠后比对（Obsidian 的标题常有连写空格）', () => {
+    const items = parseOutline('# 概述\n\n## 主机 1 向主机 2 发送数据\n\n## 2. 保号性\n');
+    expect(headingLineByAnchor(items, '主机 1 向主机 2 发送数据')).toBe(3);
+    expect(headingLineByAnchor(items, '主机  1   向主机 2 发送数据')).toBe(3);
+    expect(headingLineByAnchor(items, '概述')).toBe(1);
+    expect(headingLineByAnchor(items, '不存在的小节')).toBeNull();
+  });
+
+  it('块引用 ^id 我们没有块级索引：如实返回 null，不猜一行跳过去', () => {
+    const items = parseOutline('# 概述\n\n## 小节\n');
+    expect(headingLineByAnchor(items, '^1')).toBeNull();
+    expect(headingLineByAnchor(items, '')).toBeNull();
   });
 });

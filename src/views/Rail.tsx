@@ -115,11 +115,13 @@ export default function Rail(p: Props) {
         <span className="rail-expand-icon"><IconChevron /></span>
         <span className="rail-expand-label">{expanded ? '收起导航' : '展开导航'}</span>
       </button>
-      {/* 上组：窗口变矮时只有这一组在内部滚动。
-          下组（AI / 草稿 / PDF / 转换 / 字体 / 主题）钉在底部、不参与滚动——
-          这样字体飞出菜单仍留在不滚动的容器里，.rail 的 overflow:visible 不必动。
-          整条轨内容固定要 963px，窗口低于这个高度时下组会直接溢出到视口外，
-          而 overflow:visible 没有滚动条，那几个入口就够不着；所以上组单独滚动。 */}
+      {/* 滚动区：入口全部在这里（含「工具」组）。窗口变矮时只有这一区滚，
+          底部「字体 / 高亮 / 主题」三行钉住不动 —— 它们带飞出菜单，必须留在
+          不滚动的容器里，.rail 的 overflow:visible 才能保住菜单不被裁。
+          为什么不像以前那样把「工具」组也钉在底部：展开态整条轨要 963px，
+          钉住的部分越多，留给入口的滚动窗口越小 —— 实测 705px 高的窗口下，
+          原来钉住 470px，滚动区只剩 154px，20 个入口里 11 个被塞进只能显示
+          两行的小窗口；只钉底部三行后，同一窗口能看到 14 行。 */}
       <div className="rail-scroll">
         <button className="rail-home" data-tip="回到主界面" aria-label="回到主界面" onClick={p.onHome}>
           <IconLogo /><span className="rail-label">知识首页</span>
@@ -184,37 +186,36 @@ export default function Rail(p: Props) {
           <IconChart />
           <span className="rail-label">学习统计</span>
         </button>
+        <div className="rail-group-divider"><span>工具</span></div>
+        <button className={`rail-btn${p.activeItem === 'ai' ? ' on' : ''}`} aria-current={p.activeItem === 'ai' ? 'page' : undefined} data-tip="AI 问答：内嵌网页问答" aria-label="AI 问答" onClick={p.onAi}>
+          <IconAi />
+          <span className="rail-label">AI 问答</span>
+        </button>
+        <button className={`rail-btn${p.activeItem === 'agent' ? ' on' : ''}`} aria-current={p.activeItem === 'agent' ? 'page' : undefined} data-tip="AI 笔记：对话式检索与修改笔记（先预览后写入）" aria-label="AI 笔记" onClick={p.onAgent}>
+          <IconAgent />
+          <span className="rail-label">AI 笔记</span>
+        </button>
+        <button className={`rail-btn${p.activeItem === 'draft' ? ' on' : ''}`} aria-current={p.activeItem === 'draft' ? 'page' : undefined} data-tip="智能草稿：讲义 / PDF 一键成笔记" aria-label="智能草稿" onClick={p.onDraft}>
+          <IconWand />
+          <span className="rail-label">智能草稿</span>
+        </button>
+        <button className={`rail-btn${p.activeItem === 'history' ? ' on' : ''}`} aria-current={p.activeItem === 'history' ? 'page' : undefined} data-tip="历史版本：快照与误删找回" aria-label="历史版本" onClick={p.onHistory}>
+          <IconHistory />
+          <span className="rail-label">历史版本</span>
+        </button>
+        <button className={`rail-btn${p.activeItem === 'import' ? ' on' : ''}`} aria-current={p.activeItem === 'import' ? 'page' : undefined} data-tip="导入：自动识别格式（笔记 / 题库 / Anki / 数据集 / Word·PDF），支持批量" aria-label="导入" onClick={p.onImport}>
+          <IconRestore />
+          <span className="rail-label">导入</span>
+        </button>
+        <button className={`rail-btn${p.activeItem === 'convert' ? ' on' : ''}`} aria-current={p.activeItem === 'convert' ? 'page' : undefined} data-tip="格式转换：PDF / Word → Markdown" aria-label="格式转换" onClick={p.onConvert}>
+          <IconConvert />
+          <span className="rail-label">格式转换</span>
+        </button>
+        <button className="rail-btn" data-tip="关于、隐私与第三方许可" aria-label="关于与许可" onClick={p.onNotice}>
+          <IconInfo />
+          <span className="rail-label">关于与许可</span>
+        </button>
       </div>
-      <div className="rail-sep" />
-      <div className="rail-section-label rail-section-label--bottom" aria-hidden={!expanded}>工具</div>
-      <button className={`rail-btn${p.activeItem === 'ai' ? ' on' : ''}`} aria-current={p.activeItem === 'ai' ? 'page' : undefined} data-tip="AI 问答：内嵌网页问答" aria-label="AI 问答" onClick={p.onAi}>
-        <IconAi />
-        <span className="rail-label">AI 问答</span>
-      </button>
-      <button className={`rail-btn${p.activeItem === 'agent' ? ' on' : ''}`} aria-current={p.activeItem === 'agent' ? 'page' : undefined} data-tip="AI 笔记：对话式检索与修改笔记（先预览后写入）" aria-label="AI 笔记" onClick={p.onAgent}>
-        <IconAgent />
-        <span className="rail-label">AI 笔记</span>
-      </button>
-      <button className={`rail-btn${p.activeItem === 'draft' ? ' on' : ''}`} aria-current={p.activeItem === 'draft' ? 'page' : undefined} data-tip="智能草稿：讲义 / PDF 一键成笔记" aria-label="智能草稿" onClick={p.onDraft}>
-        <IconWand />
-        <span className="rail-label">智能草稿</span>
-      </button>
-      <button className={`rail-btn${p.activeItem === 'history' ? ' on' : ''}`} aria-current={p.activeItem === 'history' ? 'page' : undefined} data-tip="历史版本：快照与误删找回" aria-label="历史版本" onClick={p.onHistory}>
-        <IconHistory />
-        <span className="rail-label">历史版本</span>
-      </button>
-      <button className={`rail-btn${p.activeItem === 'import' ? ' on' : ''}`} aria-current={p.activeItem === 'import' ? 'page' : undefined} data-tip="导入：自动识别格式（笔记 / 题库 / Anki / 数据集 / Word·PDF），支持批量" aria-label="导入" onClick={p.onImport}>
-        <IconRestore />
-        <span className="rail-label">导入</span>
-      </button>
-      <button className={`rail-btn${p.activeItem === 'convert' ? ' on' : ''}`} aria-current={p.activeItem === 'convert' ? 'page' : undefined} data-tip="格式转换：PDF / Word → Markdown" aria-label="格式转换" onClick={p.onConvert}>
-        <IconConvert />
-        <span className="rail-label">格式转换</span>
-      </button>
-      <button className="rail-btn" data-tip="关于、隐私与第三方许可" aria-label="关于与许可" onClick={p.onNotice}>
-        <IconInfo />
-        <span className="rail-label">关于与许可</span>
-      </button>
       <div className="rail-sep" />
       <div className="rail-font-wrap">
         <button

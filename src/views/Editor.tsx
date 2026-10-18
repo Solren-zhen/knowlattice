@@ -171,6 +171,8 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   const lowerNamesRef = useRef<string[] | null>(null);
   const attachRef = useRef(onAttach);
   const openLinkRef = useRef(onOpenLink);
+  /** mousedown 命中过的链接部件（部件随即被换回源码，click 时只能靠它认目标） */
+  const pressedLinkRef = useRef<{ kind: 'wiki' | 'link'; value: string; at: number } | null>(null);
   const readFileRef = useRef(readFile);
   /** 右键菜单位置（视口坐标）；null = 关闭。CM 的事件处理器只建一次，用 ref 改状态 */
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
@@ -248,6 +250,30 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
 
   // 初始化一次
   useEffect(() => {
+    /**
+     * 记下「按下时」命中的实时预览部件（捕获阶段，早于 CM 自己的 mousedown 处理）。
+     *
+     * 为什么必须抢在 CM 前面：mousedown 一落到部件上，CM 会把光标移到这一行，而光标所在行
+     * 按设计显示源码 —— 部件元素当场被换掉。到 click 事件到达时，`e.target` 已经是新渲染的
+     * 文本节点，`closest('.lp-wiki')` 找不到东西，只能退回「按坐标猜列号」，坐标一旦对不上
+     * （部件比源码少两个 `[`，文字整体左移）就点空或点中相邻链接。
+     * 这里只记录，不拦截事件：选词、拖选、点空白处放光标一切照旧。
+     */
+    const host = hostRef.current!;
+    const rememberPressed = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('.lp-wiki, .lp-link') as HTMLElement | null;
+      if (!el) { pressedLinkRef.current = null; return; }
+      const isWiki = el.classList.contains('lp-wiki');
+      const value = el.getAttribute(isWiki ? 'data-lp-target' : 'data-lp-url');
+      pressedLinkRef.current = value ? { kind: isWiki ? 'wiki' : 'link', value, at: Date.now() } : null;
+      if (!value) return;
+      // 拦下这一下：不拦的话 CM 会把光标移进本行，而「光标所在行显示源码」——
+      // 部件当场被换成文本，浏览器在 mouseup 时找不到原来的目标，**连 click 事件都不派发**，
+      // 结果就是实时预览里的链接根本点不开。拦下后部件还在，click 照常派发。
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    host.addEventListener('mousedown', rememberPressed, true);
     const view = new EditorView({
       parent: hostRef.current!,
       state: EditorState.create({
@@ -312,6 +338,11 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               const view = viewRef.current;
               if (!view) return false;
               const target = e.target as HTMLElement;
+              // 实时预览部件在 mousedown 那一刻就被换回源码（光标进了这一行），到 click 时
+              // 只能按坐标猜；猜偏就点空或点中相邻链接。所以优先用 mousedown 记下的目标。
+              const pressed = pressedLinkRef.current;
+              pressedLinkRef.current = null;
+              const usePressed = pressed && Date.now() - pressed.at < 1000;
               // 标准链接（实时预览部件）→ 开新窗口
               const linkEl = target.closest?.('.lp-link') as HTMLElement | null;
               if (linkEl) {
@@ -329,12 +360,24 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
                   return true;
                 }
               }
+              if (!linkEl && !target.closest?.('.lp-wiki') && usePressed && pressed!.kind === 'link') {
+                const safe = safeExternalUrl(pressed!.value);
+                if (safe) { e.preventDefault(); window.open(safe, '_blank', 'noopener'); return true; }
+                e.preventDefault();
+                toast('链接已禁用：只允许 http(s) 与 mailto', 'err');
+                return true;
+              }
               // [[双链]]（实时预览部件）→ 跳转笔记
               const fn = openLinkRef.current;
               const wikiEl = target.closest?.('.lp-wiki') as HTMLElement | null;
               if (wikiEl && fn) {
                 const name = wikiEl.getAttribute('data-lp-target');
                 if (name) { e.preventDefault(); fn(name); return true; }
+              }
+              if (!wikiEl && usePressed && pressed!.kind === 'wiki' && fn) {
+                e.preventDefault();
+                fn(pressed!.value);
+                return true;
               }
               // 通路图是跨行替换部件：点图后选中整个 ```pathway 块，Delete/Backspace 可直接删除。
               if (selectPathwayBlock(view, target)) {
@@ -352,7 +395,8 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               while ((m = wikiRe.exec(line.text))) {
                 if (col >= m.index && col <= m.index + m[0].length) {
                   e.preventDefault();
-                  fn((m[2] ?? m[1]).trim());
+                  // 目标是 m[1]；m[2] 只是显示别名，拿别名去解析会误弹「创建『别名』？」
+                  fn(m[1].trim());
                   return true;
                 }
               }
@@ -467,6 +511,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
       v.focus();
     });
     return () => {
+      host.removeEventListener('mousedown', rememberPressed, true);
       pathwayReadyRef.current?.(null);
       jumpReadyRef.current?.(null);
       viewRef.current = null;

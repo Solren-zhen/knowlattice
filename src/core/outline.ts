@@ -86,3 +86,27 @@ export function activeHeadingLine(lines: number[], cursorLine: number): number |
   }
   return null;
 }
+
+/** `笔记#小节` 拆成目标与锚点（没有 # 时锚点为空）——[[双链]] 的目标里带 # 是 Obsidian 的常见写法 */
+export function splitHeadingAnchor(raw: string): { target: string; anchor: string } {
+  const i = raw.indexOf('#');
+  if (i === -1) return { target: raw.trim(), anchor: '' };
+  return { target: raw.slice(0, i).trim(), anchor: raw.slice(i + 1).trim() };
+}
+
+/** 锚点文本的比对口径：折叠空白 + 去大小写（`第 1 章   概述` 与 `第 1 章 概述` 算同一节） */
+function normalizeHeading(s: string): string {
+  return s.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * 锚点 → 标题行号（1-based）；找不到返回 null。
+ * 只认标题文本：`^块引用`（Obsidian 的块 ID）我们没有块级索引，如实返回 null，
+ * 调用方退化成「打开笔记」而不是猜一行跳过去。
+ */
+export function headingLineByAnchor(items: OutlineItem[], anchor: string): number | null {
+  const want = normalizeHeading(anchor);
+  if (!want || want.startsWith('^')) return null;
+  const hit = items.find((o) => normalizeHeading(o.text) === want);
+  return hit ? hit.line : null;
+}

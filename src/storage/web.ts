@@ -11,6 +11,24 @@ import type { StorageAdapter, VaultFileMeta } from './adapter';
 const DB_NAME = 'knowlattice';
 const DB_VERSION = 2;
 
+/**
+ * 打开 vault 库。版本号与 schema 只在这里定义一份：
+ * 演示数据、迁移脚本等旁路写入方也用这个函数——各自写一份版本号的话，
+ * 谁的版本低谁就会撞上 IndexedDB 的 VersionError，写不进去也不报给用户。
+ */
+export async function openVaultDB(): Promise<IDBPDatabase> {
+  return openDB(DB_NAME, DB_VERSION, {
+    upgrade(db, oldVersion) {
+      if (oldVersion < 1 && !db.objectStoreNames.contains('files')) {
+        db.createObjectStore('files', { keyPath: 'path' });
+      }
+      if (oldVersion < 2 && !db.objectStoreNames.contains('attachments')) {
+        db.createObjectStore('attachments', { keyPath: 'path' });
+      }
+    },
+  });
+}
+
 const textEncoder = new TextEncoder();
 
 interface FileRecord {
@@ -33,16 +51,7 @@ export class WebAdapter implements StorageAdapter {
 
   private async getDB(): Promise<IDBPDatabase> {
     if (!this.db) {
-      this.db = await openDB(DB_NAME, DB_VERSION, {
-        upgrade(db, oldVersion) {
-          if (oldVersion < 1 && !db.objectStoreNames.contains('files')) {
-            db.createObjectStore('files', { keyPath: 'path' });
-          }
-          if (oldVersion < 2 && !db.objectStoreNames.contains('attachments')) {
-            db.createObjectStore('attachments', { keyPath: 'path' });
-          }
-        },
-      });
+      this.db = await openVaultDB();
     }
     return this.db;
   }

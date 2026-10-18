@@ -6,6 +6,9 @@ import { GLOW_ATTR, glowPoint, initHoverGlow } from '../hoverGlow';
  * 指针跟光：纯函数 glowPoint 直接断言；DOM 部分断言「进入 → 挂标记 + 写局部坐标、
  * 离开 → 清空」，以及减少动态效果时完全不工作。jsdom 里没有真实布局，
  * 所以给元素显式写一个 getBoundingClientRect。
+ *
+ * 坐标写入走 rAF 合并（每帧最多一次），所以断言坐标前要让出一帧 ——
+ * 标记（GLOW_ATTR）本身仍是同步挂的，CSS 据此才画柔光。
  */
 
 let reduced = false;
@@ -63,14 +66,34 @@ describe('glowPoint', () => {
 });
 
 describe('initHoverGlow', () => {
-  it('指针进入行 → 挂标记并写入局部坐标', () => {
+  it('指针进入行 → 挂标记并写入局部坐标', async () => {
     document.body.innerHTML = '<div class="qs-item" id="row"></div>';
     const row = document.getElementById('row')!;
     defineRect(row, 100, 50, 200, 40);
     const stop = initHoverGlow();
 
     moveTo(row, 150, 60);
+    // 标记同步挂上（CSS 据此才画柔光）；坐标进 rAF 队列，下一帧才写
     expect(row.getAttribute(GLOW_ATTR)).toBe('');
+    expect(row.style.getPropertyValue('--glow-x')).toBe('');
+    await new Promise((r) => setTimeout(r, 40));
+    expect(row.style.getPropertyValue('--glow-x')).toBe('50.0px');
+    expect(row.style.getPropertyValue('--glow-y')).toBe('10.0px');
+    stop();
+  });
+
+  it('同一帧内连续移动只写一次，且写的是最后一次的坐标', async () => {
+    document.body.innerHTML = '<div class="qs-item" id="row"></div>';
+    const row = document.getElementById('row')!;
+    defineRect(row, 100, 50, 200, 40);
+    const stop = initHoverGlow();
+
+    // pointermove 的频率高于刷新率（125Hz 鼠标每秒 125+ 个事件），
+    // 逐事件写入会让这一行的 radial-gradient 重绘多次，而一帧只显示一次
+    moveTo(row, 110, 55);
+    moveTo(row, 120, 58);
+    moveTo(row, 150, 60);
+    await new Promise((r) => setTimeout(r, 40));
     expect(row.style.getPropertyValue('--glow-x')).toBe('50.0px');
     expect(row.style.getPropertyValue('--glow-y')).toBe('10.0px');
     stop();

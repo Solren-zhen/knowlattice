@@ -4,6 +4,8 @@ on:
   # 推送到 work 分支时自动构建
   push:
     branches: [work]
+    # 打 vX.Y.Z tag 时构建并（在 Release 已存在的前提下）自动发布，见文末「发布」两步
+    tags: ['v*']
     paths-ignore:
       - '**.md'
   # 也支持手动触发（Actions 页面右上角 Run workflow）
@@ -17,6 +19,14 @@ on:
           - aarch64-apple-darwin
           - x86_64-apple-darwin
           - universal-apple-darwin
+      publish:
+        description: 构建后同时发布到 GitHub Release（Release 必须已存在）
+        type: boolean
+        default: false
+
+# 发布步骤要往 Release 传资产
+permissions:
+  contents: write
 
 jobs:
   build-mac:
@@ -71,3 +81,48 @@ jobs:
             src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
           retention-days: 30
+
+      # ── 发布 ──────────────────────────────────────────────────────────────────
+      # 只在打 vX.Y.Z tag（或手动勾选 publish）时执行。
+      # 顺序要求：先在本机 Windows 打包，把 exe / .sig / latest.json 传进同一个 Release 并「发布」，
+      # 再打 tag 触发这里。否则清单里没有 windows-x86_64，Windows 端会因缺平台而检查更新失败。
+      - name: 校验 tag 与版本号一致
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "$TAG" != "${{ github.ref_name }}" ]; then
+            echo "::error::tag ${{ github.ref_name }} 与 package.json 版本 $TAG 不一致，先统一版本号再发布"
+            exit 1
+          fi
+          echo "将发布到 Release $TAG"
+
+      - name: 生成更新清单（合并已发布的 Windows 条目）
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+        run: node scripts/make-update-manifest.mjs
+
+      - name: 发布到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          MANIFEST=$(find src-tauri/target -name latest.json | head -n1)
+          echo "清单：$MANIFEST"
+          node -e '
+            const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            console.log("清单平台：" + Object.keys(m.platforms).join(", "));
+            if (!m.platforms["windows-x86_64"]) {
+              console.error("::error::清单缺少 windows-x86_64。请先在本机 Windows 打包并把 exe/.sig/latest.json 上传到 " + process.argv[2] + " 并发布 Release，再重跑本工作流。");
+              process.exit(1);
+            }
+          ' "$MANIFEST" "$TAG"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release $TAG 不存在。先在本机 Windows 打包并上传 exe/.sig/latest.json，再打 tag。"
+            exit 1
+          fi
+          gh release upload "$TAG" --clobber \
+            src-tauri/target/*/release/bundle/dmg/*.dmg \
+            src-tauri/target/*/release/bundle/macos/*.app.tar.gz \
+            src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig \
+            "$MANIFEST"
+          echo "已发布 $TAG：macOS 资产 + 合并后的 latest.json"

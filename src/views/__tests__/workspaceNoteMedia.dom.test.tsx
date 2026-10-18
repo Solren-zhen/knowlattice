@@ -170,8 +170,10 @@ describe('Workspace 笔记级音频 / 字幕', () => {
     const { container } = render(<Workspace />);
     await openNote(container);
 
-    // 必须限定在工具栏里：章节目录卡片里也有隐藏的 file input，container.querySelector 先命中它
-    const input = container.querySelector<HTMLInputElement>('.editor-toolbar input[type="file"]');
+    // 必须限定在工具栏里、并且按 accept 认准「音频/字幕」那个：
+    // 章节目录卡片里也有隐藏的 file input（container.querySelector 会先命中它），
+    // 工具栏里现在还有「插入图片」的 image/* 输入（见 Workspace 的 insertImages）
+    const input = container.querySelector<HTMLInputElement>('.editor-toolbar input[accept*=".mp3"]');
     expect(input).toBeTruthy();
     const audio = new File([new Uint8Array([1, 2, 3])], '讲解.mp3', { type: 'audio/mpeg' });
     const srt = new File([SRT], '讲解.srt', { type: 'text/plain' });

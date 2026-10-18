@@ -57,7 +57,7 @@ function cleanInline(text: string): string {
   const saved: string[] = [];
   const t = text.replace(INLINE_PROTECT, (hit) => {
     saved.push(hit);
-    return '\u0000' + (saved.length - 1) + '\u0000';
+    return String.fromCharCode(0) + (saved.length - 1) + String.fromCharCode(0);
   });
   return finishInline(cleanCjkText(t), saved);
 }
@@ -65,7 +65,7 @@ function cleanInline(text: string): string {
 /** Split sub/superscripts like "PO 2" -> "PO2", then restore protected runs. */
 function finishInline(text: string, saved: string[]): string {
   const t = text.replace(/\b([A-Z]{1,3}) ([0-9])/g, '$1$2');
-  return t.replace(/\u0000(\d+)\u0000/g, (_hit, i: string) => saved[Number(i)]);
+  return t.replace(new RegExp(String.fromCharCode(0) + '(\\d+)' + String.fromCharCode(0), 'g'), (_hit, i: string) => saved[Number(i)]);
 }
 
 const CJK = '\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff';

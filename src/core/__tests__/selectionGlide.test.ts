@@ -70,7 +70,7 @@ describe('initSelectionGlide', () => {
     expect(ink).not.toBeNull();
     expect(document.documentElement.classList.contains(GLIDE_ROOT_CLASS)).toBe(true);
     expect(ink!.classList.contains('on')).toBe(true);
-    expect(ink!.style.transform).toBe('translate(10.00px, 70.00px)');
+    expect(ink!.style.transform).toBe('translate(10.00px, 70.00px) scale(1.0000, 1.0000)');
     // jsdom 会把宽度归一化（280.00px → 280px），只断言数值
     expect(Number.parseFloat(ink!.style.width)).toBeCloseTo(280, 2);
     expect(Number.parseFloat(ink!.style.height)).toBeCloseTo(54, 2);
@@ -86,7 +86,24 @@ describe('initSelectionGlide', () => {
     r1.classList.add('active');
     // observer 回调是微任务，重测合并到下一帧 rAF
     await new Promise((r) => setTimeout(r, 60));
-    expect(ink.style.transform).toBe('translate(10.00px, 130.00px)');
+    expect(ink.style.transform).toBe('translate(10.00px, 130.00px) scale(1.0000, 1.0000)');
+    stop();
+  });
+
+  it('活动项尺寸不同时用 scale 表达，墨迹自身宽高保持基准值', async () => {
+    const { r0, r1 } = makeResults();
+    // 第二行是两行高（108 而非 54）：墨迹应当靠 scaleY 长高，而不是去改 height
+    defineRect(r1, 10, 130, 280, 108);
+    const stop = initSelectionGlide();
+    const ink = document.querySelector<HTMLElement>(`.qs-results .${GLIDE_INK_CLASS}`)!;
+
+    r0.classList.remove('active');
+    r1.classList.add('active');
+    await new Promise((r) => setTimeout(r, 60));
+    expect(ink.style.transform).toBe('translate(10.00px, 130.00px) scale(1.0000, 2.0000)');
+    // 宽高仍是首次落位那一行的基准值 —— 它们此后不再随活动项变化
+    expect(Number.parseFloat(ink.style.width)).toBeCloseTo(280, 2);
+    expect(Number.parseFloat(ink.style.height)).toBeCloseTo(54, 2);
     stop();
   });
 

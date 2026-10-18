@@ -3,12 +3,11 @@
  * 让用户马上体验 树/双链/标签/图谱/复习/题库/错题/待办/学习统计 全部功能。
  * 数据写入 IndexedDB(knowlattice.files) + localStorage；写入后调用方 reload 重新加载 vault。
  */
-import { openDB } from 'idb';
+import { openVaultDB } from '../storage/web';
 import { saveTodos, dayKey, addDays, type Todo } from './todos';
 import { importDays } from './stats';
 import { importQbanks } from './qbank';
 
-const DB_NAME = 'knowlattice';
 interface DemoNote {
   path: string;
   title: string;
@@ -160,11 +159,7 @@ const DEMO_MISTAKES: Record<string, { path: string; chapter: string; title: stri
 
 /** 写入演示数据；返回写入的笔记数。调用方写入后调用 location.reload() 重新加载 vault。 */
 export async function seedDemo(): Promise<number> {
-  const db = await openDB(DB_NAME, 1, {
-    upgrade(d) {
-      if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath: 'path' });
-    },
-  });
+  const db = await openVaultDB();
   const mtime = Date.now();
   const tx = db.transaction('files', 'readwrite');
   for (const n of NOTES) {

@@ -20,6 +20,8 @@ import { streak, last7 } from '../core/stats';
 import { seedDemo } from '../core/demo';
 import { loadReminder, notifySupport, requestNotifyPermission, saveReminder, type NotifySupport, type ReminderConfig } from '../core/reminder';
 import { MAX_DAILY_CAP, daysUntilExam, loadPlan, savePlan, type ReviewPlan } from '../core/reviewPlan';
+import { collectLearningStats, UNSOURCED_ACHIEVEMENT_IDS } from '../core/achievementStats';
+import { syncAchievements, type AchievementState } from '../core/achievementStore';
 import { IconChart, IconClose } from './icons';
 import DialogSurface from './DialogSurface';
 
@@ -97,6 +99,35 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
 
   /** 每日一练：独立于总打卡的连续天数与今日状态 */
   const daily = useMemo(() => ({ streak: dailyStreak(), done: isDailyDone(todayKey()), week: last7Daily() }), []);
+
+  /**
+   * 成就：汇总统计 → 评估 → 落盘。
+   *
+   * 放在 effect 里而不是 useMemo：`syncAchievements` 会写 localStorage，
+   * 渲染期不该有副作用（StrictMode 下还会跑两次）。
+   * 幂等，所以 StrictMode 的重复执行不会重复解锁（见 achievementStore 的说明）。
+   * 统计是异步的（逐题记录要先从 IndexedDB 初始化），所以这里走 then + active 守卫，
+   * 与上面取题库数据的那处保持一致。
+   */
+  const [ach, setAch] = useState<AchievementState | null>(null);
+  useEffect(() => {
+    let active = true;
+    void collectLearningStats({ paths: mdPaths, docs }).then((stats) => {
+      if (!active) return;
+      const state = syncAchievements(stats);
+      setAch(state);
+      // 新解锁的报一次：一次解锁多个就合并成一句，不刷屏
+      const n = state.newlyUnlocked.length;
+      if (n === 1) toast(`解锁成就「${state.newlyUnlocked[0].name}」`, 'ok', 3200);
+      else if (n > 1) toast(`一次解锁了 ${n} 个成就，去学习统计里看看`, 'ok', 3200);
+    });
+    return () => { active = false; };
+  }, [mdPaths, docs]);
+  /** 本次挂载新解锁的 id：网格里给它们加一层高亮，和 toast 呼应 */
+  const freshIds = useMemo(
+    () => new Set((ach?.newlyUnlocked ?? []).map((a) => a.id)),
+    [ach],
+  );
 
   const weekLabels = ['一', '二', '三', '四', '五', '六', '日'];
   const hasNewCards = rep.r.learned < rep.r.total;
@@ -222,6 +253,78 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
           ))}
         </div>
 
+        {/* 成就：21 个，按等级显示。未解锁的给进度条，接近解锁的（≥80%）在末尾单独提一句 */}
+        {ach && (
+          <section className="dash-ach" data-reveal aria-label="成就">
+            <h4>
+              成就
+              <span className="dash-ach-count muted">
+                {ach.summary.totalUnlocked} / {ach.summary.totalAchievements}
+              </span>
+            </h4>
+            {ach.summary.totalUnlocked === 0 && (
+              <p className="dash-ach-empty muted">
+                还没有解锁任何成就：完成一次复习、练几道题或连续打卡几天，这里会逐个亮起来。
+              </p>
+            )}
+            <div className="dash-ach-grid" role="list">
+              {ach.achievements.map((a) => {
+                // 没有数据源的成就：不给进度条（那会是一根永远停在 0 的条），标「未记录」
+                const untracked = !a.unlocked && UNSOURCED_ACHIEVEMENT_IDS.has(a.id);
+                const pct = a.progress
+                  ? Math.min(100, Math.round((a.progress.current / a.progress.target) * 100))
+                  : 0;
+                return (
+                  <div
+                    key={a.id}
+                    role="listitem"
+                    className={`dash-ach-item${a.unlocked ? ' on' : ''}${freshIds.has(a.id) ? ' fresh' : ''}`}
+                    aria-label={`${a.name}：${
+                      a.unlocked
+                        ? '已解锁'
+                        : untracked
+                          ? '未记录（暂时没有数据源）'
+                          : a.progress
+                            ? `进度 ${a.progress.current}/${a.progress.target}`
+                            : '未解锁'
+                    }`}
+                    title={untracked ? `${a.requirement}（${a.tier} 级）· 暂时没有数据源` : `${a.requirement}（${a.tier} 级）`}
+                  >
+                    <span className="dash-ach-icon" aria-hidden="true">{a.icon}</span>
+                    <span className="dash-ach-name">{a.name}</span>
+                    <span className="dash-ach-desc muted">{a.description}</span>
+                    {untracked ? (
+                      <span className="dash-ach-untracked muted">未记录</span>
+                    ) : (
+                      !a.unlocked && a.progress && (
+                        <span className="dash-ach-track" aria-hidden="true">
+                          <i style={{ width: `${pct}%` }} />
+                        </span>
+                      )
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {ach.nearby.length > 0 && (
+              <p className="dash-ach-near muted">
+                再进一步就到手：
+                {ach.nearby.slice(0, 3).map((a) => (
+                  <span key={a.id} className="dash-ach-near-chip">
+                    {a.icon} {a.name} · {a.progress!.current}/{a.progress!.target}
+                  </span>
+                ))}
+              </p>
+            )}
+            {ach.achievements.some((a) => !a.unlocked && UNSOURCED_ACHIEVEMENT_IDS.has(a.id)) && (
+              <p className="dash-ach-note muted">
+                标「未记录」的成就暂时拿不到数据：复习的每次评分、以及错题的改正次数目前没有落盘。
+                不是没达到，是没记录 —— 补上记录口径后它们才会开始计数。
+              </p>
+            )}
+          </section>
+        )}
+
         {/* 薄弱点可视化：跨库合并的章节掌握度 → 雷达图 + 学科正确率 */}
         {hasWeakData && (
           <section className="dash-weak" data-reveal aria-label="薄弱点">
@@ -252,18 +355,26 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
           </section>
         )}
 
-        <div className="dash-week" data-reveal>
+        <section className="dash-week" data-reveal aria-label="近 7 天学习">
           <h4>近 7 天学习</h4>
-          <div className="dash-bars" role="list" aria-label="最近七天每日学习次数">
-                {rep.days.map((d, i) => (
-                  <div key={d.day} className={`dash-bar-wrap${i === rep.days.length - 1 ? ' is-today' : ''}`} role="listitem" aria-label={`${d.day}：${d.count} 次`}>
-                    <span className="dash-bar-count">{d.count}</span>
-                    <div className="dash-bar" style={{ height: `${Math.max(6, (d.count / rep.maxDay) * 100)}%`, opacity: d.count ? 1 : 0.25, ['--i' as string]: i }} />
-                <div className="dash-bar-label muted">{weekLabels[(new Date(`${d.day}T00:00:00`).getDay() + 6) % 7]}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+          {/* 全零时不画那七根 6% 高、25% 透明的凸起 —— 它们读起来像渲染坏了，
+              而不是「还没开始」。与紧邻的「元认知校准」保持同一套空态语汇。 */}
+          {rep.days.every((d) => d.count === 0) ? (
+            <p className="dash-week-empty muted">
+              最近 7 天还没有学习记录：完成一次复习或练题，这里就会长出柱子。
+            </p>
+          ) : (
+            <div className="dash-bars" role="list" aria-label="最近七天每日学习次数">
+                  {rep.days.map((d, i) => (
+                    <div key={d.day} className={`dash-bar-wrap${i === rep.days.length - 1 ? ' is-today' : ''}`} role="listitem" aria-label={`${d.day}：${d.count} 次`}>
+                      <span className="dash-bar-count">{d.count}</span>
+                      <div className="dash-bar" style={{ height: `${Math.max(6, (d.count / rep.maxDay) * 100)}%`, opacity: d.count ? 1 : 0.25, ['--i' as string]: i }} />
+                  <div className="dash-bar-label muted">{weekLabels[(new Date(`${d.day}T00:00:00`).getDay() + 6) % 7]}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         <section className="dash-calib" data-reveal aria-label="元认知校准">
           <h4>元认知校准</h4>

@@ -60,8 +60,11 @@ export default function BottomSheet({ open, onClose, label, children, stops }: P
   const dragRef = useRef<{ id: number; startY: number; claimed: boolean } | null>(null);
   const geometryRef = useRef<SheetGeometry>(DEFAULT_SHEET_GEOMETRY);
   const [dragging, setDragging] = useState(false);
+  /** 退场动画进行中：遮罩可点、Esc 可再按，用它挡住重复触发 */
+  const closingRef = useRef(false);
 
-  useEsc(onClose, open);
+  // beginClose 是函数声明（会被提升），所以这里可以先引用、后定义
+  useEsc(beginClose, open);
 
   const geometry = (): SheetGeometry => {
     const viewport = typeof window === 'undefined' ? DEFAULT_SHEET_GEOMETRY.viewport : window.innerHeight;
@@ -79,6 +82,30 @@ export default function BottomSheet({ open, onClose, label, children, stops }: P
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
   };
+
+  /**
+   * 关闭：先播一段退场，再真正卸载。
+   *
+   * 松手那一刻速度最大，直接 onClose() 会让抽屉一帧消失、把刚测出的速度丢掉；
+   * 而打开与拖拽中松手都走了弹簧 —— 同一个手势两种结果，读起来像页面崩了一下。
+   * 曲线沿用仓库既有的退场语汇 --t-exit(160ms) + --ease-in，与 .mv-toast 一致。
+   *
+   * 用函数声明而不是 const 箭头：需要被上面的 useEsc 引用（声明提升）。
+   */
+  function beginClose() {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    const el = sheetRef.current;
+    if (!motionAllowed() || !el) {
+      onClose();
+      return;
+    }
+    stopAnim();
+    el.style.pointerEvents = 'none'; // 退场途中不再接受拖动
+    el.style.transition = 'transform var(--t-exit) var(--ease-in)';
+    el.style.transform = `translate3d(0, ${geometryRef.current.viewport}px, 0)`;
+    window.setTimeout(onClose, 170); // --t-exit 160ms + 10ms 余量
+  }
 
   /** 用弹簧把抽屉送到目标位移；到位即停（不常驻 rAF） */
   const springTo = (target: number) => {
@@ -104,9 +131,18 @@ export default function BottomSheet({ open, onClose, label, children, stops }: P
     rafRef.current = requestAnimationFrame(tick);
   };
 
-  // 打开：从屏幕下方弹到「近处那一档」；关闭：卸载（父组件控制）
+  // 打开：从屏幕下方弹到「近处那一档」；关闭：先播退场再卸载（见 beginClose）
   useEffect(() => {
     if (!open) return;
+    // 重新打开：清掉上一次退场留下的内联 transition / pointer-events 与关闭标记。
+    // 不清 transition 的话，下面 springTo 逐帧写 transform 会被那条 160ms 过渡拖住，
+    // 弹簧会被抹平成一坨缓动。
+    closingRef.current = false;
+    const el = sheetRef.current;
+    if (el) {
+      el.style.removeProperty('transition');
+      el.style.removeProperty('pointer-events');
+    }
     geometryRef.current = geometry();
     const target = sheetOpenY(geometryRef.current);
     if (!motionAllowed()) {
@@ -176,14 +212,14 @@ export default function BottomSheet({ open, onClose, label, children, stops }: P
     const rest = sheetRestY(geometryNow);
     const y = yRef.current;
     if (y > rest + CLOSE_OVERSHOOT) {
-      onClose();
+      beginClose();
       return;
     }
     const velocity = velocityFromSamples(samplesRef.current);
     const target = resolveSheetTarget(y, velocity, geometryNow);
     // 已经停在最下面那一档时再往下甩：直接关（抽屉的常规退出方式）
     if (target >= rest && velocity > CLOSE_FLICK) {
-      onClose();
+      beginClose();
       return;
     }
     springTo(target);
@@ -193,7 +229,7 @@ export default function BottomSheet({ open, onClose, label, children, stops }: P
 
   return (
     <>
-      <div className="sheet-backdrop" onClick={onClose} />
+      <div className="sheet-backdrop" onClick={beginClose} />
       <div
         className={`sheet${dragging ? ' is-dragging' : ''}`}
         ref={sheetRef}

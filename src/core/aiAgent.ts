@@ -52,7 +52,7 @@ export interface RunAgentOptions {
   /** 每轮请求的 token 用量（服务商返回真实值，否则本地估算并标 estimated） */
   onUsage?: (u: TokenUsage) => void;
   signal?: AbortSignal;
-  /** 工具轮数上限，防失控；默认 16 */
+  /** 工具轮数上限，防失控；默认 48（整章笔记的读检索＋多处写入很容易超过 16 轮） */
   maxSteps?: number;
 }
 
@@ -264,7 +264,7 @@ export interface RunAgentResult {
 
 export async function runAgent(o: RunAgentOptions): Promise<RunAgentResult> {
   const working: WireMessage[] = [...o.messages];
-  const maxSteps = o.maxSteps ?? 16;
+  const maxSteps = o.maxSteps ?? 48;
 
   for (let step = 0; step < maxSteps; step++) {
     // 每次请求模型前裁掉超预算的更早工具结果（单条上限在回填时已生效）：
