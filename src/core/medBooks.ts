@@ -7,6 +7,7 @@
  * 避免每次检索都重读一遍 IndexedDB。纯检索逻辑见 core/medIndex.ts。
  */
 import { listMedBookMeta, listMedBookRecords, getMedBookTexts, removeMedBook, type MedBookMeta } from '../storage/medStore';
+import { verifyQuote, type CiteStatus } from './citeVerify';
 import {
   bookMatches, extractPage, formatMedBooks, formatMedHits, printedPage, searchMedBooks,
   type MedBookHit, type MedBookInfo,
@@ -117,6 +118,43 @@ export async function medBookFullText(wanted: string): Promise<{ book: string; t
 
 /** 物理页 → 印刷页（展示某本书的页码时用） */
 export { printedPage };
+
+/**
+ * 引文核验：拿「书名 + 引文」直接查本机教材原文，**不依赖本轮是否检索过这本教材**。
+ * 回答里的引用徽标此前只比对「笔记库 + 本次会话检索到的教材段落」，
+ * 于是引了上一轮查过、或模型直接按记忆写的教材页码时，即使原文真实存在也会显示
+ * 「未找到出处」——把「没检索过」误报成「核验不通过」。
+ *
+ * 没导入教材、或书名对不上任何一本 → 返回 null（调用方保留原结论，绝不伪造「核验通过」）。
+ * 教材全文走 medBooks 的缓存（命中不重复读库），核验归一化结果另有 citeVerify 的预算缓存。
+ */
+export async function verifyQuotesAgainstBooks(
+  items: Array<{ book: string; quote: string }>,
+): Promise<Map<string, { status: CiteStatus; book: string }>> {
+  const out = new Map<string, { status: CiteStatus; book: string }>();
+  const wanted = items.filter((it) => it.book.trim() && it.quote.trim());
+  if (!wanted.length) return out;
+  let metas: MedBookInfo[];
+  try {
+    metas = await listMedBookMeta();
+  } catch {
+    return out;
+  }
+  if (!metas.length) return out; // 没导入教材：一次 IndexedDB 元数据读就返回，不加载全文
+  for (const it of wanted) {
+    const meta = metas.find((m) => bookMatches(m.title, it.book));
+    if (!meta) continue;
+    const src = await medBookFullText(meta.title).catch(() => null);
+    if (!src) continue;
+    out.set(citeKeyOf(it.book, it.quote), { status: verifyQuote(it.quote, src.text), book: src.book });
+  }
+  return out;
+}
+
+/** 核验结果的键：与面板里的引用一一对应（书名 + 引文） */
+export function citeKeyOf(book: string, quote: string): string {
+  return `${book}\u0000${quote}`;
+}
 
 /** 删除一本教材并使缓存失效 */
 export async function medBookRemove(name: string): Promise<void> {

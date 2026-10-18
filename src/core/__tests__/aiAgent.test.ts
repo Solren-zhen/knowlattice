@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   agentNetHint,
   buildHistoryMessages, buildNoteSystemPrompt, detectMention, expandCommand, extractMentionedNotes, formatNoteList,
-  listCommands, queryFragments, runAgent, searchNotes, truncateForModel,
+  listCommands, queryFragments, readNoteSlice, runAgent, searchNotes, truncateForModel,
   type RunAgentOptions, type WireMessage,
 } from '../aiAgent';
 import { BUILTIN_AI_COMMANDS } from '../aiCommands';
@@ -277,6 +277,19 @@ describe('模型侧工具实现', () => {
     expect(prompt).toContain('永远用表格对比鉴别诊断。');
   });
 
+  it('教材状态如实注入：没导入教材时不能声称已导入，导入后报出数量', () => {
+    // 默认（0 本）：不能出现「已导入」，并明确叫停教材工具——否则模型会反复调用或含糊其辞
+    const none = buildNoteSystemPrompt(null);
+    expect(none).not.toContain('本机已导入');
+    expect(none).toContain('本机尚未导入医学教材索引');
+    expect(none).toContain('不要调用 list_medical_books');
+
+    const some = buildNoteSystemPrompt(null, null, false, 3);
+    expect(some).toContain('本机已导入 3 本医学教材索引');
+    expect(some).toContain('search_medical_books');
+    expect(some).not.toContain('本机尚未导入');
+  });
+
   it('陪练模式注入强化契约：一次一题、先提示后揭示、结束写学习日志', () => {
     const base = buildNoteSystemPrompt(null);
     expect(base).not.toContain('陪练模式】');
@@ -284,6 +297,74 @@ describe('模型侧工具实现', () => {
     expect(coach).toContain('陪练模式】');
     expect(coach).toContain('一次只问一个问题');
     expect(coach).toContain('propose_study_log');
+  });
+});
+
+describe('readNoteSlice（长笔记分段读）', () => {
+  const long = `# 心脏\n\n${'心'.repeat(20_000)}`;
+
+  it('短笔记一次读完：报总长度与「已到末尾」，正文完整', () => {
+    const doc = '# 心脏\n心肌收缩泵血。\n';
+    const out = readNoteSlice('解剖/心脏.md', doc);
+    expect(out).toContain(`共 ${doc.length} 字`);
+    expect(out).toContain('已到末尾');
+    expect(out).not.toContain('继续读');
+    expect(out.endsWith(doc)).toBe(true);
+  });
+
+  it('长笔记默认只返回一段：告出区间与续读方式，总量不超单条上限', () => {
+    const out = readNoteSlice('解剖/心脏.md', long);
+    expect(out).toContain('未读完');
+    expect(out).toContain('offset=');
+    expect(out.length).toBeLessThanOrEqual(8_000); // 面板展示与模型收到的因此是同一份
+    expect(out).not.toContain('心'.repeat(7_000)); // 确实没把整篇塞进来
+  });
+
+  it('按 offset 一段段续读，能拼回全文（不会漏、不会重）', () => {
+    // 头部信息里没有空行，正文里的空行不参与——分隔符是第一个 \n\n
+    const bodyOf = (out: string) => out.slice(out.indexOf('\n\n') + 2);
+    let offset = 0;
+    let joined = '';
+    for (let guard = 0; guard < 10; guard++) {
+      const out = readNoteSlice('解剖/心脏.md', long, { offset });
+      const body = bodyOf(out);
+      expect(body.length).toBeGreaterThan(0);
+      joined += body;
+      if (out.includes('已到末尾')) break;
+      offset += body.length;
+    }
+    expect(joined).toBe(long);
+  });
+
+  it('按 heading 只读该小节，到下一个同级标题为止', () => {
+    const doc = '# 心脏\n\n## 泵血\n泵血内容。\n\n### 细节\n细节内容。\n\n## 传导\n传导内容。\n';
+    const out = readNoteSlice('解剖/心脏.md', doc, { heading: '泵血' });
+    expect(out).toContain('小节「泵血」');
+    expect(out).toContain('泵血内容。');
+    expect(out).toContain('细节内容。'); // 子级标题属于本小节
+    expect(out).not.toContain('传导内容。'); // 同级标题开始新小节
+  });
+
+  it('heading 找不到时报错并指路，不猜', () => {
+    const out = readNoteSlice('解剖/心脏.md', '# 心脏\n', { heading: '不存在的节' });
+    expect(out).toContain('错误');
+    expect(out).toContain('不存在的节');
+  });
+
+  it('未读完时列出小节清单（供按小节读），过长时截断清单', () => {
+    const doc = `# 总\n${Array.from({ length: 30 }, (_, i) => `\n## 小节${i}\n${'字'.repeat(400)}`).join('')}`;
+    const out = readNoteSlice('解剖/心脏.md', doc);
+    expect(out).toContain('本篇小节');
+    expect(out).toContain('- 小节0');
+    expect(out).toContain('此处列前 20 个');
+    expect(out).not.toContain('- 小节25');
+  });
+
+  it('frontmatter 与代码块里的 # 不算小节', () => {
+    const doc = '# 标题\n\n```\n## 不是标题\n```\n\n## 真标题\n内容。\n';
+    const out = readNoteSlice('解剖/心脏.md', doc, { heading: '不是标题' });
+    expect(out).toContain('错误');
+    expect(readNoteSlice('解剖/心脏.md', doc, { heading: '真标题' })).toContain('内容。');
   });
 });
 

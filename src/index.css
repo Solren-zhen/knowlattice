@@ -4271,6 +4271,14 @@ a.wikilink.missing::after {
   border-radius: 8px;
   background: var(--warn-bg); color: var(--warn-text);
 }
+/* 设置页的「把密钥保存在本机」：勾选框跟标签同行，说明文字小一号 */
+.agent-remember-key > span:first-child { display: flex; align-items: center; gap: 6px; }
+.agent-remember-key > span:last-child { font-size: var(--fs-caption); line-height: 1.55; }
+/* 回答里带题目时的「导入题库」入口：贴在回答下方，低调不抢正文 */
+.agent-quiz-import { margin: 6px 12px 0; font-size: var(--fs-caption); }
+/* 整篇重写的结构丢失提醒：跟在 .agent-drift 的提示带里，逐条列出 */
+.agent-warn-list { margin: 4px 0 0; padding-left: 1.15em; }
+.agent-warn-list li { margin: 2px 0; }
 /* @ 引用 / 斜杠命令补全：贴在输入框上方 */
 .agent-input { position: relative; }
 .agent-mention {

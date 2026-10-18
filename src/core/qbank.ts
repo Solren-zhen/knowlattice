@@ -146,6 +146,23 @@ export async function addBank(name: string, questions: QuizQuestion[]): Promise<
   return banks;
 }
 
+/**
+ * 往题库**追加**题目（同名题库增量追加，而不是覆盖；题库不存在则新建）。
+ * AI 出题入库走这里：一轮对话导一次，连着导几轮不该把上一轮冲掉。
+ * 题干 + 选项完全相同的题不重复收（同一段回答反复点导入也不会灌水）。
+ */
+export async function appendBankQuestions(name: string, questions: QuizQuestion[]): Promise<QuizBank[]> {
+  const all = await loadBanks();
+  const prev = all.find((b) => b.name === name);
+  if (!prev) return addBank(name, questions);
+  const existing = new Set(prev.questions.map(questionKey));
+  const fresh = questions.filter((q) => !existing.has(questionKey(q)));
+  if (!fresh.length) return all;
+  const merged: QuizBank = { ...prev, importedAt: Date.now(), questions: [...prev.questions, ...fresh] };
+  await putBank(merged);
+  return [merged, ...all.filter((b) => b.name !== name)];
+}
+
 /** 题目内容键：题干 + 选项。同名题库重导时用它把旧批注接回新题。 */
 function questionKey(q: QuizQuestion): string {
   return `${q.stem}\u0000${q.options.join('\u0000')}`;

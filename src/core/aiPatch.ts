@@ -142,6 +142,65 @@ export function fuzzyFindAnchor(text: string, anchor: string): AnchorHit | null 
   return uniqueHitInIndex(buildNormIndex(text, 'strip'), strippedAnchor);
 }
 
+/* ------------------------------------------------- 整篇重写的结构丢失检查 */
+
+export interface StructureWarning {
+  kind: 'frontmatter' | 'links' | 'shrink';
+  /** 给用户看的一句话（提案卡上直接展示） */
+  detail: string;
+}
+
+/** frontmatter 的顶层键（--- 包围的头部里 `key:` 形式的行） */
+function frontmatterKeys(text: string): string[] {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return [];
+  return m[1]
+    .split('\n')
+    .map((line) => /^([A-Za-z_][\w-]*)\s*:/.exec(line)?.[1])
+    .filter((k): k is string => !!k);
+}
+
+/** [[双链]] 目标计数（`[[目标|别名]]` 只算目标一次） */
+function wikiLinkCount(text: string): number {
+  return (text.match(/\[\[[^\]]+\]\]/g) ?? []).length;
+}
+
+/**
+ * 整篇重写的结构丢失检查：模型给的完整新正文有没有悄悄丢掉 frontmatter 键、
+ * 双链或大段内容。只报事实（缺了哪些键、少了几条链、缩了多少字），
+ * 由用户在提案卡上判断——不阻断应用，也不替用户决定。
+ */
+export function structureLossWarnings(oldText: string, newText: string): StructureWarning[] {
+  const out: StructureWarning[] = [];
+  if (!oldText.trim()) return out; // 新建笔记没有可比对的基线
+
+  const lostKeys = frontmatterKeys(oldText).filter((k) => !frontmatterKeys(newText).includes(k));
+  if (lostKeys.length) {
+    out.push({
+      kind: 'frontmatter',
+      detail: `frontmatter 少了 ${lostKeys.length} 个键：${lostKeys.join('、')}。`
+        + '（标签、章节、来源等信息会一起丢失，除非你确实想删掉它们。）',
+    });
+  }
+
+  const linksOld = wikiLinkCount(oldText);
+  const linksNew = wikiLinkCount(newText);
+  if (linksOld > 0 && linksNew < linksOld) {
+    out.push({
+      kind: 'links',
+      detail: `[[双链]] 从 ${linksOld} 条减到 ${linksNew} 条，少了 ${linksOld - linksNew} 条。`,
+    });
+  }
+
+  if (oldText.length > 400 && newText.length < oldText.length * 0.6) {
+    out.push({
+      kind: 'shrink',
+      detail: `正文从 ${oldText.length} 字缩到 ${newText.length} 字（少了 ${Math.round((1 - newText.length / oldText.length) * 100)}%）。`,
+    });
+  }
+  return out;
+}
+
 /** 逐字精确匹配的所有出现区间 */
 function exactOccurrences(text: string, anchor: string): AnchorHit[] {
   const hits: AnchorHit[] = [];

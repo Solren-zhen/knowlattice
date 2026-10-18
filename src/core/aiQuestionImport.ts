@@ -24,7 +24,19 @@
  */
 
 import type { QuizQuestion } from './qbank';
-import { nanoid } from 'nanoid';
+
+/**
+ * 题目 id：不引第三方依赖。此前用的 nanoid 并没有写进 package.json，只是被 vite/postcss
+ * 传递依赖提升到 node_modules 根，换包管理器或依赖树一变就会断——这里改用 Web Crypto，
+ * 任何上下文（含非安全上下文）都有，长度与既有 nanoid(10) 对齐，存量 id 不受影响。
+ */
+function newQuestionId(): string {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  let out = '';
+  for (const b of bytes) out += b.toString(36).padStart(2, '0');
+  return out.slice(0, 10);
+}
 
 export interface ParsedAiQuestion {
   stem: string;
@@ -199,7 +211,7 @@ export function convertToQuizQuestions(
   const { chapter, notePath } = options;
 
   return parsed.map((q) => {
-    const id = nanoid(10);
+    const id = newQuestionId();
     const type = q.options.length > 0 ? 'choice' : 'recall';
     const noteTitle = notePath ? extractNoteTitle(notePath) : undefined;
 

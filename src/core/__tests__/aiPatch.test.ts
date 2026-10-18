@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fuzzyFindAnchor, normalizeAnchor } from '../aiPatch';
+import { fuzzyFindAnchor, normalizeAnchor, structureLossWarnings } from '../aiPatch';
 
 describe('normalizeAnchor', () => {
   it('空白折叠 + 全角标点映射', () => {
@@ -11,6 +11,32 @@ describe('normalizeAnchor', () => {
 
   it('中文与字母数字原样保留', () => {
     expect(normalizeAnchor('心肌收缩泵血 P182')).toBe('心肌收缩泵血 P182');
+  });
+});
+
+describe('structureLossWarnings（整篇重写的结构丢失检查）', () => {
+  const oldNote = '---\ntags: [心脏]\nchapter: 循环\n---\n\n# 心脏\n- 定义: 泵血器官\n- 鉴别: [[肺]]\n';
+
+  it('丢掉 frontmatter 键、双链与大段正文时逐条报出', () => {
+    const w = structureLossWarnings(oldNote, '# 心脏\n泵血。\n');
+    const kinds = w.map((x) => x.kind);
+    expect(kinds).toContain('frontmatter');
+    expect(kinds).toContain('links');
+    expect(w.find((x) => x.kind === 'frontmatter')?.detail).toContain('tags、chapter');
+    expect(w.find((x) => x.kind === 'links')?.detail).toContain('从 1 条减到 0 条');
+  });
+
+  it('结构原样保留（只做增补）时没有提醒', () => {
+    const next = `${oldNote}\n- 口诀: 心房心室\n`;
+    expect(structureLossWarnings(oldNote, next)).toEqual([]);
+  });
+
+  it('新建笔记（旧正文为空）没有基线，不报结构丢失', () => {
+    expect(structureLossWarnings('', '# 新笔记\n')).toEqual([]);
+  });
+
+  it('短笔记缩水不算结构丢失（避免小改动被当成丢内容）', () => {
+    expect(structureLossWarnings('# 心脏\n泵血。\n', '# 心脏\n泵。\n').some((w) => w.kind === 'shrink')).toBe(false);
   });
 });
 

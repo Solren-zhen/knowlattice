@@ -175,7 +175,8 @@ export function parseCitations(answer: string): Citation[] {
   return out;
 }
 
-const RANK: Record<CiteStatus, number> = { exact: 3, partial: 2, fabricated: 1, not_found: 0 };
+/** 结论好坏排序：多处核验（笔记 / 教材）取最佳命中时用 */
+export const CITE_RANK: Record<CiteStatus, number> = { exact: 3, partial: 2, fabricated: 1, not_found: 0 };
 
 /**
  * 在一批笔记里核验一段引文，取最佳命中：给了 path 就只比那一篇，
@@ -192,7 +193,7 @@ export function lookupQuote(
     if (!p.endsWith('.md')) continue;
     if (path && p !== path) continue;
     const status = verifyQuote(quote, strippedSource(content));
-    if (RANK[status] > RANK[best]) { best = status; bestPath = p; }
+    if (CITE_RANK[status] > CITE_RANK[best]) { best = status; bestPath = p; }
   }
   return { status: best, sourcePath: bestPath };
 }
@@ -244,7 +245,7 @@ export function verifyCitations(answer: string, docs: Map<string, string>): Cita
       }
       const status = c.quote ? verifyQuote(c.quote, strippedSource(content)) : 'not_found';
       if (status === 'exact') hits++;
-      if (RANK[status] > RANK[best]) { best = status; bestPath = path; }
+      if (CITE_RANK[status] > CITE_RANK[best]) { best = status; bestPath = path; }
     }
     const result: CitationResult = { ...c, status: best, sourcePath: bestPath, hits, ambiguous: hits > 1 };
     bucket.set(citeKey(c), result);
