@@ -48,7 +48,6 @@ export default function Rail(p: Props) {
   const [hl, setHl] = useState<string>(currentHighlight);
   const [hlOpen, setHlOpen] = useState(false);
   const hlButtonRef = useRef<HTMLButtonElement>(null);
-  const hlName = HIGHLIGHT_PRESETS.find((preset) => preset.bg === hl)?.name;
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [isNarrow, setIsNarrow] = useState(() => window.matchMedia?.('(max-width: 1040px)').matches === true);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -123,95 +122,94 @@ export default function Rail(p: Props) {
           原来钉住 470px，滚动区只剩 154px，20 个入口里 11 个被塞进只能显示
           两行的小窗口；只钉底部三行后，同一窗口能看到 14 行。 */}
       <div className="rail-scroll">
-        <button className="rail-home" data-tip="回到主界面" aria-label="回到主界面" onClick={p.onHome}>
+        <button className="rail-home" aria-label="回到主界面" onClick={p.onHome}>
           <IconLogo /><span className="rail-label">知识首页</span>
         </button>
         <div className="rail-section-label" aria-hidden={!expanded}>工作区</div>
         <button
           className={`rail-btn ${p.treeOpen ? 'on' : ''}`}
-          data-tip="目录：折叠 / 展开章节树"
-          aria-label="目录"
+                   aria-label="目录"
           aria-pressed={p.treeOpen}
           onClick={p.onToggleTree}
         >
           <IconTree />
           <span className="rail-label">目录</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'search' ? ' on' : ''}`} aria-current={p.activeItem === 'search' ? 'page' : undefined} data-tip="快速搜索（Ctrl+K）" aria-label="搜索" onClick={p.onSearch}>
+        <button className={`rail-btn${p.activeItem === 'search' ? ' on' : ''}`} aria-current={p.activeItem === 'search' ? 'page' : undefined} aria-label="搜索" onClick={p.onSearch}>
           <IconSearch />
           <span className="rail-label">搜索</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'pdf' ? ' on' : ''}`} aria-current={p.activeItem === 'pdf' ? 'page' : undefined} data-tip="PDF 对照：左看右记 + 摘录历史" aria-label="PDF 对照" onClick={p.onPdf}>
+        <button className={`rail-btn${p.activeItem === 'pdf' ? ' on' : ''}`} aria-current={p.activeItem === 'pdf' ? 'page' : undefined} aria-label="PDF 对照" onClick={p.onPdf}>
           <IconBook />
           <span className="rail-label">PDF 对照</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'anatomy' ? ' on' : ''}`} aria-current={p.activeItem === 'anatomy' ? 'page' : undefined} data-tip="3D 解剖图谱：结构 ↔ 笔记双向打通" aria-label="解剖图谱" onClick={p.onAnatomy}>
+        <button className={`rail-btn${p.activeItem === 'anatomy' ? ' on' : ''}`} aria-current={p.activeItem === 'anatomy' ? 'page' : undefined} aria-label="解剖图谱" onClick={p.onAnatomy}>
           <IconBody />
           <span className="rail-label">解剖图谱</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'brain' ? ' on' : ''}`} aria-current={p.activeItem === 'brain' ? 'page' : undefined} data-tip="脑图谱：MNI152 模板 MRI 对照" aria-label="脑图谱" onClick={p.onBrain}>
+        <button className={`rail-btn${p.activeItem === 'brain' ? ' on' : ''}`} aria-current={p.activeItem === 'brain' ? 'page' : undefined} aria-label="脑图谱" onClick={p.onBrain}>
           <IconBrain />
           <span className="rail-label">脑图谱</span>
         </button>
-        <button className={`rail-btn rail-btn--graph${p.activeItem === 'graph' ? ' on' : ''}`} aria-current={p.activeItem === 'graph' ? 'page' : undefined} data-tip="知识图谱：全库双链网络图" aria-label="知识图谱" onClick={p.onGraph}>
+        <button className={`rail-btn rail-btn--graph${p.activeItem === 'graph' ? ' on' : ''}`} aria-current={p.activeItem === 'graph' ? 'page' : undefined} aria-label="知识图谱" onClick={p.onGraph}>
           <IconGraph />
           <span className="rail-label">知识图谱</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'pathway' ? ' on' : ''}`} aria-current={p.activeItem === 'pathway' ? 'page' : undefined} data-tip="医学通路：拖动节点绘制并复用通路图" aria-label="医学通路" onClick={() => p.onPathway?.()}>
+        <button className={`rail-btn${p.activeItem === 'pathway' ? ' on' : ''}`} aria-current={p.activeItem === 'pathway' ? 'page' : undefined} aria-label="医学通路" onClick={() => p.onPathway?.()}>
           <IconPathway />
           <span className="rail-label">医学通路</span>
         </button>
         <div className="rail-group-divider"><span>学习</span></div>
-        <button className={`rail-btn${p.activeItem === 'review' ? ' on' : ''}`} aria-current={p.activeItem === 'review' ? 'page' : undefined} data-tip="间隔复习（遗忘曲线）" aria-label="间隔复习" onClick={p.onReview}>
+        <button className={`rail-btn${p.activeItem === 'review' ? ' on' : ''}`} aria-current={p.activeItem === 'review' ? 'page' : undefined} aria-label="间隔复习" onClick={p.onReview}>
           <IconCards />
           <span className="rail-label">间隔复习</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'mistake' ? ' on' : ''}`} aria-current={p.activeItem === 'mistake' ? 'page' : undefined} data-tip="错题本（薄弱点热力图）" aria-label="错题本" onClick={p.onMistake}>
+        <button className={`rail-btn${p.activeItem === 'mistake' ? ' on' : ''}`} aria-current={p.activeItem === 'mistake' ? 'page' : undefined} aria-label="错题本" onClick={p.onMistake}>
           <IconTarget />
           <span className="rail-label">错题本</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'quiz' ? ' on' : ''}`} aria-current={p.activeItem === 'quiz' ? 'page' : undefined} data-tip="题库练习：导入 JSON 组卷" aria-label="题库练习" onClick={p.onQuiz}>
+        <button className={`rail-btn${p.activeItem === 'quiz' ? ' on' : ''}`} aria-current={p.activeItem === 'quiz' ? 'page' : undefined} aria-label="题库练习" onClick={p.onQuiz}>
           <IconQuiz />
           <span className="rail-label">题库练习</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'todo' ? ' on' : ''}`} aria-current={p.activeItem === 'todo' ? 'page' : undefined} data-tip="待办清单" aria-label="待办清单" onClick={p.onTodo}>
+        <button className={`rail-btn${p.activeItem === 'todo' ? ' on' : ''}`} aria-current={p.activeItem === 'todo' ? 'page' : undefined} aria-label="待办清单" onClick={p.onTodo}>
           <IconTodo />
           <span className="rail-label">待办清单</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'tag' ? ' on' : ''}`} aria-current={p.activeItem === 'tag' ? 'page' : undefined} data-tip="标签：按 #标签 聚合全库" aria-label="标签" onClick={p.onTag}>
+        <button className={`rail-btn${p.activeItem === 'tag' ? ' on' : ''}`} aria-current={p.activeItem === 'tag' ? 'page' : undefined} aria-label="标签" onClick={p.onTag}>
           <IconTag />
           <span className="rail-label">标签</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'dashboard' ? ' on' : ''}`} aria-current={p.activeItem === 'dashboard' ? 'page' : undefined} data-tip="学习统计：打卡 / 复习 / 错题" aria-label="学习统计" onClick={p.onDash}>
+        <button className={`rail-btn${p.activeItem === 'dashboard' ? ' on' : ''}`} aria-current={p.activeItem === 'dashboard' ? 'page' : undefined} aria-label="学习统计" onClick={p.onDash}>
           <IconChart />
           <span className="rail-label">学习统计</span>
         </button>
         <div className="rail-group-divider"><span>工具</span></div>
-        <button className={`rail-btn${p.activeItem === 'ai' ? ' on' : ''}`} aria-current={p.activeItem === 'ai' ? 'page' : undefined} data-tip="AI 问答：内嵌网页问答" aria-label="AI 问答" onClick={p.onAi}>
+        <button className={`rail-btn${p.activeItem === 'ai' ? ' on' : ''}`} aria-current={p.activeItem === 'ai' ? 'page' : undefined} aria-label="AI 问答" onClick={p.onAi}>
           <IconAi />
           <span className="rail-label">AI 问答</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'agent' ? ' on' : ''}`} aria-current={p.activeItem === 'agent' ? 'page' : undefined} data-tip="AI 笔记：对话式检索与修改笔记（先预览后写入）" aria-label="AI 笔记" onClick={p.onAgent}>
+        <button className={`rail-btn${p.activeItem === 'agent' ? ' on' : ''}`} aria-current={p.activeItem === 'agent' ? 'page' : undefined} aria-label="AI 笔记" onClick={p.onAgent}>
           <IconAgent />
           <span className="rail-label">AI 笔记</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'draft' ? ' on' : ''}`} aria-current={p.activeItem === 'draft' ? 'page' : undefined} data-tip="智能草稿：讲义 / PDF 一键成笔记" aria-label="智能草稿" onClick={p.onDraft}>
+        <button className={`rail-btn${p.activeItem === 'draft' ? ' on' : ''}`} aria-current={p.activeItem === 'draft' ? 'page' : undefined} aria-label="智能草稿" onClick={p.onDraft}>
           <IconWand />
           <span className="rail-label">智能草稿</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'history' ? ' on' : ''}`} aria-current={p.activeItem === 'history' ? 'page' : undefined} data-tip="历史版本：快照与误删找回" aria-label="历史版本" onClick={p.onHistory}>
+        <button className={`rail-btn${p.activeItem === 'history' ? ' on' : ''}`} aria-current={p.activeItem === 'history' ? 'page' : undefined} aria-label="历史版本" onClick={p.onHistory}>
           <IconHistory />
           <span className="rail-label">历史版本</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'import' ? ' on' : ''}`} aria-current={p.activeItem === 'import' ? 'page' : undefined} data-tip="导入：自动识别格式（笔记 / 题库 / Anki / 数据集 / Word·PDF），支持批量" aria-label="导入" onClick={p.onImport}>
+        <button className={`rail-btn${p.activeItem === 'import' ? ' on' : ''}`} aria-current={p.activeItem === 'import' ? 'page' : undefined} aria-label="导入" onClick={p.onImport}>
           <IconRestore />
           <span className="rail-label">导入</span>
         </button>
-        <button className={`rail-btn${p.activeItem === 'convert' ? ' on' : ''}`} aria-current={p.activeItem === 'convert' ? 'page' : undefined} data-tip="格式转换：PDF / Word → Markdown" aria-label="格式转换" onClick={p.onConvert}>
+        <button className={`rail-btn${p.activeItem === 'convert' ? ' on' : ''}`} aria-current={p.activeItem === 'convert' ? 'page' : undefined} aria-label="格式转换" onClick={p.onConvert}>
           <IconConvert />
           <span className="rail-label">格式转换</span>
         </button>
-        <button className="rail-btn" data-tip="关于、隐私与第三方许可" aria-label="关于与许可" onClick={p.onNotice}>
+        <button className="rail-btn" aria-label="关于与许可" onClick={p.onNotice}>
           <IconInfo />
           <span className="rail-label">关于与许可</span>
         </button>
@@ -221,7 +219,6 @@ export default function Rail(p: Props) {
         <button
           ref={fontButtonRef}
           className={`rail-btn rail-font-btn ${fontOpen ? 'on' : ''}`}
-          data-tip={`切换字体（当前：${FONT_LABELS[font]}）`}
           aria-label="切换字体"
           aria-expanded={fontOpen}
           aria-controls="rail-font-options"
@@ -265,7 +262,6 @@ export default function Rail(p: Props) {
         <button
           ref={hlButtonRef}
           className={`rail-btn ${hlOpen ? 'on' : ''}`}
-          data-tip={`切换高亮色（当前：${hlName ?? '自定义'}）`}
           aria-label="切换高亮色"
           aria-expanded={hlOpen}
           aria-controls="rail-highlight-options"
@@ -322,7 +318,6 @@ export default function Rail(p: Props) {
       </div>
       <button
         className="rail-btn"
-        data-tip={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
         aria-label="切换主题"
         aria-pressed={theme === 'dark'}
         onClick={(event) => {

@@ -6473,13 +6473,6 @@ html.no-morph ::view-transition-new(root) { animation: none !important; }
 .dash-ach-track > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 .dash-ach-near { margin: 8px 0 0; font-size: var(--fs-caption); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .dash-ach-near-chip { padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
-/* 「未记录」：该成就没有数据源，明确标出来而不是给一根永远停在 0 的进度条 */
-.dash-ach-untracked {
-  display: block; margin-top: 3px;
-  font-size: var(--fs-micro); font-style: italic;
-  opacity: 0.8;
-}
-.dash-ach-note { margin: 8px 0 0; font-size: var(--fs-micro); line-height: 1.6; opacity: 0.85; }
 /* 减少动态效果：成就格子的过渡是纯颜色/透明度，保留；只压掉新解锁的辉光脉冲 */
 @media (prefers-reduced-motion: reduce) {
   .dash-ach-item.fresh { box-shadow: 0 0 0 1px var(--accent); }

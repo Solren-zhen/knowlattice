@@ -12,13 +12,12 @@ describe('achievementSystem', () => {
     totalDays: 30,
     totalNotes: 50,
     totalCards: 100,
+    masteredCards: 80,
+    perfectCards: 30,
     reviewCount: 150,
-    reviewAccuracy: 0.88,
     totalQuizzes: 120,
     quizAccuracy: 0.75,
-    perfectCards: 30,
     maxDailyMinutes: 200,
-    mistakesCorrected: 25,
   };
 
   describe('checkAchievements', () => {
@@ -142,30 +141,19 @@ describe('achievementSystem', () => {
       expect(quizzes1000?.unlocked).toBe(true);
     });
 
-    it('复习正确率成就（需满足最小样本量）', () => {
-      const insufficientStats: LearningStats = {
-        ...mockStats,
-        reviewAccuracy: 0.95,
-        reviewCount: 30, // 不足 50 次
-      };
-
+    it('卡片掌握度成就：100 张进入复习态', () => {
+      const insufficientStats: LearningStats = { ...mockStats, masteredCards: 99 };
       const result1 = checkAchievements(insufficientStats);
-      const accuracy90_1 = result1.achievements.find(
-        (a) => a.id === 'review-accuracy-90'
-      );
-      expect(accuracy90_1?.unlocked).toBe(false); // 样本量不足
+      expect(result1.achievements.find((a) => a.id === 'review-mastery-100')?.unlocked).toBe(false);
+      // 进度可用于界面上的进度条
+      expect(result1.achievements.find((a) => a.id === 'review-mastery-100')?.progress).toEqual({
+        current: 99,
+        target: 100,
+      });
 
-      const sufficientStats: LearningStats = {
-        ...mockStats,
-        reviewAccuracy: 0.92,
-        reviewCount: 100, // 满足 50 次
-      };
-
+      const sufficientStats: LearningStats = { ...mockStats, masteredCards: 100 };
       const result2 = checkAchievements(sufficientStats);
-      const accuracy90_2 = result2.achievements.find(
-        (a) => a.id === 'review-accuracy-90'
-      );
-      expect(accuracy90_2?.unlocked).toBe(true); // 样本量足够且正确率达标
+      expect(result2.achievements.find((a) => a.id === 'review-mastery-100')?.unlocked).toBe(true);
     });
 
     it('做题正确率成就', () => {
@@ -197,18 +185,23 @@ describe('achievementSystem', () => {
       expect(perfectCards50?.unlocked).toBe(true);
     });
 
-    it('错题改正成就', () => {
-      const stats: LearningStats = {
+    it('答题宗师成就（需满足最小样本量）', () => {
+      // 正确率够高但题量不足 100 → 不解锁
+      const insufficientStats: LearningStats = {
         ...mockStats,
-        mistakesCorrected: 50,
+        quizAccuracy: 0.95,
+        totalQuizzes: 30,
       };
+      const result1 = checkAchievements(insufficientStats);
+      expect(result1.achievements.find((a) => a.id === 'quiz-mastery-90')?.unlocked).toBe(false);
 
-      const result = checkAchievements(stats);
-
-      const mistakesCorrected = result.achievements.find(
-        (a) => a.id === 'mistakes-corrected-50'
-      );
-      expect(mistakesCorrected?.unlocked).toBe(true);
+      const sufficientStats: LearningStats = {
+        ...mockStats,
+        quizAccuracy: 0.95,
+        totalQuizzes: 150,
+      };
+      const result2 = checkAchievements(sufficientStats);
+      expect(result2.achievements.find((a) => a.id === 'quiz-mastery-90')?.unlocked).toBe(true);
     });
 
     it('单日学习时长成就', () => {
@@ -380,13 +373,12 @@ describe('achievementSystem', () => {
         totalDays: 0,
         totalNotes: 0,
         totalCards: 0,
+        masteredCards: 0,
+        perfectCards: 0,
         reviewCount: 0,
-        reviewAccuracy: 0,
         totalQuizzes: 0,
         quizAccuracy: 0,
-        perfectCards: 0,
         maxDailyMinutes: 0,
-        mistakesCorrected: 0,
       };
 
       const result = checkAchievements(zeroStats);
@@ -401,20 +393,19 @@ describe('achievementSystem', () => {
         totalDays: 500,
         totalNotes: 1000,
         totalCards: 5000,
+        masteredCards: 4000,
+        perfectCards: 500,
         reviewCount: 10000,
-        reviewAccuracy: 0.99,
         totalQuizzes: 5000,
         quizAccuracy: 0.95,
-        perfectCards: 500,
         maxDailyMinutes: 600,
-        mistakesCorrected: 500,
       };
 
       const result = checkAchievements(extremeStats);
 
-      // 应该解锁所有可评估的成就
-      const unlocked = result.achievements.filter((a) => a.unlocked);
-      expect(unlocked.length).toBeGreaterThan(10);
+      // 所有 21 个成就都应可评估且全部解锁（没有「永远解不开」的成就）
+      expect(result.achievements).toHaveLength(21);
+      expect(result.achievements.filter((a) => a.unlocked)).toHaveLength(21);
     });
 
     it('处理空的已解锁列表', () => {

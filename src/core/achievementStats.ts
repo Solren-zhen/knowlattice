@@ -9,43 +9,39 @@
  *
  * | 字段 | 来源 | 口径 |
  * |---|---|---|
- * | streakDays | `core/stats.streak()` | 连续打卡天数（今天没学则从昨天起算）—— **精确** |
- * | totalDays | `core/stats.studyDays().length` | 有学习记录的天数 —— **精确** |
- * | totalNotes | 传入的笔记路径 | `.md` 篇数 —— **精确** |
- * | totalCards | `srsStats(buildCards(...)).total` | 卡片总数（一篇笔记按小节切多张）—— **精确** |
- * | reviewCount | `core/srs.loadCards()` | 所有卡片 `reps` 之和 = 累计复习次数 —— **精确** |
+ * | streakDays | `core/stats.streak()` | 连续打卡天数（今天没学则从昨天起算） |
+ * | totalDays | `core/stats.studyDays().length` | 有学习记录的天数 |
+ * | totalNotes | 传入的笔记路径 | `.md` 篇数 |
+ * | totalCards | `srsStats(buildCards(...)).total` | 卡片总数（一篇笔记按小节切多张） |
+ * | masteredCards | `core/srs.loadCards()` | `state === 2` 的卡片数（ts-fsrs 的「复习态」） |
+ * | perfectCards | 同上 | `reps === 1 && state === 2`：第一次复习就进入复习态 |
+ * | reviewCount | 同上 | 所有卡片 `reps` 之和 = 累计复习次数 |
  * | totalQuizzes | `core/qbankStats.loadStats()` | 有逐题记录的**不同题目数**（与 `chapterMastery` 的 `seen` 同口径）。
  * |              |          | 用「不同题目」而不是「答题次数」：反复答同一道题不该算 100 道 |
  * | quizAccuracy | 同上 | `(做过 - 错过的) / 做过`，**按题目统计**而不是按章节 ——
  * |              |          | 一道题可能同时属于多章，按章节会把同一道题重复计数 |
  * | maxDailyMinutes | `core/pomodoro.loadRecords()` | 按天汇总番茄钟分钟数后取最大值。口径是**计划时长**
- * |                 |          | 而非墙钟时间（见 pomodoro.ts 顶部注释，暂停不计入）—— 数值本身精确 |
- * | reviewAccuracy | — | **无数据源**，恒为 0。见下 |
- * | perfectCards | — | **无数据源**，恒为 0。见下 |
- * | mistakesCorrected | — | **无数据源**，恒为 0。见下 |
+ * |                 |          | 而非墙钟时间（见 pomodoro.ts 顶部注释，暂停不计入）；数值本身精确 |
  *
- * ## 那三个字段为什么给 0（实测结论，别急着「补一个代理」）
+ * ## 为什么 `perfectCards` 用「首次评 easy」这个口径
  *
- * 一开始我打算用两个代理顶上，写完之后实测 ts-fsrs 的真实演进，两个都不成立：
+ * 实测 ts-fsrs 的毕业行为（`applyReview`，默认参数）：
+ *   首次 **again / hard / good** → `state = 1`（Learning），`reps = 1`
+ *   首次 **easy**               → `state = 2`（Review）， `reps = 1`
+ * 所以 `reps === 1 && state === 2` 精确等价于「第一次复习就评了『容易』」，
+ * 也就是「一次通过」。旧定义写的是「评分 5」—— 本应用的评分档位是 1–4，根本没有 5 分。
  *
- * - **reviewAccuracy**：本想用 `1 - Σlapses / Σreps`。但实测 `lapses` **只在卡片处于
- *   Review 态（state=2）被评 Again 时才 +1**；学习态里的 Again 完全不记。一条
- *   「答错 → 普通练习答对 → 错题重练答对 → 再答错」的序列里，`lapses` 前三步一直是 0。
- *   拿它当分母算出的正确率会**系统性偏乐观**（50 次全评 Again 也可能显示 100%），
- *   而 `review-accuracy-90` 正是「≥90% 且至少 50 次」—— 偏乐观会让它轻易解锁。
- *   复习的每次评分没有落盘（`core/srs.ts` 只存调度状态，不存评分流水），所以没有别的源。
- * - **perfectCards**（成就原文「一次通过且评分 5」）：没有评分流水。而且这个应用的评分档位是
- *   ts-fsrs 的 **1–4**（Again/Hard/Good/Easy），**根本没有 5 分** —— 成就定义本身与应用的
- *   评分刻度对不上，不只是缺数据。
- * - **mistakesCorrected**：本想用 `lapses > 0 && wrong === 0`（曾经错过、现已消灭）。
- *   实测：错题重练答对时 `wrong` 被**减到 0**（见 `qbankStats.recordAnswer` 的 relearn 分支），
- *   而 `lapses` 仍是 0 —— **痕迹被抹掉了**，无法区分「从没错过」和「错过又改好了」。
- *   要记录它必须给 QStat 增加一个只增不减的计数器，而 QStat 是定长数组存储
- *   （`T` 字段表 + `LEN = 11`，改它要同时改 toTuple/fromTuple 并处理旧数据），
- *   那是存储格式变更，不是本次该顺手做的事。
+ * ## 历史：曾有 4 个成就永远解不开
  *
- * 所以这三个字段一律给 0，并在界面上**显式标注「未记录」**（见 `UNSOURCED_ACHIEVEMENT_IDS`），
- * 而不是画一根永远走不完的进度条。将来补上记录口径时，改这里 + 从那个集合里删掉即可。
+ * 原先的「记忆精准」（复习正确率 ≥90%）、「完美主义者」（一次通过且评分 5）、
+ * 「知错能改」（改正 50 个错题）、「周末战士」都没有数据源：
+ * - 复习的每次评分**没有落盘**（`core/srs.ts` 只存调度状态，不存评分流水），
+ *   所以算不出复习正确率；`lapses` 也不行 —— 它只在 Review 态评 Again 时才 +1；
+ * - 「评分 5」在本应用 1–4 的刻度里不存在；
+ * - 错题重练答对时 `wrong` 被**减到 0**，痕迹被抹掉，无法区分「从没错过」和「错过又改好」；
+ * - 「周末战士」在 `evaluateAchievement` 里是写死的 `unlocked: false`。
+ * 这 4 个已改成用现有数据可测的口径（见 achievementSystem 的成就定义），
+ * 所以本模块不再需要「无数据源」的标记。
  */
 
 import type { LearningStats } from './achievementSystem';
@@ -62,17 +58,8 @@ export interface StatsInput {
   docs: Map<string, string>;
 }
 
-/**
- * 依赖「没有数据源」的那三个字段的成就 id。
- *
- * 界面据此把它们标成「未记录」而不是给进度条 —— 否则用户会看到一根永远停在 0 的条，
- * 或者更糟：一个靠偏乐观口径轻易解锁的成就。将来补上口径时从这里删掉对应 id。
- */
-export const UNSOURCED_ACHIEVEMENT_IDS: ReadonlySet<string> = new Set([
-  'review-accuracy-90', // 复习正确率：没有评分流水
-  'perfect-cards-50', // 完美卡片：没有评分流水，且「评分 5」在本应用不存在
-  'mistakes-corrected-50', // 改正错题：wrong 减到 0 后痕迹被抹掉
-]);
+/** ts-fsrs 的 State.Review：卡片已从学习队列毕业，进入长期复习 */
+const SRS_STATE_REVIEW = 2;
 
 /**
  * 汇总一份成就系统用的学习统计。
@@ -91,11 +78,19 @@ export async function collectLearningStats({ paths, docs }: StatsInput): Promise
   // 先把逐题记录的缓存填好，再同步取用（其余来源本身就是同步的 localStorage）
   await initializeStats();
 
-  // ---- 复习（SRS 卡片）：只有「复习过几次」是可得的 ----
+  // ---- 复习（SRS 卡片）----
   const cards = loadCards();
   let reviewCount = 0;
+  let masteredCards = 0;
+  let perfectCards = 0;
   for (const card of Object.values(cards)) {
-    reviewCount += card.reps ?? 0;
+    const reps = card.reps ?? 0;
+    reviewCount += reps;
+    if (card.state === SRS_STATE_REVIEW) {
+      masteredCards++;
+      // 只复习过一次就进入复习态 = 首次评了「容易」
+      if (reps === 1) perfectCards++;
+    }
   }
 
   // ---- 答题（逐题记录）----
@@ -122,13 +117,11 @@ export async function collectLearningStats({ paths, docs }: StatsInput): Promise
     totalDays: studyDays().length,
     totalNotes: mdPaths.length,
     totalCards: srsStats(buildCards(mdPaths, docs)).total,
+    masteredCards,
+    perfectCards,
     reviewCount,
     totalQuizzes: attempted,
     quizAccuracy,
     maxDailyMinutes,
-    // 以下三个没有数据源，恒为 0；理由见文件头。界面会把它们标成「未记录」。
-    reviewAccuracy: 0,
-    perfectCards: 0,
-    mistakesCorrected: 0,
   };
 }

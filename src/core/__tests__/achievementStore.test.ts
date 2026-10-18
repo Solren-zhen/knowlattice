@@ -19,13 +19,12 @@ const zero: LearningStats = {
   totalDays: 0,
   totalNotes: 0,
   totalCards: 0,
+  masteredCards: 0,
+  perfectCards: 0,
   reviewCount: 0,
-  reviewAccuracy: 0,
   totalQuizzes: 0,
   quizAccuracy: 0,
-  perfectCards: 0,
   maxDailyMinutes: 0,
-  mistakesCorrected: 0,
 };
 
 describe('syncAchievements', () => {

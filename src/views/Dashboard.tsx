@@ -20,7 +20,7 @@ import { streak, last7 } from '../core/stats';
 import { seedDemo } from '../core/demo';
 import { loadReminder, notifySupport, requestNotifyPermission, saveReminder, type NotifySupport, type ReminderConfig } from '../core/reminder';
 import { MAX_DAILY_CAP, daysUntilExam, loadPlan, savePlan, type ReviewPlan } from '../core/reviewPlan';
-import { collectLearningStats, UNSOURCED_ACHIEVEMENT_IDS } from '../core/achievementStats';
+import { collectLearningStats } from '../core/achievementStats';
 import { syncAchievements, type AchievementState } from '../core/achievementStore';
 import { IconChart, IconClose } from './icons';
 import DialogSurface from './DialogSurface';
@@ -269,8 +269,6 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
             )}
             <div className="dash-ach-grid" role="list">
               {ach.achievements.map((a) => {
-                // 没有数据源的成就：不给进度条（那会是一根永远停在 0 的条），标「未记录」
-                const untracked = !a.unlocked && UNSOURCED_ACHIEVEMENT_IDS.has(a.id);
                 const pct = a.progress
                   ? Math.min(100, Math.round((a.progress.current / a.progress.target) * 100))
                   : 0;
@@ -282,25 +280,19 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
                     aria-label={`${a.name}：${
                       a.unlocked
                         ? '已解锁'
-                        : untracked
-                          ? '未记录（暂时没有数据源）'
-                          : a.progress
-                            ? `进度 ${a.progress.current}/${a.progress.target}`
-                            : '未解锁'
+                        : a.progress
+                          ? `进度 ${a.progress.current}/${a.progress.target}`
+                          : '未解锁'
                     }`}
-                    title={untracked ? `${a.requirement}（${a.tier} 级）· 暂时没有数据源` : `${a.requirement}（${a.tier} 级）`}
+                    title={`${a.requirement}（${a.tier} 级）`}
                   >
                     <span className="dash-ach-icon" aria-hidden="true">{a.icon}</span>
                     <span className="dash-ach-name">{a.name}</span>
                     <span className="dash-ach-desc muted">{a.description}</span>
-                    {untracked ? (
-                      <span className="dash-ach-untracked muted">未记录</span>
-                    ) : (
-                      !a.unlocked && a.progress && (
-                        <span className="dash-ach-track" aria-hidden="true">
-                          <i style={{ width: `${pct}%` }} />
-                        </span>
-                      )
+                    {!a.unlocked && a.progress && (
+                      <span className="dash-ach-track" aria-hidden="true">
+                        <i style={{ width: `${pct}%` }} />
+                      </span>
                     )}
                   </div>
                 );
@@ -314,12 +306,6 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
                     {a.icon} {a.name} · {a.progress!.current}/{a.progress!.target}
                   </span>
                 ))}
-              </p>
-            )}
-            {ach.achievements.some((a) => !a.unlocked && UNSOURCED_ACHIEVEMENT_IDS.has(a.id)) && (
-              <p className="dash-ach-note muted">
-                标「未记录」的成就暂时拿不到数据：复习的每次评分、以及错题的改正次数目前没有落盘。
-                不是没达到，是没记录 —— 补上记录口径后它们才会开始计数。
               </p>
             )}
           </section>

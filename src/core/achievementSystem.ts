@@ -46,20 +46,18 @@ export interface LearningStats {
   totalNotes: number;
   /** 总复习卡片数 */
   totalCards: number;
-  /** 复习次数 */
+  /** 已进入复习态的卡片数（ts-fsrs state = 2） */
+  masteredCards: number;
+  /** 第一次复习就进入复习态的卡片数（reps = 1 且 state = 2，即首次评「容易」） */
+  perfectCards: number;
+  /** 复习次数（所有卡片 reps 之和） */
   reviewCount: number;
-  /** 复习正确率 */
-  reviewAccuracy: number;
-  /** 总做题数 */
+  /** 总做题数（做过的不同题目数） */
   totalQuizzes: number;
   /** 做题正确率 */
   quizAccuracy: number;
-  /** 完美答对的卡片数（一次通过且评分 5） */
-  perfectCards: number;
   /** 单日最多学习分钟数 */
   maxDailyMinutes: number;
-  /** 错题改正数 */
-  mistakesCorrected: number;
 }
 
 /**
@@ -255,13 +253,13 @@ function defineAchievements(): Achievement[] {
 
     // ===== 掌握度成就 =====
     {
-      id: 'review-accuracy-90',
-      name: '记忆精准',
-      description: '复习正确率达到 90%',
+      id: 'review-mastery-100',
+      name: '过目成诵',
+      description: '100 张卡片进入复习态',
       type: 'mastery',
       tier: 3,
       icon: '🎖️',
-      requirement: '复习正确率 ≥ 90%（至少 50 次复习）',
+      requirement: '100 张卡片已进入复习态',
       unlocked: false,
     },
     {
@@ -277,21 +275,21 @@ function defineAchievements(): Achievement[] {
     {
       id: 'perfect-cards-50',
       name: '完美主义者',
-      description: '50 张卡片一次完美通过',
+      description: '50 张卡片第一次复习就进入复习态',
       type: 'mastery',
       tier: 3,
       icon: '💯',
-      requirement: '50 张卡片首次复习即满分',
+      requirement: '50 张卡片首次复习即评「容易」',
       unlocked: false,
     },
     {
-      id: 'mistakes-corrected-50',
-      name: '知错能改',
-      description: '改正 50 个错误',
+      id: 'quiz-mastery-90',
+      name: '答题宗师',
+      description: '做题正确率达到 90%',
       type: 'mastery',
-      tier: 2,
-      icon: '✅',
-      requirement: '改正 50 个错题',
+      tier: 3,
+      icon: '🥇',
+      requirement: '做题正确率 ≥ 90%（至少 100 道题）',
       unlocked: false,
     },
 
@@ -319,13 +317,13 @@ function defineAchievements(): Achievement[] {
 
     // ===== 挑战成就 =====
     {
-      id: 'challenge-weekend',
-      name: '周末战士',
-      description: '周末两天各学习 2 小时以上',
-      type: 'challenge',
+      id: 'cards-200',
+      name: '积少成多',
+      description: '卡片总数达到 200 张',
+      type: 'milestone',
       tier: 2,
-      icon: '🎮',
-      requirement: '周末连续学习',
+      icon: '🗂️',
+      requirement: '总卡片数达到 200 张',
       unlocked: false,
     },
     {
@@ -384,19 +382,14 @@ function evaluateAchievement(
       return evaluate(stats.totalQuizzes, 1000);
 
     // 掌握度
-    case 'review-accuracy-90':
-      return evaluateWithMinimum(
-        stats.reviewAccuracy,
-        0.9,
-        stats.reviewCount,
-        50
-      );
+    case 'review-mastery-100':
+      return evaluate(stats.masteredCards, 100);
     case 'quiz-accuracy-80':
       return evaluateWithMinimum(stats.quizAccuracy, 0.8, stats.totalQuizzes, 100);
+    case 'quiz-mastery-90':
+      return evaluateWithMinimum(stats.quizAccuracy, 0.9, stats.totalQuizzes, 100);
     case 'perfect-cards-50':
       return evaluate(stats.perfectCards, 50);
-    case 'mistakes-corrected-50':
-      return evaluate(stats.mistakesCorrected, 50);
 
     // 速度
     case 'daily-3hours':
@@ -404,9 +397,9 @@ function evaluateAchievement(
     case 'daily-5hours':
       return evaluate(stats.maxDailyMinutes, 300);
 
-    // 挑战成就（暂时简化评估）
-    case 'challenge-weekend':
-      return { unlocked: false }; // 需要额外的周末数据
+    // 挑战成就
+    case 'cards-200':
+      return evaluate(stats.totalCards, 200);
     case 'challenge-all-round':
       return {
         unlocked:

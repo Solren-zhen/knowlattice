@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetQbankStorageForTests } from '../../storage/qbank';
 import { recordAnswer, resetQbankStatsForTests } from '../qbankStats';
-import { collectLearningStats, UNSOURCED_ACHIEVEMENT_IDS } from '../achievementStats';
+import { collectLearningStats } from '../achievementStats';
 
 /**
  * 成就统计的来源汇总：每个字段都要能从对应的存储里读出来，口径与 achievementStats 顶部
@@ -33,14 +33,14 @@ function localDay(offset = 0): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** 一张 ts-fsrs 卡：给 srs.loadCards() 会校验的字段，加上统计要用的 reps / lapses */
-const card = (reps: number, lapses: number) => ({
+/** 一张 ts-fsrs 卡：给 srs.loadCards() 会校验的字段。state 默认 2 = 复习态 */
+const card = (reps: number, state = 2) => ({
   due: 0,
   stability: 1,
   difficulty: 3,
-  state: 2,
+  state,
   reps,
-  lapses,
+  lapses: 0,
 });
 
 const seedDays = (m: Record<string, number>) => localStorage.setItem(DAYS_KEY, JSON.stringify(m));
@@ -63,13 +63,12 @@ describe('collectLearningStats', () => {
       totalDays: 0,
       totalNotes: 0,
       totalCards: 0,
+      masteredCards: 0,
+      perfectCards: 0,
       reviewCount: 0,
       totalQuizzes: 0,
       quizAccuracy: 0,
       maxDailyMinutes: 0,
-      reviewAccuracy: 0,
-      perfectCards: 0,
-      mistakesCorrected: 0,
     });
   });
 
@@ -91,10 +90,17 @@ describe('collectLearningStats', () => {
     expect(s.totalCards).toBeGreaterThan(0);
   });
 
-  it('复习：次数取所有卡片的 reps 之和', async () => {
-    seedSrs({ a: card(3, 1), b: card(1, 0), c: card(1, 1), d: card(5, 0) });
+  it('复习：次数取所有卡片的 reps 之和；掌握态与「首次 easy」分开计', async () => {
+    seedSrs({
+      a: card(3), // 复习 3 次，已在复习态 → 掌握，但不是「首次通过」
+      b: card(1), // 只复习 1 次就进入复习态 → 掌握 + 完美
+      c: card(1, 1), // 只复习 1 次但还停在 Learning → 都算不上
+      d: card(5), // 复习 5 次，掌握
+    });
     const s = await collectLearningStats({ paths: [], docs: noDocs });
     expect(s.reviewCount).toBe(10); // 3+1+1+5
+    expect(s.masteredCards).toBe(3); // a / b / d
+    expect(s.perfectCards).toBe(1); // 只有 b
   });
 
   it('答题：做题数按「不同题目」计，正确率按题目而非章节', async () => {
@@ -127,23 +133,30 @@ describe('collectLearningStats', () => {
     expect(s.maxDailyMinutes).toBe(60); // 昨天 60 > 今天 50
   });
 
-  it('三个没有数据源的字段恒为 0，且被列进 UNSOURCED_ACHIEVEMENT_IDS', async () => {
-    // 即便把存储塞满，这三个字段也不该凭代理口径「猜」出数字来。
-    // 详见 achievementStats 文件头：lapses 只在 Review 态评 Again 时才加，
-    // wrong 被错题重练减到 0 后痕迹即消失，评分流水根本没有落盘。
-    seedSrs({ a: card(3, 1), b: card(1, 0) });
-    seedPomo([pomo('p1', localDay(0), 25)]);
-    await recordAnswer('内科', 'q1', false);
-    await recordAnswer('内科', 'q1', true, Date.now(), true); // 错题重练答对
+  it('每个字段都有真实来源，21 个成就全部可评估', async () => {
+    // 塞满四类存储，确认没有字段被写死成 0
+    seedDays({ [localDay(0)]: 3, [localDay(-1)]: 2, [localDay(-2)]: 1 });
+    seedSrs({ a: card(3), b: card(1), c: card(2, 1) });
+    seedPomo([pomo('p1', localDay(0), 25), pomo('p2', localDay(-1), 60)]);
+    await recordAnswer('内科', 'q1', true);
+    await recordAnswer('内科', 'q2', false);
 
-    const s = await collectLearningStats({ paths: [], docs: noDocs });
-    expect(s.reviewAccuracy).toBe(0);
-    expect(s.perfectCards).toBe(0);
-    expect(s.mistakesCorrected).toBe(0);
-    expect([...UNSOURCED_ACHIEVEMENT_IDS].sort()).toEqual([
-      'mistakes-corrected-50',
-      'perfect-cards-50',
-      'review-accuracy-90',
-    ]);
+    const docs = new Map([['n.md', '# 标题\n\n正文']]);
+    const s = await collectLearningStats({ paths: [...docs.keys()], docs });
+
+    expect(s.streakDays).toBe(3);
+    expect(s.totalDays).toBe(3);
+    expect(s.totalNotes).toBe(1);
+    expect(s.totalCards).toBeGreaterThan(0);
+    expect(s.masteredCards).toBe(2); // a / b
+    expect(s.perfectCards).toBe(1); // 只有 b
+    expect(s.reviewCount).toBe(6); // 3+1+2
+    expect(s.totalQuizzes).toBe(2);
+    expect(s.quizAccuracy).toBe(0.5);
+    expect(s.maxDailyMinutes).toBe(60);
+
+    // 没有任何字段是「恒为 0 的占位」
+    expect(Object.values(s).every((v) => typeof v === 'number')).toBe(true);
+    expect(Object.values(s).filter((v) => v === 0)).toHaveLength(0);
   });
 });
