@@ -275,7 +275,10 @@ async function setup() {
     onOpenPath: vi.fn(),
     onClose: vi.fn(),
   }));
-  await screen.findByRole('button', { name: '组题' });
+  // 题库行操作默认折叠：先摊开第一行的操作面板
+  const toggle = await screen.findByRole('button', { name: /^操作：/ }, { timeout: 5000 });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+  await screen.findByRole('button', { name: '组题' }, { timeout: 5000 });
   fireEvent.click(screen.getByRole('button', { name: '导入题库' }));
   return rendered;
 }

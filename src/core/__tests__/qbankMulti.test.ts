@@ -81,6 +81,16 @@ describe('多选（X 型）解析', () => {
     expect(isCorrectPick(q, [])).toBe(false);
   });
 
+  it('全角答案字母（Word/微信粘出来的「Ｂ」「ＡＣ」）照样认得', () => {
+    // 只认半角时这些答案会变成 answer = -1，那题永远判错且导入时一声不响
+    expect(first({ answer: 'Ｂ' }).answer).toBe(1);
+    expect(first({ answers: 'ＡＣ' }).answers).toEqual([0, 2]);
+    expect(first({ answers: 'Ａ、Ｃ' }).answers).toEqual([0, 2]);
+    // 选项写成「Ａ．甲」时，答案给全角字母也要落到第 0 项
+    const q = normalizeQuestions([{ stem: '题干？', options: ['Ａ．甲', '乙'], answer: 'Ａ' }])[0];
+    expect(q.answer).toBe(0);
+  });
+
   it('越界与重复下标被丢掉/去重', () => {
     const q = first({ answers: [0, 0, 9] });
     expect(correctIndices(q)).toEqual([0]);

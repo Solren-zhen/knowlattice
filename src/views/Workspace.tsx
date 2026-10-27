@@ -9,13 +9,20 @@ import { noteTemplate, parseFrontmatterCached, type NoteType } from '../core/par
 import { appendExcerpt } from '../core/noteGen';
 import { loadCards, noteStatus, srsStats } from '../core/srs';
 import { parseOutline, splitHeadingAnchor, headingLineByAnchor } from '../core/outline';
+import { splitBlockTarget } from '../core/blockAnchor';
 import { isImagePath } from '../core/imageRef';
+import { imageEntries } from '../core/imageLib';
 import OutlinePanel from './OutlinePanel';
+// 题目批注条：题库里写的选项批注，落到对应章节笔记上显示（见 core/qbankAnnotations.ts）
+import ChapterAnnotations from './ChapterAnnotations';
 // 音频条 + 字幕轨：打开笔记就可能用到，依赖很小（core/subtitle + icons），不单独拆 chunk
 import MediaTrack from './MediaTrack';
+import VideoNoteView from './VideoNoteView';
+import { mediaKeyOf, parseVideoSource, withStart } from '../core/videoSource';
 import { buildCards } from '../core/srsCards';
 import { getMistake, loadMistakes, reasonCounts } from '../core/mistakes';
 import { loadBanks } from '../core/qbank';
+import { loadCursor } from '../core/quizCursor';
 import { loadStats } from '../core/qbankStats';
 import { calibrationSummary } from '../core/qbankCalib';
 // 学习报告聚合是纯函数（core/studyReport）：数据由调用方喂，模块自己不读存储，见其文件头
@@ -45,6 +52,7 @@ import { daysUntilExam, loadPlan } from '../core/reviewPlan';
 import { loadReminder, markFired, reminderBody, sendSystemNotify, shouldFire } from '../core/reminder';
 import ChapterTree from './ChapterTree';
 import Preview from './Preview';
+import HomeView from './HomeView';
 import { useEsc } from './useEsc';
 // 编辑器（CodeMirror ~400KB）与其余弹层视图全部懒加载：首屏只加载目录 + 预览，
 // 打开笔记/对应功能时才下载各自 chunk
@@ -58,6 +66,7 @@ import AnatomyNoteCard from './AnatomyNoteCard';
 // 3D 视图懒加载：three.js（~1MB）拆成独立 chunk，打开解剖图谱时才加载
 const AnatomyViewer3D = lazy(() => import('./AnatomyViewer3D'));
 const BrainAtlasView = lazy(() => import('./BrainAtlasView'));
+const MedRefView = lazy(() => import('./MedRefView'));
 // 思维导图懒加载（mind-elixir 依赖较大，打开时才加载）
 const MindMapView = lazy(() => import('./MindMapView'));
 // 重依赖视图懒加载：force-graph / mammoth+xlsx / react-pdf-viewer+pdfjs 都很大，按需加载
@@ -67,6 +76,8 @@ const ExamCenter = lazy(() => import('./ExamCenter'));
 const PdfSplitView = lazy(() => import('./PdfSplitView'));
 // 格式转换懒加载：mammoth + turndown + pdfjs 都较大，打开面板时才加载
 const ConvertView = lazy(() => import('./ConvertView'));
+// 图片库：轻量（只有一个面板），但也保持与其他面板一致的懒加载口径
+const ImageLibrary = lazy(() => import('./ImageLibrary'));
 // 统一导入面板：懒加载（内部按需引入 mammoth / SheetJS / jszip 等重依赖）
 const ImportView = lazy(() => import('./ImportView'));
 // 历史版本面板：快照读取/恢复
@@ -81,16 +92,84 @@ import SafetyNotice from './SafetyNotice';
 // 学习报告面板：小面板（无重依赖），与 Dashboard / SafetyNotice 一样直接静态引入
 import StudyReportPanel from './StudyReportPanel';
 import MedicalPathwayBuilder from './MedicalPathwayBuilder';
+// 命令面板与生词本都是轻量面板（无重依赖），静态引入：Ctrl+Shift+P 要零延迟
+import CommandPalette, { type PaletteCommand } from './CommandPalette';
+import VocabView from './VocabView';
 import {
   IconSave, IconTrash, IconChevron, IconBack, IconFwd, IconSearch,
   IconFolder, IconLink, IconClose, IconPlay, IconChart, IconImage,
 } from './icons';
 import Rail from './Rail';
+import { RAIL_INDEX, RAIL_PRIMARY_KEYS, type RailKey } from './railCatalog';
+import SettingsPanel from './SettingsPanel';
+import { useDockSplit, type DockSplit } from './useDockSplit';
+import { usePanelDrag } from './usePanelDrag';
+import { useDeckSplit } from './useDeckSplit';
 import { clickable } from './a11y';
 import { toast, confirmBox } from '../core/feedback';
+import { printMarkdown } from '../core/printDoc';
 import { morphFrom, MORPH } from '../core/viewMorph';
 
 const RECENTS_KEY = 'knowlattice-recents';
+const RECENT_FEATURES_KEY = 'knowlattice-recent-features';
+/** 首页「最近使用」最多露几处：一排 4 列 × 2 行，再多就退回功能地图了 */
+const RECENT_FEATURES_MAX = 8;
+
+/** 读回最近使用的去处。功能改名/下架后残留的键按 RAIL_INDEX 过滤，坏 JSON 当空表 */
+function loadRecentFeatures(): RailKey[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(RECENT_FEATURES_KEY) ?? '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((key): key is RailKey => typeof key === 'string' && key in RAIL_INDEX)
+      .slice(0, RECENT_FEATURES_MAX);
+  } catch {
+    return [];
+  }
+}
+
+/** 命令面板的动作清单：顺序就是面板里的默认顺序（重要的先露脸）。
+ *  只放「打开某个面板」这类无需参数的动作——需要选中内容才能执行的动作进编辑器右键菜单。 */
+function PALETTE_COMMANDS(a: Record<
+  'search' | 'importOpen' | 'quiz' | 'exam' | 'review' | 'mistakes' | 'dashboard' | 'tags'
+  | 'todos' | 'mind' | 'graph' | 'brain' | 'anatomy' | 'medref' | 'pdf' | 'convert' | 'vocab' | 'notice'
+  | 'save' | 'backup' | 'video' | 'split' | 'images' | 'print'
+  | 'pathway' | 'history' | 'ai' | 'agent' | 'draft',
+  () => void
+>): PaletteCommand[] {
+  return [
+    { id: 'search', title: '搜索笔记 / 全文', group: '笔记', aliases: ['查找', 'search', 'ctrl+k'], run: a.search },
+    { id: 'save', title: '保存当前笔记', group: '笔记', aliases: ['save', '存盘', 'ctrl+s'], run: a.save },
+    { id: 'print', title: '打印当前笔记 / 存为 PDF', group: '笔记', aliases: ['print', '打印', 'pdf', '导出'], run: a.print },
+    { id: 'backup', title: '备份到 .json（整包）', group: '工具', aliases: ['backup', '导出备份', '换设备'], run: a.backup },
+    { id: 'import', title: '导入（统一入口）', group: '工具', aliases: ['import', '导入内容包', '备份'], run: a.importOpen },
+    { id: 'quiz', title: '题库练习', group: '题库', aliases: ['刷题', 'quiz'], run: a.quiz },
+    { id: 'exam', title: '模拟考试', group: '题库', aliases: ['exam', '考试'], run: a.exam },
+    { id: 'mistakes', title: '错题本', group: '题库', aliases: ['错题', 'wrong'], run: a.mistakes },
+    { id: 'review', title: '间隔复习', group: '题库', aliases: ['复习', 'srs', 'memory'], run: a.review },
+    { id: 'vocab', title: '生词本', group: '题库', aliases: ['单词', 'vocab', '术语'], run: a.vocab },
+    { id: 'dashboard', title: '学习报告', group: '面板', aliases: ['统计', '仪表盘', 'dashboard'], run: a.dashboard },
+    { id: 'tags', title: '标签浏览', group: '面板', aliases: ['tag'], run: a.tags },
+    { id: 'todos', title: '待办', group: '面板', aliases: ['todo', '任务'], run: a.todos },
+    { id: 'mind', title: '思维导图', group: '资料', aliases: ['mindmap', '脑图'], run: a.mind },
+    { id: 'graph', title: '知识图谱', group: '资料', aliases: ['graph', '关系图'], run: a.graph },
+    { id: 'brain', title: '脑图谱', group: '资料', aliases: ['brain', '神经'], run: a.brain },
+    { id: 'anatomy', title: '3D 解剖', group: '资料', aliases: ['anatomy', '解剖'], run: a.anatomy },
+    { id: 'medref', title: '医学速查', group: '资料', aliases: ['medref', '速查', '术语', '症状', '口诀'], run: a.medref },
+    { id: 'images', title: '图片库（附件里的图片）', group: '资料', aliases: ['image', '图片', '插图', '附件'], run: a.images },
+    { id: 'video', title: '视频笔记（时间点 / 复读 / 收藏）', group: '工具', aliases: ['video', '视频', '时间点', '锚点', '复读'], run: a.video },
+    { id: 'split', title: '右侧分屏：编辑与预览并排', group: '面板', aliases: ['split', '分屏', '对照', '预览'], run: a.split },
+    { id: 'pdf', title: 'PDF 拆分', group: '工具', aliases: ['pdf', '拆分'], run: a.pdf },
+    { id: 'convert', title: '格式转换', group: '工具', aliases: ['convert', 'docx', 'xlsx'], run: a.convert },
+    { id: 'pathway', title: '医学通路', group: '资料', aliases: ['pathway', '通路', '机制'], run: a.pathway },
+    { id: 'history', title: '历史版本', group: '笔记', aliases: ['history', '版本', '回溯'], run: a.history },
+    { id: 'ai', title: 'AI 问答', group: '工具', aliases: ['ai', '问答'], run: a.ai },
+    { id: 'agent', title: 'AI 笔记', group: '工具', aliases: ['agent', '笔记助手'], run: a.agent },
+    { id: 'draft', title: '智能草稿', group: '工具', aliases: ['draft', '草稿', '续写'], run: a.draft },
+    { id: 'notice', title: '安全与隐私说明', group: '工具', aliases: ['notice', '隐私'], run: a.notice },
+  ];
+}
+
 
 /** 字幕复习卡落进当前笔记的小节标题：`## 字幕复习卡` 就是一张卡，卡键 = `<笔记路径>#字幕复习卡`
  *  （core/srsCards 的规则）——所以「写一个小节」等于自动进复习队列/统计/Anki 导出，不需要
@@ -108,6 +187,29 @@ function loadRecents(): string[] {
   }
 }
 
+/**
+ * 整栏的分隔条：两块同开时夹在视频与 AI 笔记之间（上下拖 = 两块按总高互换），
+ * 只开一块时贴在该块的上沿（上下拖 = 直接改这一块的高度）。方向由 useDockSplit 按实际位置量。
+ */
+function DockSplitHandle({ dockSplit }: { dockSplit: DockSplit }) {
+  return (
+    <div
+      className="dock-col__split"
+      role="separator"
+      aria-orientation="horizontal"
+      tabIndex={0}
+      aria-label="上下拖动调整高度（方向键微调，双击复位）"
+      title="上下拖动调整高度；双击复位"
+      onPointerDown={dockSplit.onSplitDown}
+      onPointerMove={dockSplit.onMove}
+      onPointerUp={dockSplit.onUp}
+      onPointerCancel={dockSplit.onUp}
+      onKeyDown={dockSplit.onKeyDown('h')}
+      onDoubleClick={dockSplit.reset}
+    />
+  );
+}
+
 export default function Workspace() {
   const vault = useVault();
   const [draft, setDraft] = useState<string | null>(null); // 编辑中内容（未保存）
@@ -115,6 +217,10 @@ export default function Workspace() {
   const [showBacklinks, setShowBacklinks] = useState(() => window.matchMedia?.('(max-width: 980px)').matches !== true);
   const [mindOpen, setMindOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  // 命令面板（Ctrl+Shift+P）与生词本面板
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [vocabOpen, setVocabOpen] = useState(false);
+  const [medRefOpen, setMedRefOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [mistakeOpen, setMistakeOpen] = useState(false);
   const [anatomyOpen, setAnatomyOpen] = useState(false);
@@ -140,7 +246,118 @@ export default function Workspace() {
   const [convertOpen, setConvertOpen] = useState(false);
   /** 统一导入面板：自动识别格式 + 批量 */
   const [importOpen, setImportOpen] = useState(false);
+  /** 图片库（附件图片的统一入口，笔记目录里那一行点开就是它） */
+  const [imageLibOpen, setImageLibOpen] = useState(false);
+  /** 设置：字体 / 主题 / 高亮 / 备份 / 导入 / 工具 / 关于（原来这些占着导航轨） */
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pathwayOpen, setPathwayOpen] = useState(false);
+  /** 视频笔记：src 是 blob:/http(s) 地址，media 是片段归属标识（附件路径或直链） */
+  const [videoOpen, setVideoOpen] = useState(false);
+  /**
+   * 「视频是被 AI 问答面板临时挤掉的」标记：AI 问答（.ai-panel）与这一栏都贴右边缘，
+   * 同时开会完全重叠，所以打开它就先把视频收起；但它一关（含切到 AI 笔记）要原样还回来——
+   * 否则用户从「AI 助手 → 笔记助手」进来，视频窗口就永久消失了（用户实测反馈）。
+   */
+  const videoHiddenByAi = useRef(false);
+  /** 视频 + AI 笔记共用一栏的尺寸：整栏宽度 & 视频那块的高度（见 useDockSplit） */
+  const dockSplit = useDockSplit();
+  /** 整栏可移动：拖视频标题栏挪位置（位置持久化，双击标题栏复位） */
+  const dockDrag = usePanelDrag('dock-col');
+  /** 工作区三列宽度：目录 / 编辑 / 关联（见 useDeckSplit，宽度持久化） */
+  const deckSplit = useDeckSplit();
+  // 稳定引用：usePanelDrag 的 reset 是 useCallback，不会每帧换
+  const resetDockPos = dockDrag.reset;
+  /**
+   * 存下来的位移可能来自更宽的窗口、或更早一次拖动：首帧若整栏几乎跑出视口就复位。
+   * 否则会出现「面板贴在编辑区中间、又找不到抓手」的状态（用户实测反馈过）。
+   */
+  useEffect(() => {
+    if (!videoOpen && !agentOpen) return;
+    const el = document.querySelector<HTMLElement>('.dock-col');
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const outside = r.right < 80 || r.left > window.innerWidth - 80
+      || r.bottom < 80 || r.top > window.innerHeight - 80;
+    if (outside) resetDockPos();
+  }, [videoOpen, agentOpen, resetDockPos]);
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [videoMedia, setVideoMedia] = useState('');
+  const [videoTitle, setVideoTitle] = useState('');
+  const [videoSeek, setVideoSeek] = useState<number | null>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  /** 外部来源（B站/抖音/网盘）的原始页地址，锚点靠它在浏览器里定位 */
+  const videoPageRef = useRef<string | null>(null);
+  /**
+   * 当前 blob 地址。必须自己记账：`URL.createObjectURL` 的句柄不会随 state 消失而回收，
+   * 一个视频几十到几百 MB。之前只在「再选一个本地文件」时释放上一个，
+   * 选完本地文件再粘一个 B 站链接就把旧的漏掉了（那条路径直接 setVideoSrc 覆盖）。
+   */
+  const videoBlobRef = useRef<string | null>(null);
+  const releaseVideoBlob = useCallback(() => {
+    const prev = videoBlobRef.current;
+    videoBlobRef.current = null;
+    if (prev) URL.revokeObjectURL(prev);
+  }, []);
+  // 卸载时收尾（整库重载 / 关窗）：留着也没人再读它了
+  useEffect(() => () => releaseVideoBlob(), [releaseVideoBlob]);
+
+  /**
+   * 打开视频面板。给了 file 就换成 blob 地址（本地文件不走网络）；
+   * 不给则只把面板叫出来，让用户点「换视频」。
+   */
+  const openVideo = (file?: File) => {
+    if (file) {
+      releaseVideoBlob();
+      const url = URL.createObjectURL(file);
+      videoBlobRef.current = url;
+      setVideoSrc(url);
+      videoPageRef.current = null;
+      // 片段归属键：浏览器 file API 拿不到真实路径，只用文件名会让两个目录下同名、
+      // 内容不同的视频共用同一份片段清单（点进去跳到另一个视频）。
+      // 加上大小与修改时间后碰撞概率接近零，同一次选同一个文件仍然稳定。
+      setVideoMedia(`${file.name}|${file.size}|${file.lastModified}`);
+      setVideoTitle(file.name);
+      setVideoSeek(null);
+    }
+    setVideoOpen(true);
+  };
+
+  /**
+   * 打开一个视频链接（B站 / 抖音 / 网盘 / 直链）。识别结果决定面板怎么放它：
+   * 能内嵌的给播放器，不能的把原页地址记下来（锚点靠它开浏览器定位）。
+   */
+  const openVideoUrl = (url: string) => {
+    const source = parseVideoSource(url);
+    videoPageRef.current = source.pageUrl;
+    releaseVideoBlob();
+    setVideoSrc(source.playUrl ?? source.pageUrl ?? url);
+    setVideoMedia(mediaKeyOf(source, url));
+    setVideoTitle(source.title);
+    setVideoSeek(null);
+    setVideoOpen(true);
+    if (source.note) toast(source.note, 'info', 6000);
+  };
+
+  /**
+   * 点笔记里的锚点：能读进度的直接跳；B站在面板里重载 iframe；抖音/网盘开浏览器定位。
+   * 什么都没选中时只把面板叫出来——此时点锚点不该悄悄开一个新标签页。
+   */
+  const jumpVideoAnchor = (seconds: number): boolean => {
+    const source = parseVideoSource(videoSrc ?? '');
+    if (videoSrc && (source.seekable || source.kind === 'bilibili')) {
+      setVideoSeek(seconds);
+      setVideoOpen(true);
+      return true;
+    }
+    const page = videoPageRef.current ?? source.pageUrl;
+    if (page) {
+      window.open(withStart(page, seconds), '_blank', 'noopener');
+      return true;
+    }
+    openVideo();
+    toast('已打开视频面板（锚点 ' + seconds + ' 秒）：先选视频或粘贴链接', 'info', 5200);
+    return true;
+  };
   /** 编辑器注册的「在光标处插入 Markdown」句柄（医学通路插入与「插入图片」共用；
    *  插入时会自动补前后空行，见 Editor 里注册的那段） */
   const editorInsertRef = useRef<((markdown: string) => void) | null>(null);
@@ -150,6 +367,20 @@ export default function Workspace() {
   const [noticeOpen, setNoticeOpen] = useState(false);
   /** 目录卡片显隐（导航轨「目录」按钮切换，窄屏可收起给正文让位） */
   const [treeOpen, setTreeOpen] = useState(() => window.matchMedia?.('(max-width: 700px)').matches !== true);
+  /**
+   * 目录卡片「收起成窄条」：与 treeOpen 是两件事——treeOpen 是整张卡片在不在，
+   * 这个是卡片在、但只留一条 44px 宽的边（点一下展开）。收起时宽度只改 --tree-w，
+   * 首页/正文的让位偏移与所有断点规则都跟着那一个变量走，不需要另写一套。
+   */
+  const [treeCollapsed, setTreeCollapsed] = useState(() => {
+    try { return localStorage.getItem('knowlattice.tree.collapsed') === '1'; } catch { return false; }
+  });
+  const setTreeCollapsedPersist = useCallback((v: boolean) => {
+    setTreeCollapsed(v);
+    try { localStorage.setItem('knowlattice.tree.collapsed', v ? '1' : '0'); } catch { /* 隐私模式：本次会话内仍生效 */ }
+  }, []);
+  /** 首页「新建笔记」快捷入口的触发信号：自增一次，目录卡片里的新建表单打开一次 */
+  const [newNoteSignal, setNewNoteSignal] = useState(0);
   const [anatomyManifest, setAnatomyManifest] = useState<AnatomyManifest | null>(null);
   const [anatomySelected, setAnatomySelected] = useState<ManifestOrgan | null>(null);
   /** 结构笔记卡片：点击点（视口坐标；null = 从列表选中 → 停靠）+ 本次选择是否已被手动关掉 */
@@ -196,6 +427,48 @@ export default function Workspace() {
   const editRef = useRef({ vault, draft, dirty, recents });
   editRef.current = { vault, draft, dirty, recents };
 
+  /**
+   * 打印当前笔记（在系统对话框里选「另存为 PDF」就是导出）。
+   * 走 editRef 而不是闭包里的 vault/draft：Ctrl+P 的监听只挂一次，
+   * 用闭包会一直打印「注册监听那一刻的那篇笔记」。
+   */
+  const printCurrentNote = useCallback(() => {
+    const { vault: v, draft: d } = editRef.current;
+    if (!v.currentPath || d === null) {
+      toast('先打开一篇笔记，再点打印', 'info', 4000);
+      return;
+    }
+    const name = v.currentPath.replace(/^.*\//, '').replace(/\.md$/i, '');
+    // 图片是 vault 相对路径，打印用的 iframe 没有基址 → 先换成可显示地址
+    void printMarkdown(name, d, { resolveImage: (src) => v.readFile(src) }).then((ok) => {
+      if (!ok) toast('这个环境不支持打印：请用桌面版，或允许浏览器打印', 'err', 6000);
+    });
+  }, []);
+
+  /**
+   * 把一道题写成笔记：建在「题库笔记/<题库>/」下。
+   * 同名不是覆盖而是另存带时间的副本——那篇很可能是用户已经改过的，
+   * 静默覆盖等于把笔记正文扔掉，是这里唯一不可逆的操作。
+   */
+  const saveQuestionNote = useCallback(async (path: string, markdown: string) => {
+    const v = editRef.current.vault;
+    const cut = path.lastIndexOf('/');
+    const dir = cut > 0 ? path.slice(0, cut) : '';
+    const title = path.slice(cut + 1).replace(/.md$/i, '');
+    const stamp = new Date().toISOString().slice(5, 16).replace(/[:T]/g, '-');
+    try {
+      const made = await v.createNote(dir, title, markdown);
+      toast(`已写成笔记：${made}`, 'ok', 4000);
+    } catch {
+      try {
+        const made = await v.createNote(dir, `${title} ${stamp}`, markdown);
+        toast(`同名笔记已存在，另存为：${made}`, 'ok', 5000);
+      } catch (e2) {
+        toast(`写成笔记失败：${(e2 as Error).message}`, 'err', 6000);
+      }
+    }
+  }, []);
+
   // Ctrl+K 全局唤起快速搜索
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -206,10 +479,21 @@ export default function Workspace() {
         e.preventDefault();
         setSearchOpen(true);
       }
+      // Ctrl+Shift+P 命令面板：功能越堆越多以后，靠记按钮位置找功能比记一个名字更难
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+      // Ctrl+P 打印：不接管的话浏览器会去打整个应用界面（深色面板 + 侧栏按钮），
+      // 那不是用户想印的东西。这里改成打当前这篇笔记。
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        printCurrentNote();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [printCurrentNote]);
 
   // 废弃的旧行内格式键位（Ctrl/⌘+B 加粗、+I 斜体、+H 高亮）在应用层统一消费，不产生任何副作用。
   // 键位本身已搬到 Alt 系（见 core/mdFormat.ts）；这里兜的是「没人管」的后果：Chrome 会拿
@@ -386,12 +670,15 @@ export default function Workspace() {
    *  `[[笔记#小节]]` 还能定位：先按目标打开笔记，等大纲就绪后跳到那一节（见 pendingAnchor）。 */
   const handleOpenLink = useCallback(
     async (name: string) => {
-      const { target, anchor } = splitHeadingAnchor(name);
+      // 块引用 ：名字部分查笔记，id 部分交给 pendingBlock 去编辑器里定位那一行
+      const { name: blockName, block } = splitBlockTarget(name);
+      const { target, anchor } = splitHeadingAnchor(blockName);
       const resolved = vault.resolveLink(target);
       if (resolved) {
         openNote(resolved);
+        if (block) setPendingBlock({ path: resolved, block });
         // 锚点统一交给 pendingAnchor：同一篇笔记时它下一帧就跳，跨笔记时等目标笔记的大纲就绪再跳
-        if (anchor) setPendingAnchor({ path: resolved, anchor });
+        else if (anchor) setPendingAnchor({ path: resolved, anchor });
         return;
       }
       if (await confirmBox({
@@ -435,6 +722,9 @@ export default function Workspace() {
    * 同名附件自动让位（`图.png` → `图-1.png`），不静默覆盖用户已有的图；
    * 避开换成任何后缀都不撞名的极端情况时宁可报错，也不回退成覆盖。
    */
+  /** 附件里的图片条目：笔记目录的计数与图片库共用同一份，避免两处各算一遍 */
+  const attachmentImages = useMemo(() => imageEntries(vault.attachmentPaths), [vault.attachmentPaths]);
+
   const insertImages = useCallback(async (files: File[]) => {
     if (!vault.currentPath) { toast('请先打开一篇笔记，再插入图片', 'info'); return; }
     // 编辑器未就绪就整批不做：落盘后却插不进正文，等于凭空多出几张没人引用的附件。
@@ -716,6 +1006,165 @@ export default function Workspace() {
     [pdfOpen, notePaths, vault.structureDocs]
   );
   const noteCount = notePaths.length;
+
+  /* ── 首页的数据 ────────────────────────────────────────────────────────────
+   * 首页只在「没有打开笔记」时出现，此时不在打字路径上：
+   *   - 最近 3 篇直接从 vault.docs 取，过滤掉已删除的路径；
+   *   - 到期卡数只在这一屏算一次（buildCards 要全库切卡，不能跟着每次按键跑）；
+   *   - 错题数直接读 localStorage：同屏没有编辑器，不存在「每键一次」的问题。
+   */
+  const homeRecents = useMemo(
+    () => recents
+      .filter((path) => vault.docs.has(path))
+      .slice(0, 3)
+      .map((path) => {
+        const { title } = parseFrontmatterCached(path, vault.docs.get(path) ?? '');
+        return { path, title: title || path.replace(/\.md$/, '').split('/').pop() || path };
+      }),
+    [recents, vault.docs],
+  );
+  const homeDueCount = useMemo(
+    () => (vault.currentPath ? 0 : srsStats(buildCards(notePaths, vault.docs)).dueNow),
+    [vault.currentPath, notePaths, vault.docs],
+  );
+  const homeMistakeCount = vault.currentPath ? 0 : Object.keys(loadMistakes()).length;
+  /** 首页「最近使用」：读回即初值；写入在 touchFeature */
+  const [recentFeatures, setRecentFeatures] = useState<RailKey[]>(loadRecentFeatures);
+  /** 首页「继续刷题」刚点的标记：传给 QuizView 让它挂载后自动接上一轮，处理完自己清掉 */
+  const [quizAutoResume, setQuizAutoResume] = useState(false);
+
+  /** 去处表：键与 Rail 的 RailKey 一一对应，漏一个会编译失败。
+   *  导航轨与首页「最近使用」共用这一张表——同一个开关只写一遍，也只有这一个记录点。 */
+  const openFeature: Record<RailKey, () => void> = {
+    // 从「收起成窄条」状态重新打开时顺手展开整张卡片：否则点了「目录」只看到一条边
+    tree: () => { setPathwayOpen(false); if (!treeOpen) setTreeCollapsedPersist(false); setTreeOpen((v) => !v); },
+    search: () => setSearchOpen(true),
+    quiz: () => setQuizOpen(true),
+    review: () => setReviewOpen(true),
+    mistakes: () => setMistakeOpen(true),
+    report: () => setDashOpen(true),
+    todos: () => setTodoOpen(true),
+    // 视频笔记是浮层而非全屏面板：轨上当开关用，再点一次收起。
+    // 关掉 AI 问答面板：两者都锚在右侧（.ai-panel 与 .dock-col），同时打开会完全重叠。
+    // 用户自己开关视频时清掉「被 AI 临时收起」的标记：之后关掉 AI 面板不该再替他打开。
+    video: () => { videoHiddenByAi.current = false; setVideoOpen((v) => !v); setAiOpen(false); },
+    graph: () => setGraphOpen(true),
+    anatomy: () => void openAnatomy(),
+    brain: () => setBrainOpen(true),
+    mind: () => setMindOpen(true),
+    // 轨上是开关：再点一次收起。从首页点开时它本来就收着，效果等于打开
+    pathway: () => setPathwayOpen((v) => !v),
+    tags: () => setTagOpen(true),
+    medref: () => setMedRefOpen(true),
+    import: () => setImportOpen(true),
+    pdf: () => setPdfOpen(true),
+    convert: () => setConvertOpen(true),
+    history: () => setHistoryOpen(true),
+    notice: () => setNoticeOpen(true),
+    ai: () => {
+      if (aiOpen || agentOpen || draftOpen) { setAiOpen(false); setAgentOpen(false); setDraftOpen(false); return; }
+      setAiOpen(true);
+      // AI 问答与「视频 + AI 笔记」栏都锚在右侧，同时打开会互相遮挡。
+      // 只临时收起视频并记下，面板关闭/切到 AI 笔记时由下面的 effect 原样还回来。
+      if (videoOpen) { videoHiddenByAi.current = true; setVideoOpen(false); }
+    },
+    settings: () => setSettingsOpen(true),
+  };
+
+  /** AI 问答面板关掉（包括切到「AI 笔记」）后，把被它临时收起的视频窗口原样还回来 */
+  useEffect(() => {
+    if (aiOpen || !videoHiddenByAi.current) return;
+    videoHiddenByAi.current = false;
+    setVideoOpen(true);
+  }, [aiOpen]);
+
+  /** 记一次使用（LRU，最多 8 条）。第一项就是它时不写盘——避免每次点同一个按钮都落一次 localStorage */
+  const touchFeature = useCallback((key: RailKey) => {
+    setRecentFeatures((prev) => {
+      if (prev[0] === key) return prev;
+      const next = [key, ...prev.filter((k) => k !== key)].slice(0, RECENT_FEATURES_MAX);
+      try { localStorage.setItem(RECENT_FEATURES_KEY, JSON.stringify(next)); } catch { /* 配额满：本次会话内仍然可用 */ }
+      return next;
+    });
+  }, []);
+
+  /**
+   * 全屏面板的关闭器。
+   *
+   * 每个面板自己渲染一层 position:fixed inset:0 的遮罩（.panel-backdrop、解剖/脑图谱、通路构建器），
+   * 同一时刻只该存在一个。两个同时打开时后渲染的盖住先渲染的，关掉上面那个才会露出下面那个——
+   * 用户看到的是「点了新功能没反应」，或者「关掉题库，冒出个错题本」。
+   * 所以进入一个面板前先把其余的关掉：这条规则只写在这里，不在二十来个入口里各记一遍。
+   *
+   * 不在表里的是能与内容共存的：目录侧栏（tree）、右侧 AI 浮层（ai/agent/draft）、视频小窗。
+   */
+  const modalClosers: Record<string, () => void> = {
+    search: () => setSearchOpen(false),
+    quiz: () => setQuizOpen(false),
+    exam: () => { setExamOpen(false); setExamBank(undefined); },
+    review: () => setReviewOpen(false),
+    mistakes: () => setMistakeOpen(false),
+    todos: () => setTodoOpen(false),
+    graph: () => setGraphOpen(false),
+    mind: () => setMindOpen(false),
+    tags: () => setTagOpen(false),
+    medref: () => setMedRefOpen(false),
+    import: () => setImportOpen(false),
+    pdf: () => setPdfOpen(false),
+    convert: () => setConvertOpen(false),
+    history: () => setHistoryOpen(false),
+    notice: () => setNoticeOpen(false),
+    settings: () => setSettingsOpen(false),
+    dash: () => setDashOpen(false),
+    report: () => setReportOpen(false),
+    vocab: () => setVocabOpen(false),
+    imageLib: () => setImageLibOpen(false),
+    brain: () => setBrainOpen(false),
+    anatomy: () => setAnatomyOpen(false),
+    pathway: () => setPathwayOpen(false),
+    palette: () => setPaletteOpen(false),
+  };
+
+  /** 关掉除 keep 以外的全部全屏面板（值本来就是 false 时 setState 自己跳过，不会有额外渲染） */
+  const closeModals = (keep: string) => {
+    for (const [key, close] of Object.entries(modalClosers)) if (key !== keep) close();
+  };
+
+  /** 导轨入口 → 它打开的全屏面板。tree / ai 不在表里：目录侧栏与右侧浮层要能跟内容共存 */
+  const RAIL_MODAL: Partial<Record<RailKey, string>> = {
+    search: 'search', quiz: 'quiz', review: 'review', mistakes: 'mistakes', report: 'dash',
+    todos: 'todos', graph: 'graph', anatomy: 'anatomy', brain: 'brain', mind: 'mind',
+    tags: 'tags', medref: 'medref', import: 'import', pdf: 'pdf', convert: 'convert',
+    history: 'history', notice: 'notice', settings: 'settings', pathway: 'pathway',
+  };
+
+  const railActions = {} as Record<RailKey, () => void>;
+  for (const key of Object.keys(openFeature) as RailKey[]) {
+    railActions[key] = () => {
+      touchFeature(key);
+      const modal = RAIL_MODAL[key];
+      if (modal) closeModals(modal);
+      openFeature[key]();
+    };
+  }
+
+  /** 首页那一排：最近用过的去处；一条记录都没有时退回轨上的 8 个常驻项。
+   *  已下架的轨道项（思维导图、PDF 拆分）在 RAIL_INDEX 里没有条目，这里直接跳过，
+   *  而不是让首页为一条历史记录崩掉。 */
+  const homeFeatures = (recentFeatures.length > 0 ? recentFeatures : RAIL_PRIMARY_KEYS)
+    .flatMap((key) => {
+      const entry = RAIL_INDEX[key];
+      return entry ? [{ key, label: entry.label, icon: entry.icon }] : [];
+    });
+  /**
+   * 首页「继续刷题」要显示的那一轮。只在欢迎页现读：编辑器每敲一个字都会重渲染，
+   * 那里没必要碰 localStorage；而首页每次渲染都读一遍，练完/续完回来自然就没有了，
+   * 不用再去同步一份状态。
+   */
+  const homeCursor = vault.currentPath ? null : loadCursor();
+  const homeQuizResume = homeCursor
+    ? { bank: homeCursor.bank, position: homeCursor.idx + 1, total: homeCursor.qids.length }
+    : null;
   /** 现存路径集合（历史面板判断「已删除」快照用；memoized 防止面板 effect 重载） */
   const existingPathSet = useMemo(() => new Set(notePaths), [notePaths]);
   const wordCount = useMemo(
@@ -746,6 +1195,20 @@ export default function Workspace() {
     if (line !== null) outlineJumpRef.current?.(line);
     setPendingAnchor(null);
   }, [pendingAnchor, activePath, outline]);
+
+  /** `[[笔记#^id]]` 待跳的块：等目标笔记的草稿就绪后，在编辑器里定位到含 `^id` 的那一行。
+   *  不做块级索引：块 id 就写在行尾，扫一遍草稿比维护一份索引更不容易和正文脱节。 */
+  const [pendingBlock, setPendingBlock] = useState<{ path: string; block: string } | null>(null);
+  /** 右侧分屏：同一篇笔记的编辑与预览并排（Obsidian 的「源码 + 预览」对照） */
+  const [splitPreview, setSplitPreview] = useState(false);
+  useEffect(() => {
+    if (!pendingBlock) return;
+    if (pendingBlock.path !== activePath || !draft) return;
+    const idx = draft.split('\n').findIndex((l) => new RegExp(`\\^${pendingBlock.block}\\s*$`).test(l));
+    if (idx >= 0) outlineJumpRef.current?.(idx);
+    else toast(`这段内容里没找到块 ^${pendingBlock.block}（可能已被改写）`, 'info');
+    setPendingBlock(null);
+  }, [pendingBlock, activePath, draft]);
 
   /* ── 笔记级音频 + 字幕（I1）────────────────────────────────────────────
    * 放在这里而不是文件顶部：要用到 activePath（上面）与 readFile（上面的 `const readFile = vault.readFile`），又必须在下两处
@@ -1054,59 +1517,85 @@ export default function Workspace() {
         ? '到期待复习'
         : `${activeCard.reps} 次 · 下次 ${new Date(activeCard.due).toLocaleDateString('zh-CN')}`) + activeSections
     : null;
-  const activeRailItem = pathwayOpen ? 'pathway'
-    : searchOpen ? 'search'
-    : pdfOpen ? 'pdf'
-      : anatomyOpen ? 'anatomy'
-        : brainOpen ? 'brain'
-          : graphOpen ? 'graph'
-            : reviewOpen ? 'review'
-              : mistakeOpen ? 'mistake'
-                : quizOpen ? 'quiz'
-                  : todoOpen ? 'todo'
-                    : tagOpen ? 'tag'
-                      : dashOpen ? 'dashboard'
-                        : aiOpen ? 'ai'
-                          : agentOpen ? 'agent'
-                            : draftOpen ? 'draft'
-                              : historyOpen ? 'history'
-                                : convertOpen ? 'convert'
-                                  : importOpen ? 'import'
-                                    : null;
+  /** 轨上高亮哪一处：按「谁盖在上面」排优先级，前一个开着就标前一个。
+   *  写成表而不是 19 层三元链——再加一个去处只是加一行。 */
+  const railOrder: Array<[RailKey, boolean]> = [
+    ['pathway', pathwayOpen], ['search', searchOpen], ['pdf', pdfOpen], ['anatomy', anatomyOpen],
+    ['brain', brainOpen], ['graph', graphOpen], ['review', reviewOpen], ['mistakes', mistakeOpen],
+    ['quiz', quizOpen], ['todos', todoOpen], ['tags', tagOpen], ['report', dashOpen],
+    ['ai', aiOpen || agentOpen || draftOpen], ['history', historyOpen], ['convert', convertOpen],
+    ['video', videoOpen],
+    ['import', importOpen], ['mind', mindOpen], ['medref', medRefOpen], ['notice', noticeOpen],
+  ];
+  const activeRailItem = railOrder.find(([, open]) => open)?.[0] ?? null;
 
   // 右侧 AI 面板打开时把主区挤窄，避免面板压住笔记（见 index.css 的 .app.ai-open / .agent-open）。
   // 面板自身是 position: fixed，不受这里的 padding 影响，只是把左侧内容让出等宽空间。
   const sidePanelClass = agentOpen ? ' agent-open' : aiOpen ? ' ai-open' : '';
 
+  // 命令面板只是快捷键层：每个功能都有自己的常驻入口（导航轨 / 笔记工具条 / 设置），
+  // 面板不承担「唯一入口」的职责，否则不知道快捷键的人永远找不到功能。
+  // 与导轨同一口径：全屏面板先关掉其余的；保存/打印/备份/视频/分屏/AI 这几项不是面板，原样执行。
+  // 备份导出：超大附件不进 JSON（见 vault.exportAll），跳过时要让用户知道去哪找它们
+  const exportBackup = async () => {
+    const r = await vault.exportAll();
+    const skipped = [
+      r.skippedAttachments > 0 ? `${r.skippedAttachments} 个大附件` : '',
+      r.skippedPdfs > 0 ? `${r.skippedPdfs} 本大 PDF` : '',
+    ].filter(Boolean).join('、');
+    if (skipped) {
+      toast(`备份已导出，但跳过 ${skipped}（单件 >20MB 或合计 >80MB）：请保留原文件或改用文件夹备份`, 'info', 9000);
+    }
+  };
+  const openOnly = (keep: string, open: () => void) => { closeModals(keep); open(); };
+  const paletteCommands = PALETTE_COMMANDS({
+              search: () => openOnly('search', () => setSearchOpen(true)),
+              save: () => void saveCurrent(),
+              print: printCurrentNote,
+              backup: () => exportBackup(),
+              importOpen: () => openOnly('import', () => setImportOpen(true)),
+              quiz: () => openOnly('quiz', () => setQuizOpen(true)),
+              exam: () => openOnly('exam', () => setExamOpen(true)),
+              review: () => openOnly('review', () => setReviewOpen(true)),
+              mistakes: () => openOnly('mistakes', () => setMistakeOpen(true)),
+              dashboard: () => openOnly('dash', () => setDashOpen(true)),
+              tags: () => openOnly('tags', () => setTagOpen(true)),
+              todos: () => openOnly('todos', () => setTodoOpen(true)),
+              mind: () => openOnly('mind', () => setMindOpen(true)),
+              graph: () => openOnly('graph', () => setGraphOpen(true)),
+              brain: () => openOnly('brain', () => setBrainOpen(true)),
+              anatomy: () => openOnly('anatomy', () => void openAnatomy()),
+              medref: () => openOnly('medref', () => setMedRefOpen(true)),
+              pdf: () => openOnly('pdf', () => setPdfOpen(true)),
+              // 与导航轨一致：再执行一次就是收起（命令面板只开不收的话，收起只有鼠标一条路）
+              video: () => { videoHiddenByAi.current = false; setVideoOpen((v) => !v); setAiOpen(false); },
+              images: () => openOnly('imageLib', () => setImageLibOpen(true)),
+              split: () => setSplitPreview((v) => !v),
+              convert: () => openOnly('convert', () => setConvertOpen(true)),
+              vocab: () => openOnly('vocab', () => setVocabOpen(true)),
+              notice: () => openOnly('notice', () => setNoticeOpen(true)),
+              pathway: () => openOnly('pathway', () => setPathwayOpen((v) => !v)),
+              history: () => openOnly('history', () => setHistoryOpen(true)),
+              ai: () => {
+                setAgentOpen(false);
+                if (!aiOpen && videoOpen) { videoHiddenByAi.current = true; setVideoOpen(false); }
+                setAiOpen((v) => !v);
+              },
+              agent: () => { setAgentOpen((v) => !v); setAiOpen(false); },
+              draft: openDraft,
+            });
   return (
-    <div className={`app${sidePanelClass}`} ref={appRef} onKeyDown={onKeyDown} tabIndex={-1}>
+    <div
+      className={`app${sidePanelClass}`}
+      ref={appRef}
+      onKeyDown={onKeyDown}
+      tabIndex={-1}
+      /* 让位宽度按功能栏的真实宽度算（见 index.css 的 .app.agent-open）：
+         拖宽整栏后主区跟着多让，拖窄后不多占。没拖过就不写，用 CSS 默认值。 */
+      style={dockSplit.width != null ? { ['--dock-w' as string]: `${dockSplit.width}px` } : undefined}
+    >
       {/* 左侧导航轨：功能入口 + 字体/主题切换（见 Rail.tsx） */}
-      <Rail
-        activeItem={activeRailItem}
-        treeOpen={treeOpen}
-        onToggleTree={() => { setPathwayOpen(false); setTreeOpen((v) => !v); }}
-        onPathway={() => setPathwayOpen((v) => !v)}
-        onHome={goHome}
-        onSearch={() => setSearchOpen(true)}
-        onHistory={() => setHistoryOpen(true)}
-        onAnatomy={() => void openAnatomy()}
-        onBrain={() => setBrainOpen(true)}
-        onGraph={() => setGraphOpen(true)}
-        onReview={() => setReviewOpen(true)}
-        onMistake={() => setMistakeOpen(true)}
-        onQuiz={() => setQuizOpen(true)}
-        onTodo={() => setTodoOpen(true)}
-        onTag={() => setTagOpen(true)}
-        onDash={() => setDashOpen(true)}
-        // 两个右侧面板共用同一块让位空间，同时打开会互相压住，故互斥
-        onAi={() => { setAiOpen((v) => !v); setAgentOpen(false); }}
-        onAgent={() => { setAgentOpen((v) => !v); setAiOpen(false); }}
-        onDraft={openDraft}
-        onPdf={() => setPdfOpen(true)}
-        onConvert={() => setConvertOpen(true)}
-        onImport={() => setImportOpen(true)}
-        onNotice={() => setNoticeOpen(true)}
-      />
+      <Rail activeItem={activeRailItem} treeOpen={treeOpen} onHome={goHome} actions={railActions} />
 
       {pathwayOpen ? (
         <div className="pathway-workspace-host">
@@ -1120,15 +1609,44 @@ export default function Workspace() {
           />
         </div>
       ) : (
-      <div className={`deck${treeOpen ? ' with-tree' : ''}`}>
+      <div
+        className={`deck${treeOpen ? ' with-tree' : ''}${treeOpen && treeCollapsed ? ' tree-collapsed' : ''}`}
+        style={treeOpen && treeCollapsed
+          ? { ...deckSplit.style, ['--tree-w' as string]: '44px' }
+          : deckSplit.style}
+      >
         {/* 目录卡片常驻（未打开笔记时也要能选笔记），由导航轨的「目录」按钮折叠 */}
-        {treeOpen && (
+        {treeOpen && (treeCollapsed ? (
+          /* 收起态：只留一条窄边，点一下展开。--tree-w 已被上面的 style 改成 44px，
+             所以首页/正文的让位偏移和各断点规则都跟着收窄，不用另写一套。 */
+          <div className="card c-tree is-collapsed">
+            <button
+              type="button"
+              className="tree-expand"
+              onClick={() => setTreeCollapsedPersist(false)}
+              title="展开章节目录"
+              aria-label="展开章节目录"
+            >
+              <IconFolder size={16} />
+              <span className="tree-expand__label">章节目录</span>
+            </button>
+          </div>
+        ) : (
           <div className="card c-tree">
             <div className="card-head">
               <IconFolder size={15} />
               <span>章节目录</span>
               <span className="spacer" />
               <span className="card-head-note">{noteCount} 篇</span>
+              <button
+                type="button"
+                className="btn-icon tree-collapse"
+                onClick={() => setTreeCollapsedPersist(true)}
+                title="收起章节目录（收成左侧窄条）"
+                aria-label="收起章节目录"
+              >
+                <IconBack size={14} />
+              </button>
             </div>
             {/* Markdown 格式修复已改成「打开库时自动跑」（vault.autoRepair）：
                 这里只把自动修正过的明细交给目录面板显示，不再有「点一下才扫描」的入口。 */}
@@ -1140,7 +1658,7 @@ export default function Workspace() {
                 if (window.matchMedia?.('(max-width: 700px)').matches) setTreeOpen(false);
               }}
               onCreate={handleCreate}
-              onExport={() => vault.exportAll()}
+              onExport={exportBackup}
               onExportFolder={() => vault.exportMdFolder()}
               onImport={(t) => vault.importBackup(t)}
               onImportMd={(files) => vault.importMdFiles(files)}
@@ -1163,8 +1681,24 @@ export default function Workspace() {
               }}
               onFindOrphanAttachments={() => vault.findOrphanAttachments()}
               onRemoveAttachments={(paths) => vault.removeAttachments(paths)}
+              newNoteSignal={newNoteSignal}
             />
           </div>
+        ))}
+
+        {/* 目录 │ 编辑 的拖宽抓手（宽度存 knowlattice.deck.split）；收起成窄条时没有可拖的宽度 */}
+        {treeOpen && !treeCollapsed && (
+          <button
+            type="button"
+            className="deck-split"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="拖动调整目录宽度（← → 微调，双击复位）"
+            title="拖动调整目录宽度（双击复位）"
+            onPointerDown={deckSplit.onTreeDown}
+            onKeyDown={deckSplit.onKeyDown('tree')}
+            onDoubleClick={deckSplit.reset}
+          />
         )}
 
         {vault.currentPath ? (
@@ -1346,6 +1880,9 @@ export default function Workspace() {
                 </div>
               )}
 
+              <ChapterAnnotations path={vault.currentPath} refreshToken={qbankRefresh} />
+
+              <div className={splitPreview ? 'note-split note-split--on' : 'note-split'}>
               <Suspense fallback={<div className="editor-fallback">编辑器加载中…</div>}>
                 <Editor
                   value={draft ?? ''}
@@ -1366,9 +1903,46 @@ export default function Workspace() {
                   onJumpReady={(jump) => { outlineJumpRef.current = jump; }}
                   readFile={readFile}
                   highlight={highlight}
+                  onJumpAnchor={jumpVideoAnchor}
+                  onPrint={printCurrentNote}
+                  onHistory={() => setHistoryOpen(true)}
+                  onVideo={() => setVideoOpen(true)}
                 />
               </Suspense>
+              {splitPreview && (
+                <aside className="note-split__pane" aria-label="分屏预览">
+                  <div className="note-split__head">
+                    <span>预览</span>
+                    <span className="spacer" />
+                    <button className="btn-icon" onClick={() => setSplitPreview(false)} aria-label="关闭分屏">✕</button>
+                  </div>
+                  <div className="note-split__body">
+                    <Preview
+                      content={draft ?? ''}
+                      resolve={vault.resolveLink}
+                      onOpenLink={handleOpenLink}
+                      readFile={readFile}
+                      focusBlock={pendingBlock?.block ?? null}
+                    />
+                  </div>
+                </aside>
+              )}
+              </div>
             </div>
+
+            {/* 编辑 │ 关联 的拖宽抓手（关联在右侧，往左拖变宽） */}
+            {showBacklinks && (
+              <button
+                type="button"
+                className="deck-split"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="拖动调整关联栏宽度（← → 微调，双击复位）"
+                onPointerDown={deckSplit.onInspDown}
+                onKeyDown={deckSplit.onKeyDown('insp')}
+                onDoubleClick={deckSplit.reset}
+              />
+            )}
 
             {showBacklinks && (
               <div className="card c-insp" id="backlinks-panel">
@@ -1420,13 +1994,29 @@ export default function Workspace() {
           /* 欢迎页不套卡片：直接落在背景上，并按整片工作区居中（不被左侧目录卡片挤偏）。
              pointer-events 交给内层内容，保证目录卡片仍可点击。 */
           <div className="welcome-stage">
-            <Preview
-              content={null}
-              resolve={vault.resolveLink}
-              onOpenLink={handleOpenLink}
-              readFile={readFile}
-              onSearch={() => setSearchOpen(true)}
-              onGraph={() => setGraphOpen(true)}
+            <HomeView
+              features={homeFeatures}
+              featuresTitle={recentFeatures.length > 0 ? '最近使用' : '常用入口'}
+              recents={homeRecents}
+              dueCount={homeDueCount}
+              mistakeCount={homeMistakeCount}
+              quizResume={homeQuizResume}
+              onFeature={(key) => railActions[key as RailKey]()}
+              onOpenRecent={openNote}
+              onReview={railActions.review}
+              onMistake={railActions.mistakes}
+              onResumeQuiz={() => { touchFeature('quiz'); closeModals('quiz'); setQuizAutoResume(true); setQuizOpen(true); }}
+              onSearch={railActions.search}
+              // 工作台快捷操作：新建要先把目录卡片展开，再给 ChapterTree 一个自增信号打开表单
+              onNewNote={() => {
+                setTreeOpen(true);
+                setTreeCollapsedPersist(false);
+                setNewNoteSignal((n) => n + 1);
+              }}
+              onImport={railActions.import}
+              onVideo={railActions.video}
+              onOpenTodos={railActions.todos}
+              onOpenReport={railActions.report}
             />
           </div>
         )}
@@ -1513,7 +2103,10 @@ export default function Workspace() {
             onOpenExam={(name) => { setExamBank(name); setExamOpen(true); }}
             resolveAsset={readFile}
             onUnifiedImport={() => setImportOpen(true)}
+            onSaveNote={(path: string, markdown: string) => void saveQuestionNote(path, markdown)}
             refreshToken={qbankRefresh}
+            autoResume={quizAutoResume}
+            onAutoResumeDone={() => setQuizAutoResume(false)}
           />
         </Suspense>
       )}
@@ -1540,6 +2133,7 @@ export default function Workspace() {
           onClose={() => setDashOpen(false)}
           onOpenReview={() => { setDashOpen(false); setReviewOpen(true); }}
           onOpenQuiz={() => { setDashOpen(false); setQuizOpen(true); }}
+          onOpenMistakes={() => { setDashOpen(false); setMistakeOpen(true); }}
           onOpenExam={() => { setDashOpen(false); setExamBank(undefined); setExamOpen(true); }}
         />
       )}
@@ -1556,29 +2150,150 @@ export default function Workspace() {
           onCopy={handleCopyReport}
         />
       )}
-      {aiOpen && <AiPanel onClose={() => setAiOpen(false)} />}
-      {agentOpen && (
-        <AiAgentPanel
-          onClose={() => setAgentOpen(false)}
-          docs={vault.docs}
-          onSave={async (path, content) => {
-            await vault.save(path, content);
-            // AI 改的就是当前打开的这篇：编辑器缓冲必须跟着换。
-            // 不换的后果实测过（浏览器里可复现）：编辑器仍显示旧正文，用户随后随便敲一个字，
-            // 0.8s 的自动保存就把 AI 刚写进去的整段改动顶回旧内容——AI 的版本只能去「历史版本」里找。
-            // 缓冲是脏的（用户正在手打）就不动它：那是用户正在写的东西，改成提示一句，
-            // 让他自己决定是丢掉手改还是先另存（AI 的版本已经在历史版本里）。
-            const cur = editRef.current;
-            if (cur.vault.currentPath !== path) return;
-            if (!cur.dirty) setDraft(content);
-            else toast('这篇笔记刚被 AI 改写；编辑器里还有未保存的手改，保存后会覆盖 AI 的版本（可在「历史版本」找回）', 'info');
-          }}
-          onOpenPath={(p) => openNote(p)}
-          currentPath={vault.currentPath}
-          resolveLink={vault.resolveLink}
-          quote={agentQuote}
-          onQuoteConsumed={() => setAgentQuote(null)}
+      {aiOpen && (
+        <AiPanel
+          onClose={() => setAiOpen(false)}
+          onSwitchToAgent={() => { setAiOpen(false); setAgentOpen(true); }}
         />
+      )}
+      {paletteOpen && <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />}
+      {settingsOpen && (
+        <SettingsPanel
+          onClose={() => setSettingsOpen(false)}
+          onBackup={exportBackup}
+          onImport={() => { setSettingsOpen(false); setImportOpen(true); }}
+          onNotice={() => { setSettingsOpen(false); setNoticeOpen(true); }}
+        />
+      )}
+      {medRefOpen && <MedRefView onClose={() => setMedRefOpen(false)} onToast={toast} />}
+      {vocabOpen && <VocabView onClose={() => setVocabOpen(false)} />}
+      {imageLibOpen && (
+        <ImageLibrary
+          entries={attachmentImages}
+          resolveAsset={readFile}
+          onInsert={vault.currentPath ? (md) => { editorInsertRef.current?.(md); } : undefined}
+          onClose={() => setImageLibOpen(false)}
+        />
+      )}
+      {/* 视频笔记：顶层渲染，不依赖「已打开笔记」——挂进编辑区时没开笔记点它等于无反应 */}
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/*"
+        style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) openVideo(f); }}
+      />
+      {/*
+        视频笔记 + AI 笔记合成「一栏」：两者贴同一条右边缘、共享同一列宽度、上下相邻。
+        这一栏是唯一的定位根，三种操作互不干扰：
+          · 视频标题栏拖动 = 整栏移动（位置持久化，双击标题栏复位）
+          · 左边缘抓手     = 整栏宽度（双击复位，方向键微调）
+          · 两块之间的分隔条 = 视频大小（上下拖按 16:9 换算成宽度，画面等比放大/缩小）
+        尺寸与位置都写进 localStorage，下次打开还是这个样子。
+        视频块自身不再带独立的拖动/缩放：栏内尺寸只留一套来源，
+        否则内联 width/height 会把它顶出整栏（实测溢出 288px，且分隔条失效）。
+      */}
+      {/*
+        上下顺序是「AI 笔记在上、视频在下」：整栏贴底，视频是最后一项，
+        所以打开 AI 笔记时视频的底边不动——只往上多长出一块，不再被顶到屏幕顶部。
+        （旧顺序视频在上，AI 一开就把视频整体推上去，用户实测反馈为「视频被 AI 笔记顶掉」。）
+      */}
+      {(videoOpen || agentOpen) && (
+        <div
+          className="dock-col"
+          data-dock-root
+          data-panel-drag-root
+          style={{ ...dockDrag.style, ...dockSplit.style }}
+          aria-label="视频与 AI 笔记栏"
+        >
+          {/*
+            拖动条：不管哪块面板在，都能移动整栏。
+            之前只把拖动挂在视频标题栏上 —— 视频一关，整栏就再也动不了（用户实测反馈）。
+          */}
+          {/*
+            必须是 div 而不是 button：usePanelDrag 的 NO_DRAG 明确忽略 button/a/input…
+            （为的是标题栏里的按钮不被当拖动起点）。写成 button 的话这里点了毫无反应。
+          */}
+          <div
+            className="dock-col__drag"
+            role="separator"
+            aria-orientation="horizontal"
+            tabIndex={0}
+            aria-label="拖动移动这一栏（双击复位位置）"
+            title="拖动移动；双击复位位置"
+            onPointerDown={dockDrag.onHandlePointerDown}
+            onDoubleClick={dockDrag.reset}
+          />
+          <button
+            type="button"
+            className="dock-col__grip"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="拖动调整这一栏的宽度（方向键微调，双击复位）"
+            onPointerDown={dockSplit.onWidthDown}
+            onPointerMove={dockSplit.onMove}
+            onPointerUp={dockSplit.onUp}
+            onPointerCancel={dockSplit.onUp}
+            onKeyDown={dockSplit.onKeyDown('w')}
+            onDoubleClick={dockSplit.reset}
+          />
+          {/* 只开视频：分隔条贴在视频块上沿，往上拖整块变高 */}
+          {videoOpen && !agentOpen && <DockSplitHandle dockSplit={dockSplit} />}
+          {/* 视频在上、AI 笔记在下（顺序即视觉顺序，别被后续 patch 调换） */}
+          {videoOpen && (
+            /*
+             * 这一块不带自己的 data-panel-drag-root / 缩放入参：
+             * 栏内尺寸只有一套来源——宽度归整栏抓手、高度归分隔条。
+             * 曾经把它同时当成独立浮窗（自带拖动 transform + 内联 width/height），
+             * 实测会把它撑到 908px 宽、越过整栏 288px 跑出窗口，之后分隔条也一起失效。
+             */
+            <div className="video-note-wrap">
+              <VideoNoteView
+                key={videoMedia}
+                src={videoSrc}
+                media={videoMedia}
+                title={videoTitle}
+                seekTo={videoSeek}
+                onSeekConsumed={() => setVideoSeek(null)}
+                onPick={() => videoInputRef.current?.click()}
+                onUrl={openVideoUrl}
+                onInsert={(md) => { const ins = editorInsertRef.current; if (!ins) return false; ins(md); return true; }}
+                onAttach={(name, blob) => vault.saveAttachment(name, blob)}
+                hasAttachment={(path) => vault.hasAttachment(path)}
+                // 标题栏拖动 = 移动整栏（transform 写在 .dock-col 上）；双击标题栏复位
+                onDragStart={dockDrag.onHandlePointerDown}
+                onDragReset={dockDrag.reset}
+                onClose={() => setVideoOpen(false)}
+              />
+            </div>
+          )}
+          {/* AI 笔记在上沿挂分隔条：与视频同开时它就落在两块之间（互换高度），单开时就是它自己的上沿 */}
+          {agentOpen && <DockSplitHandle dockSplit={dockSplit} />}
+          {agentOpen && (
+            <AiAgentPanel
+              onClose={() => setAgentOpen(false)}
+              docs={vault.docs}
+              onSave={async (path, content) => {
+                await vault.save(path, content);
+                // AI 改的就是当前打开的这篇：编辑器缓冲必须跟着换。
+                // 不换的后果实测过（浏览器里可复现）：编辑器仍显示旧正文，用户随后随便敲一个字，
+                // 0.8s 的自动保存就把 AI 刚写进去的整段改动顶回旧内容——AI 的版本只能去「历史版本」里找。
+                // 缓冲是脏的（用户正在手打）就不动它：那是用户正在写的东西，改成提示一句，
+                // 让他自己决定是丢掉手改还是先另存（AI 的版本已经在历史版本里）。
+                const cur = editRef.current;
+                if (cur.vault.currentPath !== path) return;
+                if (!cur.dirty) setDraft(content);
+                else toast('这篇笔记刚被 AI 改写；编辑器里还有未保存的手改，保存后会覆盖 AI 的版本（可在「历史版本」找回）', 'info');
+              }}
+              onOpenPath={(p) => openNote(p)}
+              currentPath={vault.currentPath}
+              resolveLink={vault.resolveLink}
+              quote={agentQuote}
+              onQuoteConsumed={() => setAgentQuote(null)}
+              onSwitchToAi={() => { setAgentOpen(false); setAiOpen(true); }}
+            />
+          )}
+        </div>
       )}
       {noticeOpen && <SafetyNotice onClose={() => setNoticeOpen(false)} />}
       {draftOpen && (

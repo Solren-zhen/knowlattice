@@ -1,0 +1,42 @@
+name: 构建 Windows 应用
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, master, work]
+    paths-ignore:
+      - '**.md'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust 编译缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 静态检查
+        run: npm run lint
+
+      - name: 单元测试
+        run: npm test
+
+      - name: 构建前端与 Tauri 可执行文件
+        run: npx tauri build --no-bundle

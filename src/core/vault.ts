@@ -25,9 +25,11 @@ import { exportQuestionStats, importQuestionStats } from './qbankStats';
 import { exportStars, importStars, type StarMap } from './qbankStarred';
 import { exportCalibration, importCalibration } from './qbankCalib';
 import { loadMistakes, importMistakes } from './mistakes';
+import { exportVocabState, importVocabState } from './vocab';
 import { exportTodos, importTodos } from './todos';
 import { exportCardEdits, importCardEdits } from './cardEdits';
 import { exportNoteMedia, importNoteMedia } from './noteMedia';
+import { exportClips, importClips } from './videoNotes';
 import { findOrphanAttachments as findOrphans } from './attachmentOrphans';
 import { exportNoteStyles, importNoteStyles } from './mindmapNodeStyles';
 import { exportMarks, importMarks } from './mindmapMarks';
@@ -239,6 +241,19 @@ function dataUrlToBlob(dataUrl: string): Blob | null {
 }
 
 /** Blob → dataURL（把二进制附件并入 .json 备份；环境不支持 FileReader 时返回 null，跳过该附件不阻塞整包） */
+/** 单个附件进 JSON 备份的上限；超过走 ZIP 导出。 */
+const BACKUP_ATTACH_MAX = 20 * 1024 * 1024;
+/** 一次备份里附件合计上限：再多也会把内存顶爆。 */
+const BACKUP_ATTACH_TOTAL = 80 * 1024 * 1024;
+
+/** 本地日期 YYYY-MM-DD：下载文件名用。用 toISOString 会按 UTC 算，凌晨 0–8 点导出会写成昨天。 */
+function localDateKey(d = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
 function blobToDataUrl(blob: Blob): Promise<string | null> {
   return new Promise((resolve) => {
     try {
@@ -752,9 +767,12 @@ export function useVault() {
    *  然后照常落盘——用户的应用内编辑不被打断，别人的改动也不会被静默吃掉。 */
   const keepExternalEdit = useCallback(async (path: string, incoming: string) => {
     const known = diskMtimesRef.current.get(path);
-    if (known === undefined) return; // 本次会话没打开也没写过 → 没有基线，直接写
     const meta = await adapter.stat(path).catch(() => null);
-    if (!meta || meta.mtime === known) return;
+    if (!meta) return;
+    // 本次会话没打开/写过时没有 mtime 基线，但不能因此直接覆盖：
+    // 读一次磁盘，和内存里的上一版、本次要写的版本都比一遍。这样 AI/导入
+    // 写一篇从未打开过的笔记时，外部编辑器或同步盘的改动仍会进历史快照。
+    if (known !== undefined && meta.mtime === known) return;
     const onDisk = await adapter.read(path).catch(() => null);
     if (onDisk === null || onDisk === incoming) return;
     if (onDisk === docsRef.current.get(path)) return; // 只是 mtime 变了，内容还是我们那一版
@@ -836,16 +854,40 @@ export function useVault() {
     for (const [path, content] of docs) {
       if (path.endsWith('.md') || path.startsWith('_attachments/')) fileMap.set(path, content);
     }
-    // 新附件库（Blob）并入备份：转不成 dataURL 的跳过，不阻塞整包导出
+    // 新附件库（Blob）并入备份：转不成 dataURL 的跳过，不阻塞整包导出。
+    // 超大附件直接跳过并把数量报给调用方——dataURL 本身膨胀 33%，JSON.stringify 再翻一倍，
+    // 一个 120MB 讲义就能把标签页顶到 OOM，而失败时用户只会看到按钮没反应。
+    // 这类附件走「导出 md 文件夹 (.zip)」：二进制原样打包，体积不膨胀。
+    let skippedAttachments = 0;
+    let attachedBytes = 0;
     for (const [path, blob] of attachments) {
       if (fileMap.has(path)) continue;
+      if (blob.size > BACKUP_ATTACH_MAX || attachedBytes + blob.size > BACKUP_ATTACH_TOTAL) {
+        skippedAttachments += 1;
+        continue;
+      }
       const dataUrl = await blobToDataUrl(blob);
-      if (dataUrl) fileMap.set(path, dataUrl);
+      if (dataUrl) {
+        fileMap.set(path, dataUrl);
+        attachedBytes += blob.size;
+      }
+    }
+    // PDF 正文/页码在独立 IndexedDB，不随 files 或 attachments 走。动态 import
+    // 避免为了备份把 pdf.js 拖进首屏；超限书由界面提示改用文件夹备份。
+    let pdfBooks: unknown[] = [];
+    let skippedPdfs = 0;
+    try {
+      const { exportPdfLibrary } = await import('./pdfLib');
+      const pdf = await exportPdfLibrary();
+      pdfBooks = pdf.books;
+      skippedPdfs = pdf.skipped;
+    } catch (e) {
+      console.error('PDF 书架备份失败：', e);
     }
     const files = [...fileMap].map(([path, content]) => ({ path, content }));
     const payload = {
       app: 'knowlattice',
-      version: 12,
+      version: 15,
       exportedAt: new Date().toISOString(),
       files,
       // v2 起随备份保存 SRS 复习调度进度（旧版备份无此字段，导入时自动跳过）
@@ -889,6 +931,15 @@ export function useVault() {
       // 不随备份走就会在换设备时无声消失（考试历史清空、每日一练连续天数归零）。
       examHistory: exportExamHistory(),
       daily: exportDaily(),
+      // v13 起补上生词本（core/vocab）：与错题/待办同一性质——用户一条条攒出来的记录，
+      // 只活在 localStorage 里，不随备份走就会在换设备时整本消失。
+      vocab: exportVocabState(),
+      // v14 起补上视频片段收藏（core/videoNotes）：与生词本同一性质——用户一段段挑出来的
+      // 重点，只活在 localStorage 里。锚点写在正文里能随笔记走，片段不随备份走就会整批消失，
+      // 而且笔记里的 `#vn=` 锚点还在、片段清单却是空的，比彻底没有更让人困惑。
+      videoClips: exportClips(),
+      // v15：PDF 书架正文与阅读进度
+      pdfBooks,
     };
     const blob = new Blob([JSON.stringify(payload)], {
       type: 'application/json',
@@ -896,9 +947,10 @@ export function useVault() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `lattice-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `lattice-backup-${localDateKey()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    return { skippedAttachments, skippedPdfs };
   }, [docs, attachments]);
 
   /** 从备份 .json 恢复（**只补不覆盖**）：目标路径不存在才写入；已存在且内容不同 → 把备份里
@@ -930,6 +982,9 @@ export function useVault() {
       mindmapPrefs?: unknown;
       examHistory?: unknown;
       daily?: unknown;
+      vocab?: unknown;
+      videoClips?: unknown;
+      pdfBooks?: unknown;
     };
     // 兼容旧版以 medvault 命名的备份：两版文件结构一致，只有 app 字段不同
     if ((data.app !== 'knowlattice' && data.app !== 'medvault') || !Array.isArray(data.files)) {
@@ -1101,8 +1156,30 @@ export function useVault() {
       const cur = exportExamHistory();
       storeMerges.push(await mergeListStore('考试历史', data.examHistory, new Set(cur.map((r) => r.id)), (it) => (typeof it.id === 'string' ? it.id : undefined), (p) => importExamHistory(p)));
     }
+    if (data.vocab) {
+      // importVocabState 是「只补不覆盖」写：本机已有的词保留本地释义，只补缺的键
+      storeMerges.push(await mergeObjectStore('生词本', data.vocab, exportVocabState(), (p) => { importVocabState(p); }));
+    }
     if (data.daily) {
       storeMerges.push(await mergeObjectStore('每日一练', data.daily, exportDaily(), (p) => { importDaily(p); }));
+    }
+    if (data.videoClips) {
+      // importClips 自己就是「只补不覆盖」：同 id 已存在就保留本地那份（含用户后来改的备注/标签）
+      const cur = exportClips();
+      storeMerges.push(await mergeListStore(
+        '视频片段', data.videoClips, new Set(cur.map((c) => c.id)),
+        (it) => (typeof it.id === 'string' ? it.id : undefined),
+        (p) => importClips(p),
+      ));
+    }
+    if (data.pdfBooks) {
+      try {
+        const { importPdfLibrary } = await import('./pdfLib');
+        const merged = await importPdfLibrary(data.pdfBooks);
+        storeMerges.push({ name: 'PDF 书架', added: merged.added, kept: merged.kept });
+      } catch (e) {
+        console.error('PDF 书架恢复失败：', e);
+      }
     }
 
     // 并入内存缓存 + 增量更新链接索引（新增的与冲突另存的都算「这次写进去的」）
@@ -1424,7 +1501,7 @@ export function useVault() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `lattice-vault-${new Date().toISOString().slice(0, 10)}.zip`;
+    a.download = `lattice-vault-${localDateKey()}.zip`;
     a.click();
     URL.revokeObjectURL(url);
     return count;
@@ -1523,6 +1600,9 @@ export function useVault() {
     [linkNameSig]
   );
 
+  /** 附件路径清单（按路径排序）：视图侧只读，别把 Map 本身交出去——那是可变引用 */
+  const attachmentPaths = useMemo(() => [...attachments.keys()].sort(), [attachments]);
+
   const currentContent = currentPath ? docs.get(currentPath) ?? '' : null;
 
   const currentBacklinks = useMemo(() => {
@@ -1560,6 +1640,8 @@ export function useVault() {
     removeAttachments,
     readFile,
     hasAttachment,
+    /** 全部附件路径（含 `_attachments/` 前缀）：图片库等入口用它列举 */
+    attachmentPaths,
     exportAll,
     exportMdFolder,
     importBackup,

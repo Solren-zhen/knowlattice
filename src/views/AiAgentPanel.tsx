@@ -14,7 +14,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   agentNetHint, buildHistoryMessages, buildNoteSystemPrompt, detectMention, expandCommand, extractMentionedNotes, formatNoteList,
-  isAbortError, listCommands, MEDBOOK_TOOLS, NOTE_AGENT_TOOLS, readNoteSlice, runAgent, searchNotes, truncateForModel,
+  isAbortError, isAllowedAgentBaseUrl, listCommands, MEDBOOK_TOOLS, NOTE_AGENT_TOOLS, readNoteSlice, runAgent, searchNotes, truncateForModel,
   type AgentSettings, type MentionHit, type RunAgentOptions, type TokenUsage, type WireMessage,
 } from '../core/aiAgent';
 import { capToolResult } from '../core/aiBudget';
@@ -30,13 +30,21 @@ import { appendStudyLogEntry, studyLogEntryFromArgs, studyLogPath } from '../cor
 import { appendBankQuestions, loadBanks } from '../core/qbank';
 import { containsQuestions, importAiQuestions } from '../core/aiQuestionImport';
 import { initializeStats } from '../core/qbankStats';
-import { cardHints } from '../core/srsCards';
 import { renderMarkdown } from '../core/markdown';
 import { CITE_LABEL, CITE_MARK, CITE_RANK, lookupQuote, verifyCitations, verifyQuote, type CiteStatus } from '../core/citeVerify';
 import { parseSynonymLines, setUserSynonymGroups, USER_SYNONYMS_KEY } from '../core/medSynonyms';
 import { setMedBookPageOffset } from '../storage/medStore';
 import { safeVaultPath } from '../core/vault';
-import { fuzzyFindAnchor, structureLossWarnings, type AnchorHit, type StructureWarning } from '../core/aiPatch';
+import { structureLossWarnings, type StructureWarning } from '../core/aiPatch';
+import { applyNotePatch, cleanCardKeys, insertCardHints } from '../core/aiTools';
+import { AGENT_TOOL_NAMES, AGENT_TOOL_REGISTRY, createAgentRuntime, makeWriteVerifier } from '../core/agentRuntime';
+import {
+  collectSkills, collectSouls, distillSkills, findSkill, formatSkillCatalog, formatSoulPrefix, skillBody,
+  stripFrontmatter, toSkillMarkdown, validateSkills,
+} from '../core/agentSkills';
+import { createTraceRecorder } from '../core/agentTrace';
+import { adviseCompaction, measureContext } from '../core/agentContextUsage';
+import { CONTEXT_TOTAL_BUDGET } from '../core/aiBudget';
 import { toast } from '../core/feedback';
 import { bumpRecallHits, lookupRecall, saveRecall, type RecallEntry } from '../core/localRecall';
 import { useEsc, escThenClose } from './useEsc';
@@ -45,6 +53,8 @@ import Preview from './Preview';
 
 interface Props {
   onClose: () => void;
+  /** 一个 AI 入口：面板内切回 AI 问答 */
+  onSwitchToAi?: () => void;
   /** 全库笔记（path → Markdown），随 vault 更新换引用 */
   docs: Map<string, string>;
   /** 写入笔记（含新建）：走 vault.save，自动记历史版本 */
@@ -134,7 +144,14 @@ function useDeferredMarkdown(text: string): string {
  *  教材侧结论比笔记侧更好时取教材侧；两边都没命中时，标题里写明「已比对本机教材」，
  *  把「核验过但没有」与「本机没有这本书的索引」区分开。 */
 function CitationCheck({ text, docs }: { text: string; docs: Map<string, string> }) {
-  const results = useMemo(() => verifyCitations(text, docs), [text, docs]);
+  /**
+   * 只在正文变化时核验一次，**不跟 docs 走**：docs 每次自动保存都会换引用，
+   * 挂在它上面等于「用户每敲停一次，所有历史消息都把全库重扫一遍」
+   * （5000 篇 × 20 条消息）。引用核验是给人看的快照，不是实时视图；
+   * 新收到的消息本来就会带着当时的 docs 算一次。
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const results = useMemo(() => verifyCitations(text, docs), [text]);
   const [bookHits, setBookHits] = useState<Map<string, { status: CiteStatus; book: string }>>(new Map());
 
   useEffect(() => {
@@ -303,29 +320,6 @@ const STALL_IDLE_MS = 120_000;
  *  diff 预览＋人工确认这条主写入路径就整个消失了，那是砍功能，不是简化界面。 */
 const ALL_AGENT_TOOLS = [...NOTE_AGENT_TOOLS, ...MEDBOOK_TOOLS, ...LEARNING_TOOLS];
 
-/** 属性键行：`- 键: `，与 srsCards.cardHints 同口径（键 ≤12 字，无空格冒号） */
-const HEADING_LINE = /^(#{1,6})\s+(.+?)\s*$/;
-
-/** 把属性键骨架插进指定小节标题之后；返回错误文案（string）或新正文的行数组 */
-function insertCardHints(old: string, heading: string, keys: string[]): string[] | string {
-  const lines = old.split('\n');
-  const target = lines.findIndex((l) => HEADING_LINE.exec(l)?.[2] === heading);
-  if (target < 0) return `错误：找不到小节标题「${heading}」。先 read_note，标题要与文中一字不差（不含 # 号）。`;
-  const level = HEADING_LINE.exec(lines[target])![1].length;
-  let end = lines.length;
-  for (let i = target + 1; i < lines.length; i++) {
-    const m = HEADING_LINE.exec(lines[i]);
-    if (m && m[1].length <= level) { end = i; break; }
-  }
-  const existing = new Set(cardHints(lines.slice(target + 1, end).join('\n')));
-  const add = keys.filter((k) => !existing.has(k));
-  if (!add.length) return `错误：这些提示键在小节里都已存在（${keys.join('、')}），不用重复添加。`;
-  const insert = add.map((k) => `- ${k}: `);
-  if (lines[target + 1] !== undefined && lines[target + 1].trim() !== '') insert.push('');
-  lines.splice(target + 1, 0, ...insert);
-  return lines;
-}
-
 function freshSession(): AgentSession {
   return {
     id: `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
@@ -375,7 +369,7 @@ function loadSessions(): AgentSession[] {
   return [];
 }
 
-function persistSessions(sessions: AgentSession[], activeId: string) {
+function persistSessions(sessions: AgentSession[], activeId: string): boolean {
   // 提案卡里的全文截断后保存（持久化只为回看，diff 渲染容忍截断）
   const slim = sessions.map((s) => ({
     ...s,
@@ -401,8 +395,11 @@ function persistSessions(sessions: AgentSession[], activeId: string) {
   }
   try {
     localStorage.setItem(SESSIONS_KEY, json);
+    return true;
   } catch {
-    /* 存储满等异常不致命：会话只是不再持久化 */
+    // 配额满：会话只是不再持久化。但必须回一个 false 让调用方提示——
+    // 静默失败会让用户以为「关掉面板还能回来」，实际整段对话已经丢了。
+    return false;
   }
 }
 
@@ -425,7 +422,7 @@ function loadSettings(): AgentSettings | null {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as AgentSettings;
-    if (typeof s.baseUrl !== 'string' || !/^https?:\/\//.test(s.baseUrl)) return null;
+    if (typeof s.baseUrl !== 'string' || !isAllowedAgentBaseUrl(s.baseUrl)) return null;
     if (typeof s.model !== 'string' || !s.model.trim()) return null;
     return {
       baseUrl: s.baseUrl,
@@ -454,7 +451,7 @@ function fmtAgo(ts: number, now = Date.now()): string {
 }
 
 export default function AiAgentPanel({
-  onClose, docs, onSave, onOpenPath, currentPath, resolveLink, quote, onQuoteConsumed,
+  onClose, docs, onSave, onOpenPath, currentPath, resolveLink, quote, onQuoteConsumed, onSwitchToAi,
 }: Props) {
   /** 会话切换弹层开着时 Esc 只关弹层，不把整块面板带走（ref 供栈顶闭包读最新值） */
   const switcherOpenRef = useRef(false);
@@ -483,6 +480,13 @@ export default function AiAgentPanel({
   const [thinkingText, setThinkingText] = useState('');
   /** read / yolo 偏好 */
   const [prefs, setPrefs] = useState<AgentPrefs>(loadPrefs);
+  /** 上一轮的上下文占用读数（只展示，不参与裁剪） */
+  const [ctxHint, setCtxHint] = useState('');
+  /** 当前正在跑的工具：工具卡已隐藏，至少要有一行「还在干活」的可见状态，
+   *  否则模型跑一次长工具（读大笔记、抓网页）就是 20 秒的静止画面。 */
+  const [activeTool, setActiveTool] = useState<{ name: string; since: number } | null>(null);
+  /** 只用来驱动上面那行的秒数重渲染 */
+  const [, setTick] = useState(0);
   /** 运行中排队的后续消息（Claudian 式：不打断，跑完自动接续） */
   const [queued, setQueued] = useState<string[]>([]);
   /** @ 引用 / 斜杠命令补全 */
@@ -521,6 +525,13 @@ export default function AiAgentPanel({
     for (const [k, v] of bookEvidence) merged.set(k, v);
     return merged;
   }, [docs, bookEvidence]);
+
+  /**
+   * 全部 .md 路径：补全下拉与 @ 引用都要这一份。按**路径签名**memo（与 vault.notePaths 同一手法）：
+   * `docs` 每次自动保存都换引用，直接依赖它会在每次按键时重建 5000 条路径的数组 + 过滤。
+   */
+  const pathSig = useMemo(() => [...docs.keys()].join('\u0000'), [docs]);
+  const notePaths = useMemo(() => (pathSig ? pathSig.split('\u0000').filter((p) => p.endsWith('.md')) : []), [pathSig]);
   /** 笔记库 + 已检索到的教材原文，合并给引文核验（笔记键在前，教材可覆盖同名键） */
   const evidenceForVerify = (): Map<string, string> => {
     if (!bookEvidenceRef.current.size) return docsRef.current;
@@ -540,6 +551,71 @@ export default function AiAgentPanel({
   const coachRef = useRef(false);
   useEffect(() => { coachRef.current = !!active?.coach; });
   const runningRef = useRef(false);
+  /* 面板尺寸可拖（左边缘改宽、上边缘改高）。宽度要同步写 .app 的 --side-w：
+     主区靠这个变量让位，只改面板宽度会让它压住笔记。 */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const sizeDragRef = useRef<{ axis: 'w' | 'h'; x: number; y: number; w: number; h: number } | null>(null);
+  const PANEL_SIZE_KEY = 'knowlattice.agent.panel.size';
+  const applyPanelSize = (w: number, h: number) => {
+    const el = panelRef.current;
+    if (!el) return;
+    const lim = (v: number, lo: number, hi: number) => Math.round(Math.min(Math.max(v, lo), hi));
+    const width = lim(w, 320, Math.max(320, window.innerWidth * 0.96));
+    const height = lim(h, 240, Math.max(240, window.innerHeight - 8));
+    el.style.width = width + 'px';
+    // top:0 + bottom:0 会把 height 撑满；改成贴底定高，拖上边缘才有意义
+    el.style.top = 'auto';
+    el.style.height = height + 'px';
+    const app = el.closest('.app');
+    if (app instanceof HTMLElement) app.style.setProperty('--side-w', width + 'px');
+  };
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PANEL_SIZE_KEY) || 'null');
+      if (saved && Number(saved.w) > 0 && Number(saved.h) > 0) applyPanelSize(Number(saved.w), Number(saved.h));
+    } catch { /* 存坏了就当没存过 */ }
+  }, []);
+  // 工具耗时秒数：每 500ms 推一次，工具结束时 activeTool 置空自动停
+  useEffect(() => {
+    if (!activeTool) return;
+    const t = window.setInterval(() => setTick((n) => n + 1), 500);
+    return () => window.clearInterval(t);
+  }, [activeTool]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const el = panelRef.current;
+      if (!el || !el.style.width) return;
+      applyPanelSize(parseFloat(el.style.width), parseFloat(el.style.height) || window.innerHeight);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const onSizeDown = (axis: 'w' | 'h') => (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = panelRef.current;
+    if (!el) return;
+    e.preventDefault();
+    const rect = el.getBoundingClientRect();
+    sizeDragRef.current = { axis, x: e.clientX, y: e.clientY, w: rect.width, h: rect.height };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onSizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = sizeDragRef.current;
+    if (!d) return;
+    if (d.axis === 'w') applyPanelSize(d.w + (d.x - e.clientX), d.h);
+    else applyPanelSize(d.w, d.h + (d.y - e.clientY));
+  };
+  const onSizeUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!sizeDragRef.current) return;
+    sizeDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    const el = panelRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    try {
+      localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify({ w: Math.round(rect.width), h: Math.round(rect.height) }));
+    } catch { /* 隐私模式禁用存储 */ }
+  };
   const queueRef = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   // 条目 id 从恢复的对话续接：重开面板后从 1 重数会与旧条目撞车，
@@ -552,6 +628,12 @@ export default function AiAgentPanel({
   }, [activeId]);
   /** 待确认提案的裁决函数：提案条目 id → resolve */
   const pendingRef = useRef(new Map<number, (d: Decision) => void>());
+  /** 上一轮的工具审计记录器：本轮发车前取它的异常摘要，再换成本轮的 */
+  const runtimeRef = useRef<ReturnType<typeof createAgentRuntime> | null>(null);
+  /** 回合轨迹：意图键 + 工具序列 + 裁决结果，跨轮累积，供技能蒸馏聚类 */
+  const traceRef = useRef<ReturnType<typeof createTraceRecorder> | null>(null);
+  /** 已经提示过的技能建议 id：同一张建议卡只打扰用户一次 */
+  const suggestedSkillsRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   /** 视口是否贴着底部（用户上翻回看时为 false，此时不自动跟随） */
   const pinnedRef = useRef(true);
@@ -561,8 +643,13 @@ export default function AiAgentPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+  /** 持久化失败只提示一次：每条新消息都会重试写一次，反复弹窗比丢会话更烦人 */
+  const persistWarnedRef = useRef(false);
   useEffect(() => {
-    persistSessions(sessions, activeId);
+    if (persistSessions(sessions, activeId)) return;
+    if (persistWarnedRef.current) return;
+    persistWarnedRef.current = true;
+    toast('对话太长，没能存进本机存储：关掉面板后这段对话会丢。可先删掉几个旧会话再继续。', 'err', 9000);
   }, [sessions, activeId]);
   useEffect(() => {
     try {
@@ -726,6 +813,18 @@ export default function AiAgentPanel({
       return result;
     }
 
+    if (name === 'load_skill') {
+      const key = String(args.id ?? args.skill ?? '').trim();
+      if (!key) return '错误：需要 id（技能目录里的名字）。';
+      const card = findSkill(docsRef.current, key);
+      if (!card) {
+        return '错误：没有技能「' + key + '」。技能目录在系统提示里；没有对应卡就按常规做法执行，不要臆造技能。';
+      }
+      const result = skillBody(docsRef.current, card);
+      push({ kind: 'tool', id: idRef.current++, name, summary: '技能 ' + card.id, detail: result });
+      return result;
+    }
+
     if (name === 'read_med_book_page') {
       const wantBook = String(args.book ?? '').trim();
       const page = Math.floor(Number(args.page) || 0);
@@ -872,34 +971,21 @@ export default function AiAgentPanel({
         next = appendStudyLogEntry(old, entry, new Date());
       } else if (name === 'propose_card_hints') {
         const heading = String(args.heading ?? '').trim();
-        // 中文输入法很容易把键写成「定义：」：先去掉尾部的半角/全角冒号（cardHints 只认半角冒号），
-        // 再去重、校验。键名本身不改写。
-        const keys = [...new Set((Array.isArray(args.keys) ? args.keys : [])
-          .map((k) => String(k).trim().replace(/[:：]+$/, '').trim())
-          .filter(Boolean))];
         if (!heading) return '错误：缺少 heading（小节标题）。先 read_note，再原样复制标题（不含 # 号）。';
-        if (!keys.length) return '错误：keys 为空。至少给一个属性键，如「定义」。';
-        const bad = keys.find((k) => /[:\s：]/.test(k) || k.length > 12);
-        if (bad) return `错误：属性键「${bad}」不合法——不能含空格或冒号，且不超过 12 个字（参考：定义、首选检查、鉴别要点）。`;
-        const nextLines = insertCardHints(old!, heading, keys);
+        // 键的清洗（去尾部全角冒号）与校验在 core/aiTools，同一套逻辑直接单测
+        const cleaned = cleanCardKeys(args.keys);
+        if ('error' in cleaned) return cleaned.error;
+        const nextLines = insertCardHints(old!, heading, cleaned.keys);
         if (typeof nextLines === 'string') return nextLines;
         next = nextLines.join('\n');
       } else if (name === 'propose_note_patch') {
-        const findText = typeof args.find_text === 'string' ? args.find_text : '';
-        const replaceText = typeof args.replace_text === 'string' ? args.replace_text : '';
-        if (!findText) return '错误：find_text 为空。请先 read_note，再从返回结果里原样复制一段唯一文本。';
-        const occurrences = old!.split(findText).length - 1;
-        if (occurrences > 1) return `错误：find_text 出现了 ${occurrences} 次，不唯一。请扩大上下文（多带几行）让它唯一。`;
-        let hit: AnchorHit | null = null;
-        if (occurrences === 1) {
-          hit = { start: old!.indexOf(findText), end: old!.indexOf(findText) + findText.length };
-        } else {
-          // 逐字 0 命中：宽容匹配（空白/全半角标点/引号/省略号/CRLF 差异）。
-          // 只在恰好唯一命中时放行；匹配失败仍报错让模型重新复制。
-          hit = fuzzyFindAnchor(old!, findText);
-          if (!hit) return '错误：find_text 在笔记中没有找到（已尝试忽略空白与标点差异）。请先 read_note，从返回结果里原样复制（含空格与标点）。';
-        }
-        next = old!.slice(0, hit.start) + replaceText + old!.slice(hit.end);
+        const patched = applyNotePatch(
+          old!,
+          typeof args.find_text === 'string' ? args.find_text : '',
+          typeof args.replace_text === 'string' ? args.replace_text : '',
+        );
+        if ('error' in patched) return patched.error;
+        next = patched.next;
       } else {
         const content = typeof args.content === 'string' ? args.content : '';
         if (!content.trim()) return '错误：正文为空。';
@@ -1082,6 +1168,7 @@ export default function AiAgentPanel({
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     let wasAborted = false;
+    let turnFailed = false;
     let thinkAccum = '';
     // 本轮助手正文累计（工具轮之间的过渡语也算进来，避免把最后一句「已写入…」当成答案存进速查）
     let answerAccum = '';
@@ -1118,7 +1205,13 @@ export default function AiAgentPanel({
     // 教材数量决定系统提示里「本机有没有教材」的说法：读一次元数据（小表，不读正文），
     // 失败按「没有」处理——宁可让模型少用教材工具，也不能让它以为有书却查不到。
     const medBookCount = await medBooksList().then((books) => books.length).catch(() => 0);
-    const sys = buildNoteSystemPrompt(currentPath, agentMd ? truncateForModel(agentMd, 4_000) : null, coachRef.current, medBookCount)
+    // 技能目录：库里「AI命令/技能/」下的卡，只注入通过校验的那些（卡里出现未注册工具就整卡作废），
+    // 正文靠 load_skill 按需取——目录常驻、正文不常驻。
+    const skillCards = validateSkills(collectSkills(docsRef.current), (t) => AGENT_TOOL_NAMES.has(t)).active;
+    const skillCatalog = formatSkillCatalog(skillCards);
+    // 人格卡与技能卡同目录族但语义不同：它常驻、只取一张；没有卡就是空串，保持默认口吻。
+    const soulPrefix = formatSoulPrefix(collectSouls(docsRef.current));
+    const sys = buildNoteSystemPrompt(currentPath, agentMd ? truncateForModel(agentMd, 4_000) : null, coachRef.current, medBookCount, skillCatalog, soulPrefix)
       + (prefsRef.current.yolo
         ? '\nyolo 模式：写入操作免确认直接生效（自动存历史版本，可回溯）。仍必须先 read_note 拿最新原文再动手；'
           + '发现笔记被用户改过会停下询问；改动保持最小，删除或整篇重写要格外谨慎。'
@@ -1128,12 +1221,58 @@ export default function AiAgentPanel({
       ...history,
       { role: 'user', content: wireContent },
     ];
+    // 上一轮的工具异常（执行失败 / 被用户拒绝 / 写后核对不符）补进本轮系统消息。
+    // 会话历史里的【写入提案结果】只覆盖已裁决的提案卡，读工具报错与重复被拒在这里兜住。
+    const prevAudit = runtimeRef.current?.takeAuditSummary() ?? '';
+    if (prevAudit) wire.splice(1, 0, { role: 'system', content: prevAudit });
+
+    // 治理记录器：只做分类、动作日志与写后核对，不接管执行——写入仍由 executeTool
+    // 里的 diff 卡片 + awaitDecision 把关，两套确认不叠加。
+    const runtime = createAgentRuntime({
+      registry: AGENT_TOOL_REGISTRY,
+      // 包一层只为了上报「现在在跑哪个工具」，执行语义不变
+      execute: async (name, argsJson, signal) => {
+        setActiveTool({ name, since: Date.now() });
+        try {
+          return await executeTool(name, argsJson, signal);
+        } finally {
+          setActiveTool(null);
+        }
+      },
+      verify: makeWriteVerifier((p) => docsRef.current.get(p)),
+    });
+    runtimeRef.current = runtime;
+
+    // 回合轨迹：本轮意图键 + 工具序列 + 裁决，跨轮累积成技能蒸馏的样本集。
+    // 历史提问去掉最后一条（就是本轮这条，否则自己跟自己相似度 1.0，永远是「重复提问」）。
+    traceRef.current ??= createTraceRecorder({ limit: 200 });
+    const priorAsks = itemsRef.current
+      .flatMap((i) => (i.kind === 'msg' && i.role === 'user' ? [i.text] : []))
+      .slice(0, -1);
+    const slashCommand = text.trimStart().startsWith('/')
+      ? (text.trimStart().slice(1).split(/\s+/, 1)[0] || null)
+      : null;
+    const turnTrace = traceRef.current.begin({
+      sessionId: active.id,
+      userText: text,
+      command: slashCommand,
+      priorUserTexts: priorAsks,
+    });
+
+    // 预算分桶：这里只度量、不干预（真正的裁剪在 aiAgent 的 fitToolBudget 里做），
+    // 给出「这一轮是谁吃掉了上下文」的读数，超 85% 时提示优先压哪段。
+    const buckets = measureContext(wire, { toolsJson: JSON.stringify(ALL_AGENT_TOOLS) });
+    const advice = adviseCompaction(buckets);
+    setCtxHint(
+      '上下文 ' + Math.round((buckets.totalTokens / CONTEXT_TOTAL_BUDGET) * 100) + '%'
+        + (advice.needed ? '·' + advice.reason : ''),
+    );
 
     const agentOpts: RunAgentOptions = {
       settings: settingsRef.current,
       messages: wire,
       tools: ALL_AGENT_TOOLS,
-      executeTool,
+      executeTool: runtime.executeTool,
       signal: ctrl.signal,
       onDelta: (t) => { lastEventRef.current = Date.now(); streamRef.current += t; setStreamText(streamRef.current); },
       onThinking: (t) => {
@@ -1173,6 +1312,7 @@ export default function AiAgentPanel({
       }
     } catch (e) {
       if (isAbortError(e)) wasAborted = true;
+      else turnFailed = true;
       push({
         kind: 'error', id: idRef.current++,
         text: stalled
@@ -1192,6 +1332,37 @@ export default function AiAgentPanel({
       setStreamText('');
       setThinkingText('');
       if (abortRef.current === ctrl) abortRef.current = null;
+      // 回合收尾：把本轮的治理记录回放成一条轨迹，再据此校准「AI命令/技能/」里已有卡的置信度。
+      // 这一段属于副业：任何一步出错都只吞掉，不能影响本轮回复，也不影响队列续跑。
+      try {
+        for (const rec of runtime.records()) {
+          turnTrace.call(
+            rec.toolName, JSON.stringify(rec.toolArgs ?? {}),
+            rec.executionStatus === 'success', rec.result ? rec.result.length : 0,
+          );
+          if (rec.approvalStatus === 'rejected') turnTrace.decide(rec.id, 'rejected');
+          else if (rec.approvalStatus === 'approved') turnTrace.decide(rec.id, 'applied');
+          else if (rec.approvalStatus === 'auto') turnTrace.decide(rec.id, 'auto');
+        }
+        turnTrace.finish(wasAborted ? 'aborted' : turnFailed ? 'error' : 'ok');
+        // 中止的轨迹工具序列是残缺的：拿它调置信度会把「用户中途叫停」记成技能失败。
+        if (!wasAborted) {
+          const { updates, suggestions } = distillSkills(traceRef.current.list(), collectSkills(docsRef.current), { now: Date.now() });
+          for (const updated of updates) {
+            const body = docsRef.current.get(updated.path);
+            if (body === undefined) continue;
+            try {
+              await onSave(updated.path, toSkillMarkdown(updated, stripFrontmatter(body)));
+            } catch { /* 单张卡写失败只影响这一张的置信度，不影响回复 */ }
+          }
+          // 建议卡不自动落盘：技能卡是指令文件，等于给助手加规矩，只能由用户决定。
+          const fresh = suggestions.find((c) => !suggestedSkillsRef.current.has(c.path));
+          if (fresh) {
+            suggestedSkillsRef.current.add(fresh.path);
+            toast(`同类任务已经成功重复 ${fresh.samples} 次，可以固化成技能：新建 ${fresh.path}（工具顺序 ${fresh.tools.join(' → ')}）`, 'ok', 12_000);
+          }
+        }
+      } catch { /* 轨迹/技能维护失败不影响本轮 */ }
       // 队列续跑（用户主动停止时不自动接续，留给用户决定）
       const next = wasAborted ? undefined : queueRef.current.shift();
       if (next !== undefined) {
@@ -1219,7 +1390,7 @@ export default function AiAgentPanel({
 
   const mentionMatches = mention
     ? (mention.kind === 'note'
-        ? [...docs.keys()].filter((p) => p.endsWith('.md') && p.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 8)
+        ? notePaths.filter((p) => p.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 8)
         : listCommands(docs).filter((c) => c.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 8))
     : [];
 
@@ -1245,6 +1416,54 @@ export default function AiAgentPanel({
     setMentionIdx(0);
   };
 
+  const [copiedId, setCopiedId] = useState(0);
+  /** 复制一条回答：Tauri WebView 里 clipboard.writeText 可能被权限挡，退回 execCommand */
+  const copyMessage = async (id: number, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } finally { ta.remove(); }
+    }
+    setCopiedId(id);
+    window.setTimeout(() => setCopiedId(0), 1600);
+  };
+  /** 重试：砍掉这条回答之后的所有条目，把它对应的用户提问原样重发 */
+  const retryTurn = (assistantId: number) => {
+    if (runningRef.current) return;
+    const list = itemsRef.current;
+    const ai = list.findIndex((i) => i.id === assistantId);
+    if (ai < 0) return;
+    let ui = -1;
+    for (let k = ai - 1; k >= 0; k -= 1) {
+      const it = list[k];
+      if (it.kind === 'msg' && it.role === 'user') { ui = k; break; }
+    }
+    if (ui < 0) return;
+    const ask = list[ui];
+    if (ask.kind !== 'msg') return;
+    const { text, quote } = ask;
+    const cut = (arr: ChatItem[]) => {
+      const k = arr.findIndex((i) => i.id === ask.id);
+      if (k < 0) return arr;
+      // 被砍掉的待确认提案要先拒掉，否则等在那里的 promise 永远不 resolve
+      for (const it of arr.slice(k)) {
+        if (it.kind === 'proposal' && it.status === 'pending') pendingRef.current.get(it.id)?.('rejected');
+      }
+      return arr.slice(0, k);
+    };
+    itemsRef.current = cut(itemsRef.current);
+    updateActive((s) => ({ ...s, items: cut(s.items), updatedAt: Date.now() }));
+    pendingQuoteRef.current = quote ?? null;
+    setPendingQuote(quote ?? null);
+    void sendText(text);
+  };
+
   /* ------------------------------------------------------------- 渲染 */
 
   /** 助手消息里的 [[双链]]：能解析就跳转对应笔记 */
@@ -1260,7 +1479,18 @@ export default function AiAgentPanel({
     : '';
 
   return (
-    <div className={`agent-panel${pendingQuote ? ' has-quote' : ''}`}>
+    <div className={`agent-panel${pendingQuote ? ' has-quote' : ''}`} ref={panelRef}>
+      {/* 左边缘拖宽、上边缘拖高。pointer capture 挂在把手上，拖出面板外也不丢事件。 */}
+      <div
+        className="agent-panel-grip agent-panel-grip-w"
+        role="separator" aria-orientation="vertical" aria-label="拖动调整 AI 面板宽度"
+        onPointerDown={onSizeDown('w')} onPointerMove={onSizeMove} onPointerUp={onSizeUp} onPointerCancel={onSizeUp}
+      />
+      <div
+        className="agent-panel-grip agent-panel-grip-h"
+        role="separator" aria-orientation="horizontal" aria-label="拖动调整 AI 面板高度"
+        onPointerDown={onSizeDown('h')} onPointerMove={onSizeMove} onPointerUp={onSizeUp} onPointerCancel={onSizeUp}
+      />
       <div className="ai-header agent-header">
         <div className="agent-brand">
           <span className="agent-brand-mark" aria-hidden="true"><IconLattice size={15} /></span>
@@ -1342,6 +1572,11 @@ export default function AiAgentPanel({
               </button>
             </div>
           </>
+        )}
+        {onSwitchToAi && (
+          <button className="btn-small" onClick={onSwitchToAi} aria-label="切到 AI 问答">
+            AI 问答
+          </button>
         )}
         <button
           className="btn-small"
@@ -1455,6 +1690,23 @@ export default function AiAgentPanel({
                 {item.partial && <p className="agent-partial">（已停止，以上为未写完的回答）</p>}
                 <CitationCheck text={item.text} docs={citationDocs} />
                 <ImportQuestionsRow text={item.text} notePath={currentPath} />
+                <div className="agent-msg-actions">
+                  <button
+                    type="button" className="agent-msg-act"
+                    aria-label="复制这条回答"
+                    onClick={() => void copyMessage(item.id, item.text)}
+                  >
+                    {copiedId === item.id ? '已复制' : '复制'}
+                  </button>
+                  <button
+                    type="button" className="agent-msg-act"
+                    aria-label="重新生成这条回答"
+                    disabled={running}
+                    onClick={() => retryTurn(item.id)}
+                  >
+                    重试
+                  </button>
+                </div>
               </div>
             ) : (
               <div key={item.id} className="agent-msg user">
@@ -1470,17 +1722,12 @@ export default function AiAgentPanel({
               </div>
             );
           }
-          if (item.kind === 'tool') {
-            return (
-              <details key={item.id} className="agent-tool">
-                <summary><span className="agent-tool-tag">{toolIcon(item.name)}</span>{item.summary}</summary>
-                <pre className="agent-tool-detail">{item.detail}</pre>
-              </details>
-            );
-          }
+          // 工具调用不进正文：查了什么、返回了多少字都在 turn trace 与治理日志里，
+          // 面板只留「依据」（引文核验）与「推理」（思考卡），读起来才是一篇文章而不是操作流水
+          if (item.kind === 'tool') return null;
           if (item.kind === 'thinking') {
             return (
-              <details key={item.id} className="agent-thinking">
+              <details key={item.id} className="agent-thinking" open>
                 <summary><span className="agent-tool-tag">思考</span>推理过程</summary>
                 <div className="agent-thinking-body">{item.text}</div>
               </details>
@@ -1695,6 +1942,11 @@ export default function AiAgentPanel({
             aria-label="对 AI 笔记说点什么"
           />
           <div className="agent-composer-foot">
+            {activeTool && (
+              <span className="agent-status" role="status">
+                {activeTool.name} · {((Date.now() - activeTool.since) / 1000).toFixed(1)}s
+              </span>
+            )}
             {running ? (
               <button className="btn-small agent-stop" onClick={stop}>停止</button>
             ) : (
@@ -1746,24 +1998,19 @@ export default function AiAgentPanel({
             {usageText}
           </span>
         )}
+        {ctxHint && (
+          <span
+            className="agent-usage"
+            title="上一轮请求发出前的上下文预算估算（系统提示 + 历史 + 工具结果 + 工具声明）；超 85% 会提示优先压哪一段"
+          >
+            {ctxHint}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-function toolIcon(name: string): string {
-  if (name === 'list_notes') return '目录';
-  if (name === 'search_notes') return '检索';
-  if (name === 'read_note') return '读取';
-  if (name === 'get_review_due') return '复习';
-  if (name === 'get_study_summary') return '状态';
-  if (name === 'get_weak_chapters') return '错题';
-  if (name === 'get_quiz_progress') return '题库';
-  if (name === 'list_medical_books' || name === 'search_medical_books' || name === 'read_med_book_page') return '教材';
-  if (name === 'verify_quote') return '引文';
-  if (name === 'propose_card_hints') return '提示键';
-  return '工具';
-}
 
 /* ------------------------------------------------------------ 设置表单 */
 
@@ -1849,13 +2096,13 @@ function SettingsForm({ initial, onSaved, onCancel }: {
     await refreshMedBooks();
   };
 
-  const valid = /^https?:\/\//.test(baseUrl.trim()) && !!model.trim();
+  const valid = isAllowedAgentBaseUrl(baseUrl) && !!model.trim();
 
   /** 连通性测试：真实发一条短请求；成功后顺手拉 /models 做模型名候选。
    *  中转站友好：404 且地址没带 /vN 版本段时自动补 /v1 重试一次并回填输入框。 */
   const test = async () => {
     const orig = baseUrl.trim().replace(/\/+$/, '');
-    if (!/^https?:\/\//.test(orig) || !model.trim()) {
+    if (!isAllowedAgentBaseUrl(orig) || !model.trim()) {
       setResult({ ok: false, text: '先填好接口地址与模型名' });
       return;
     }
@@ -1924,6 +2171,11 @@ function SettingsForm({ initial, onSaved, onCancel }: {
           spellCheck={false}
         />
       </label>
+      {baseUrl.trim().startsWith('http://') && !isAllowedAgentBaseUrl(baseUrl) && (
+        <p className="agent-settings-hint muted">
+          远程地址必须使用 https://；HTTP 只允许 localhost、127.0.0.1 和 [::1]，避免 API Key 明文传输。
+        </p>
+      )}
       <label className="agent-field">
         <span>API Key{baseUrl.includes('localhost') ? '（本地服务可留空）' : ''}</span>
         <input

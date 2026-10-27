@@ -11,6 +11,8 @@ import {
   chaptersOf,
   type QuizBank, type QuizQuestion,
 } from '../core/qbank';
+import { analyzePick, pickHint } from '../core/answerReview';
+import { questionNotePath, questionToMarkdown } from '../core/qbankNote';
 import { parseQbankFile, parseQbankJsonText } from '../core/qbankParse';
 import { mergeQuestions, mergeSummary } from '../core/qbankMerge';
 import {
@@ -23,8 +25,14 @@ import { QUESTION_FIELD_LABELS, searchBanks } from '../core/qbankSearch';
 import { segment } from '../core/searchHit';
 import { buildTagContext, difficultyBand, DIFFICULTY_LABELS, Q_TAG_LABELS, tagsOf, type DifficultyBand, type QStatusTag } from '../core/qbankTags';
 import { CONFIDENCE_LABELS, CONFIDENCE_VALUES, recordCalibration, type Confidence } from '../core/qbankCalib';
+import {
+  gatePrompt, needsRationale, rationaleHint, rationaleReady,
+  reflectionCounter, reflectionReady, shouldGateExplanation,
+} from '../core/reviewGate';
 import { buildChapterIndex, questionNoteLabel, resolveQuestionNote } from '../core/qbankNotes';
-import { recordMistake } from '../core/mistakes';
+import { getMistake, lapseMistake, recordMistake, stageOf } from '../core/mistakes';
+import { clearCursor, loadCursor, resumeQuestions, saveCursor, type QuizCursor } from '../core/quizCursor';
+import { isKnowledgeDone, markKnowledgeDone, pickTodayKnowledge, type KnowledgePick } from '../core/dailyKnowledge';
 import { toast, confirmBox } from '../core/feedback';
 import { markStudy } from '../core/stats';
 import { bankToAnki, downloadFile } from '../core/anki';
@@ -50,6 +58,12 @@ interface Props {
   /** 外部导入完成后刷新题库列表的信号：统一面板是从本面板里打开的，导入的题库必须在
    *  「题库练习」里立刻可见，否则用户会以为导入失败了。数值变化即触发重新读库。 */
   refreshToken?: number;
+  /** 把当前这道题写成一篇笔记（含解析、我的选择、批注、知识点）。不传则不显示入口 */
+  onSaveNote?: (path: string, markdown: string) => void;
+  /** 从首页「继续刷题」进来：题库就绪后自动接上上次没练完的那一轮（见 core/quizCursor） */
+  autoResume?: boolean;
+  /** 自动续做已处理（无论接上没有）——调用方清掉标记，免得下次打开题库又自动续 */
+  onAutoResumeDone?: () => void;
 }
 
 /** rules 为 null = 不组题，整库洗牌（「全部」入口）；非 null 时「再练一轮」沿用同一套规则 */
@@ -95,8 +109,54 @@ interface ImportReport {
   /** 失败原因（面向使用者的中文说明） */
   error?: string;
 }
-export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAskAi, onOpenExam, resolveAsset, onUnifiedImport, refreshToken }: Props) {
+/** 讲解音频：只在答完/背题时出现；preload="none"——一题一段录音，预载会把带宽吃光 */
+function ExplainAudio({ src, dur }: { src: string; dur?: number }) {
+  const label = dur && dur > 0
+    ? `讲解音频 · ${Math.floor(dur / 60)}:${String(Math.round(dur % 60)).padStart(2, '0')}`
+    : '讲解音频';
+  return (
+    <div className="quiz-audio">
+      <span className="muted">{label}</span>
+      <audio controls preload="none" src={src} />
+    </div>
+  );
+}
+
+/** 习题界面缩放：整块界面的百分比，存本机（换设备不带，属个人手感） */
+const ZOOM_KEY = 'knowlattice-quiz-zoom';
+const ZOOM_MIN = 0.9;
+const ZOOM_MAX = 1.6;
+
+function readZoom(): number {
+  try {
+    const n = Number(localStorage.getItem(ZOOM_KEY));
+    if (!Number.isFinite(n) || n < ZOOM_MIN || n > ZOOM_MAX) return 1;
+    return Math.round(n * 10) / 10;
+  } catch {
+    return 1;
+  }
+}
+
+export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAskAi, onOpenExam, resolveAsset, onUnifiedImport, refreshToken, onSaveNote, autoResume, onAutoResumeDone }: Props) {
   const [banks, setBanks] = useState<QuizBank[]>([]);
+  /** 题库行操作区：默认折叠成行内竖向面板，用户自己决定展开哪些（偏好记在 localStorage） */
+  const [openBankActions, setOpenBankActions] = useState<Set<string>>(new Set());
+  /** 只初始化一次：偏好只决定默认，之后每行各点各的 */
+  const bankActionsSeeded = useRef(false);
+
+  const toggleBankActions = (name: string) => {
+    setOpenBankActions((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      try { localStorage.setItem('knowlattice.quiz.bank-actions', next.size > 0 ? 'open' : 'closed'); } catch { /* 同上 */ }
+      return next;
+    });
+  };
+  const toggleAllBankActions = (open: boolean) => {
+    try { localStorage.setItem('knowlattice.quiz.bank-actions', open ? 'open' : 'closed'); } catch { /* 同上 */ }
+    setOpenBankActions(open ? new Set(banks.map((b) => b.name)) : new Set());
+  };
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -115,8 +175,21 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
   const [revealed, setRevealed] = useState(false);
   /** 多套解析里当前选中的来源下标；单条/无解析时用不到，切题时重置 */
   const [explIdx, setExplIdx] = useState(0);
+  /**
+   * 逐题的作答快照（下标 → 已选 + 是否已看答案）。
+   * 前后翻题时必须把「当时选了什么、看到答案没有」一起存起来：只改 idx 的话
+   * 回看会变成一道没答过的题，批注也藏起来了——那不是回看，是重做。
+   */
+  const [snaps, setSnaps] = useState<Record<number, { picked: number[]; revealed: boolean }>>({});
   /** 作答前自报的把握度（1~5）；null = 没报。可选，不报也能作答，只是不计入校准样本 */
   const [confidence, setConfidence] = useState<Confidence | null>(null);
+  /** 解析门控：答错 / 没把握时先写一句推理，写够字数或勾「我想过了」才展开解析 */
+  const [reflectText, setReflectText] = useState('');
+  const [reflectAck, setReflectAck] = useState(false);
+  /** 自证：做对了也可能靠蒙，答案对了但题还没练熟时请人写一段推理链 */
+  const [rationaleText, setRationaleText] = useState('');
+  /** 自证后的自查结论：闭环 / 有漏洞（有漏洞的答对题要回到错题队列） */
+  const [rationaleVerdict, setRationaleVerdict] = useState<'closed' | 'guess' | null>(null);
   /** 正在写批注的选项下标（null = 没在写）与草稿文本 */
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
@@ -133,17 +206,65 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
   const [searchQ, setSearchQ] = useState('');
   /** 背题模式：不判分、直接摊开答案背一遍（进入即按「背题」渲染，见下方背题分支） */
   const [beatMode, setBeatMode] = useState(false);
+  /** 断点续做：上次没练完的那一轮（见 core/quizCursor；过期/失效的游标读出来就是 null） */
+  const [cursor, setCursor] = useState<QuizCursor | null>(loadCursor);
+  const [zoom, setZoom] = useState(readZoom);
+  /** 缩放只在 0.9–1.6 之间走，并且写回本机：调到 160% 是为了看清长题干，不是排版实验 */
+  const nudgeZoom = (delta: number) => {
+    setZoom((prev) => {
+      const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round((prev + delta) * 10) / 10));
+      try { localStorage.setItem(ZOOM_KEY, String(next)); } catch { /* 存不上就只管本次 */ }
+      return next;
+    });
+  };
+  /** 今日知识点「看过了」的标记键（当天+库+章节）；null = 还没点 */
+  const [knowDoneKey, setKnowDoneKey] = useState<string | null>(null);
+
+  /**
+   * 首页「继续刷题」的两个 prop 走 ref：父组件内联箭头函数每次都换引用，直接进 effect 依赖
+   * 会让题库每渲染一次就重读一遍 IndexedDB。这里只关心「这次读库里要不要顺手续上一轮」。
+   */
+  const autoResumeRef = useRef({ on: autoResume, done: onAutoResumeDone });
+  autoResumeRef.current = { on: autoResume, done: onAutoResumeDone };
 
   useEffect(() => {
     let active = true;
-    Promise.all([loadBanks(), initializeStats(), initializeStars()]).then(([loadedBanks, loadedStats, loadedStars]) => {
+    /**
+     * 空列表 ≠ 用户没题库：读库会和「重置 / 迁移 legacy 数据」交错（组件重挂载时尤其明显）。
+     * 再读一次把这个窗口挡掉；仍为空（或抛错）就按「确实还没有题库」处理——
+     * 新用户第一次打开时必须看到导入入口，不能因为防抖反而给他一个错误提示。
+     */
+    const load = async () => {
+      const [bankList, loadedStats, loadedStars] = await Promise.all([
+        loadBanks(), initializeStats(), initializeStars(),
+      ]);
+      const list = bankList.length === 0 ? await loadBanks().catch(() => bankList) : bankList;
+      return { list, loadedStats, loadedStars };
+    };
+    load().then(({ list: loadedBanks, loadedStats, loadedStars }) => {
       if (!active) return;
       setBanks(loadedBanks);
+      // 和 setBanks 放在同一个提交里，避免「先渲染折叠按钮，再由 effect 展开」：
+      // 用户恰好在 effect 前点了一下，会把展开又切回折叠。
+      if (!bankActionsSeeded.current && loadedBanks.length > 0) {
+        bankActionsSeeded.current = true;
+        let open = false;
+        try { open = localStorage.getItem('knowlattice.quiz.bank-actions') === 'open'; } catch { /* 隐私模式 */ }
+        if (open) setOpenBankActions(new Set(loadedBanks.map((b) => b.name)));
+      }
+
       if (loadedBanks.length === 0) setImportOpen(true);
       setStats(loadedStats);
       setStars(loadedStars);
       setLoadError(null);
       setReady(true);
+      // 首页「继续刷题」进来的：题库刚读回来才谈得上续做。早于这里续，banks 还是空的，
+      // resumeLast 会把游标当成「题库已删」清掉——点了没反应，回去还得重练。
+      if (autoResumeRef.current.on) {
+        const c = loadCursor();
+        if (c) resumeLast(c, loadedBanks);
+        autoResumeRef.current.done?.();
+      }
     }).catch((error: unknown) => {
       if (!active) return;
       setLoadError(error instanceof Error ? error.message : String(error));
@@ -203,13 +324,24 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
   const notePathOf = (question: QuizQuestion) =>
     resolveQuestionNote(question, resolveLink, chapterIndex, (p) => docs.has(p));
 
-  // Exit policy: a practice run in progress must not be lost to a stray click.
-  const inProgress = Boolean(session) && results.some((r) => r === true || r === false);
+  const q = session?.questions[idx];
+
+  /**
+   * Exit policy: a practice run in progress must not be lost to a stray click.
+   *
+   * 判据是「还在答题中」（有 session 且当前题还没走完），**不是「有没有答过题」**：
+   * 上一版用 `results.some(r => r === true || r === false)`，于是刚开练、第一题还没提交答案时
+   * 点一下面板外面的任何地方（遮罩上铺着整屏，外面的按钮点到的就是它）会一声不响地整轮退出
+   * —— 用户实测反馈「题库训练时候点击外面的按钮会直接退出训练」。
+   * 成绩页（q 为空）没有可丢的进度，直接关；答题中才拦一下。
+   */
+  const inProgress = Boolean(session && q);
   const requestClose = () => {
-    if (inProgress === false) { onClose(); return; }
+    if (!inProgress) { onClose(); return; }
+    const answered = results.filter((r) => r !== undefined).length;
     void confirmBox({
-      title: '练习题还没做完，确定退出？',
-      detail: '已作答的记录不会保存',
+      title: '这一轮还没做完，确定退出？',
+      detail: `已答 ${answered} / ${session!.questions.length} 题 · 逐题记录已保存，退出后可从「继续上次」接着练`,
       okText: '退出',
       danger: true,
     }).then((ok) => { if (ok) onClose(); });
@@ -223,7 +355,6 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     requestClose();
   });
 
-  const q = session?.questions[idx];
   const correctCount = results.filter((r) => r === true).length;
 
   // ---------- 导入 ----------
@@ -351,6 +482,97 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     setBeatMode(false);
   };
 
+  /**
+   * 继续上次：按游标里的题目 id 找回原题（core/quizCursor.resumeQuestions）。
+   * 题库被删、题被替换掉的部分直接跳过；一道都找不回来就清游标。
+   * 本轮结果页只统计这一节——已经答过的题在逐题记录里（进度/待复习/错题本都还在）。
+   */
+  function resumeLast(c: QuizCursor, list: QuizBank[] = banks) {
+    const bank = list.find((b) => b.name === c.bank);
+    if (!bank) {
+      clearCursor();
+      setCursor(null);
+      toast('上次练的题库已经不在了，断点已清除', 'info', 5000);
+      return;
+    }
+    const r = resumeQuestions(c, bank.questions);
+    if (!r) {
+      clearCursor();
+      setCursor(null);
+      toast('上次那一轮已经没有可续的题了', 'info', 5000);
+      return;
+    }
+    setSession({ bankName: bank.name, questions: r.questions, rules: c.rules });
+    setIdx(r.idx);
+    // 已经答过的题连对错一起恢复：只恢复题号、分数清零，等于「进度还在但记录没了」
+    setResults(r.results.map((v) => (v === null ? undefined : v)));
+    setPicked(c.picked ?? []);
+    setRevealed(false);
+    setExplIdx(0);
+    setConfidence(null);
+    setEditing(null);
+    setBeatMode(false);
+    toast(`接着上次练：「${bank.name}」第 ${r.idx + 1}/${r.questions.length} 题`, 'ok', 4200);
+  };
+
+
+  /** 今日知识点：每天固定推一个章节（挑选规则见 core/dailyKnowledge），点了才换 */
+  const todayKnowledge = useMemo(() => pickTodayKnowledge(banks, stats), [banks, stats]);
+  const knowDone = todayKnowledge
+    ? knowDoneKey === `${todayKnowledge.date}|${todayKnowledge.bank}|${todayKnowledge.chapter}`
+      || isKnowledgeDone(todayKnowledge)
+    : false;
+
+  /** 练这个知识点的 5 道题（不足就全给）。不整库洗牌——那等于把今天的建议淹掉 */
+  const startKnowledge = (p: KnowledgePick) => {
+    const bank = banks.find((b) => b.name === p.bank);
+    if (!bank) return;
+    const pool = bank.questions.filter((q) => chaptersOf(q).includes(p.chapter));
+    const qs = pickQuestions({ ...bank, questions: pool }, 5);
+    if (!qs.length) {
+      toast('这个知识点下没有可选题目', 'info', 4000);
+      return;
+    }
+    setSession({ bankName: bank.name, questions: qs, rules: null });
+    setIdx(0);
+    setResults(new Array(qs.length).fill(undefined));
+    setPicked([]);
+    setRevealed(false);
+    setExplIdx(0);
+    setConfidence(null);
+    setEditing(null);
+    setBeatMode(false);
+  };
+
+  /**
+   * 断点续做：练到哪就记到哪。挂在 session/idx 上，作答、翻页、中途关掉面板都能覆盖到；
+   * 一轮做完（idx 越界）就清游标，免得下次提示一个已经做完的轮次。
+   * 这里只写外部存储、不改 state：提示条需要的最新值在「回到题库列表」时现读（见 exitToList），
+   * 在 effect 里 setState 会多跑一遍渲染，React 也会给一条「effect 里不该同步 setState」的警告。
+   */
+  useEffect(() => {
+    if (!session) return;
+    if (idx >= session.questions.length) {
+      clearCursor();
+      return;
+    }
+    saveCursor({
+      bank: session.bankName,
+      qids: session.questions.map((x) => x.id),
+      idx,
+      rules: session.rules,
+      // undefined 进不了 JSON：未答的题存 null，读回来再还原成 undefined
+      results: results.map((r) => r ?? null),
+      picked,
+      at: Date.now(),
+    });
+  }, [session, idx, results, picked]);
+
+  /** 回到题库列表：现读一次游标，让提示条与本轮实际进度对齐 */
+  const exitToList = () => {
+    setSession(null);
+    setCursor(loadCursor());
+  };
   /** 答错且关联笔记存在 → 记入错题本；同时对每道题记一次逐题历史（错题加权与 FSRS 排程的数据源） */
   const judge = async (correct: boolean) => {
     if (!q) return;
@@ -379,6 +601,27 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     setConfidence(null);
     setEditing(null);
     setIdx((i) => i + 1);
+  };
+
+  /**
+   * 跳到指定题号（上一题 / 直接输入题号都走这里）。
+   * 离开前把当前题的作答状态存进快照，回来时原样恢复；越界直接忽略，
+   * 不夹取——「下一题」已经在最后一题时换成「查看成绩」，这里再夹会跳回上一题。
+   */
+  const goTo = (n: number) => {
+    if (!session || n < 0 || n >= session.questions.length || n === idx) return;
+    setSnaps((m) => ({ ...m, [idx]: { picked, revealed } }));
+    const back = snaps[n];
+    setIdx(n);
+    setPicked(back?.picked ?? []);
+    setRevealed(back?.revealed ?? false);
+    setExplIdx(0);
+    setConfidence(null);
+    setReflectText('');
+    setReflectAck(false);
+    setRationaleText('');
+    setRationaleVerdict(null);
+    setEditing(null);
   };
 
   /** 收藏 / 取消收藏当前题目（重点题）。内存先变、存储后写，按钮立即反映结果。 */
@@ -425,6 +668,30 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
       : s));
   };
 
+  /** 选项批注输入框：作答视图与背题视图共用同一套交互（Ctrl/⌘+Enter 保存、Esc 取消、清空即删除） */
+  const noteEditor = (i: number) => (
+    <div className="opt-note-edit">
+      <textarea
+        className="opt-note-input"
+        data-note-input="1"
+        rows={2}
+        autoFocus
+        value={draft}
+        placeholder="这个选项为什么对、为什么错，写下来下次一眼看到"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { setEditing(null); return; }
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            commitNote(i);
+          }
+        }}
+        onBlur={() => commitNote(i)}
+      />
+      <span className="opt-note-hint">Ctrl/⌘+Enter 保存 · Esc 取消 · 清空即删除</span>
+    </div>
+  );
+
   // ---------- 渲染 ----------
   if (!ready || loadError) {
     return (
@@ -439,6 +706,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     );
   }
 
+
+
   // ---------- 背题模式（不判分，直接摊开答案背） ----------
   if (session && q && beatMode) {
     const expls = explanationsOf(q);
@@ -449,7 +718,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     const notePath = notePathOf(q);
     return (
       <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
-        <DialogSurface className="panel quiz-panel" label={`背题模式，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
+        <DialogSurface className="panel quiz-panel" style={{ zoom }} label={`背题模式，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">背题 · {session.bankName} · 第 {idx + 1} / {session.questions.length} 题</span>
             <button
@@ -459,6 +728,10 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
               title={starredNow ? '取消收藏' : '收藏 / 标为重点题'}
               onClick={() => void toggleCurrentStar()}
             >{starredNow ? '★' : '☆'}</button>
+            {/* 界面缩放：题干长、字号小的时候整块放大（连图一起放大），关掉应用再打开还保持 */}
+            <button className="btn-icon" aria-label="缩小题目界面" title="缩小" onClick={() => nudgeZoom(-0.1)}>A−</button>
+            <button className="btn-icon" aria-label="放大题目界面" title="放大" onClick={() => nudgeZoom(0.1)}>A+</button>
+            <span className="muted">{(zoom * 100).toFixed(0)}%</span>
             <button className="btn-small" onClick={() => setBeatMode(false)}>退出背题</button>
             <button className="btn-icon" onClick={requestClose} aria-label="关闭"><IconClose /></button>
           </div>
@@ -486,15 +759,37 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
             ) : null}
             {q.type === 'choice' && q.options.length > 0 && (
               <div className="quiz-opts">
-                {q.options.map((opt, i) => (
-                  <div key={i} className={`opt${right.includes(i) ? ' right' : ''}`}>
-                    <b>{String.fromCharCode(65 + i)}</b> {opt}
-                    {right.includes(i) && <span className="opt-mark">✓</span>}
-                  </div>
-                ))}
+                {q.options.map((opt, i) => {
+                  /* 背题就是对着答案看题：这里正是想写批注的时候。
+                     以前背题模式没有铅笔，X 型题这类多选项题基本只能靠背题复习，
+                     于是「X 型题无法批注」的一半原因在这里。 */
+                  const note = q.optionNotes?.[i] ?? '';
+                  const letter = String.fromCharCode(65 + i);
+                  return (
+                    <div key={i} className={`opt${right.includes(i) ? ' right' : ''}`}>
+                      <b>{letter}</b> {opt}
+                      {right.includes(i) && <span className="opt-mark">✓</span>}
+                      <button
+                        className={`btn-icon opt-note-btn${note ? ' has-note' : ''}`}
+                        aria-label={note ? `修改选项 ${letter} 的批注` : `给选项 ${letter} 写批注`}
+                        title={note ? '修改批注' : '给这个选项写批注'}
+                        onClick={() => (editing === i ? setEditing(null) : beginNote(i))}
+                      >
+                        <IconPencil size={14} />
+                      </button>
+                      {editing === i ? noteEditor(i) : note ? (
+                        <div className="opt-note">
+                          <span className="opt-note-icon" aria-hidden="true"><IconPencil size={12} /></span>
+                          <span className="opt-note-text">{note}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             )}
             <div className="quiz-answer"><b>参考答案</b><p>{q.answerText}</p></div>
+            {q.audio && <ExplainAudio src={q.audio} dur={q.audioDur} />}
             {expls.length > 0 && (
               <div className="quiz-expl is-right">
                 {expls.map((e, i) => <p key={i}>{e.source ? `${e.source}：${e.text}` : e.text}</p>)}
@@ -509,7 +804,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
             {idx + 1 < session.questions.length ? (
               <button className="btn-primary" onClick={() => setIdx((i) => i + 1)}>下一题 →</button>
             ) : (
-              <button className="btn-primary" onClick={() => setSession(null)}>结束背题</button>
+              <button className="btn-primary" onClick={exitToList}>结束背题</button>
             )}
           </div>
         </DialogSurface>
@@ -519,7 +814,16 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
 
   if (session && q) {
     const answered = results[idx] !== undefined;
+    // 解析门控：只有「答对且很确定」才直接看解析，其余先过反思闸门
+    const gated = answered && shouldGateExplanation(Boolean(results[idx]), confidence);
+    const gateOpen = !gated || reflectionReady(reflectText, reflectAck);
+    const gatedHint = '先写下你的推理：写够 10 字，或勾「我想过了」，解析就展开。';
     const notePath = notePathOf(q);
+    // 自证只看熟练度：这道笔记在错题本里的晋级阶段（没进过错题本 = 0）
+    const mistakeRec = notePath ? getMistake(notePath) : null;
+    const stage = mistakeRec ? stageOf(mistakeRec) : 0;
+    // 门控没放行时只给反思框，别同时压两个输入框
+    const askRationale = answered && gateOpen && Boolean(results[idx]) && needsRationale(true, confidence, stage);
     // 题干图片：拿不到 URL（调用方没传 resolveAsset，或附件还没加载）就当没有图
     const stemImg = q.image ? resolveAsset?.(q.image) : undefined;
     // 软门控（成员口径，O1 收尾）：题目**任一所属章节**薄弱就提示，与组题筛选 / 章节清单 /
@@ -536,10 +840,39 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     const starredNow = isStarred(stars, session.bankName, q.id);
     return (
       <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
-        <DialogSurface className="panel quiz-panel" label={`${session.bankName}练习，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
+        <DialogSurface className="panel quiz-panel" style={{ zoom }} label={`${session.bankName}练习，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">{session.bankName} · 第 {idx + 1} / {session.questions.length} 题</span>
             <span className="muted">已对 {correctCount}</span>
+            {/* 界面缩放：题干长、字号小的时候整块放大（连图一起放大），关掉应用再打开还保持 */}
+            <button className="btn-icon" aria-label="缩小题目界面" title="缩小" onClick={() => nudgeZoom(-0.1)}>A−</button>
+            <button className="btn-icon" aria-label="放大题目界面" title="放大" onClick={() => nudgeZoom(0.1)}>A+</button>
+            <span className="muted">{(zoom * 100).toFixed(0)}%</span>
+            {/* 背题模式（不判分、直接摊开答案背）之前只有实现没有入口：setBeatMode 从没被调用过 */}
+            <button
+              className="btn-small"
+              title="背题模式：不判分，直接看答案背；可以标「掌握了 / 没掌握」"
+              onClick={() => setBeatMode(true)}
+            >背题</button>
+            {onSaveNote && (
+              <button
+                className="btn-small"
+                title="把这道题连同解析、我的选择、批注、知识点写成一篇笔记：之后能复习、能搜到、能进图谱"
+                onClick={() => {
+                  const q = session.questions[idx];
+                  if (!q) return;
+                  onSaveNote(
+                    questionNotePath(session.bankName, q),
+                    questionToMarkdown({
+                      question: q,
+                      bank: session.bankName,
+                      picked,
+                      correct: results[idx],
+                    }),
+                  );
+                }}
+              >写成笔记</button>
+            )}
             <button
               className={`btn-icon quiz-star${starredNow ? ' on' : ''}`}
               aria-pressed={starredNow}
@@ -626,6 +959,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
                       <button
                         className={`${cls}${!answered && chosen ? ' on' : ''}`}
                         disabled={answered}
+                        aria-pressed={answered ? undefined : chosen}
                         onClick={() => {
                           // 多选：点一下只切换勾选，交卷才判定；单选保持「点一下即判定」
                           if (isMultiSelect(q)) {
@@ -639,6 +973,9 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
                         }}
                       >
                         <b>{letter}</b> {opt}
+                        {/* 未交卷也要有「我勾了这一项」的确定信号：X 型题勾完不判定，
+                            只靠描边一圈，勾了三项回头看根本认不出勾了哪几个。 */}
+                        {!answered && chosen && <span className="opt-mark opt-mark--pick" aria-hidden="true">✓</span>}
                         {answered && right && <span className="opt-mark">✓</span>}
                         {answered && chosen && !right && <span className="opt-mark">✗</span>}
                       </button>
@@ -647,39 +984,18 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
                           <img className="opt-img" src={optImg} alt={`选项 ${letter} 的图`} loading="lazy" />
                         </figure>
                       ) : null}
-                      {/* 批注只在答案出现后可写：先看答案再记「为什么」，避免猜着写 */}
-                      {answered && (
-                        <button
-                          className={`btn-icon opt-note-btn${note ? ' has-note' : ''}`}
-                          aria-label={note ? `修改选项 ${letter} 的批注` : `给选项 ${letter} 写批注`}
-                          title={note ? '修改批注' : '给这个选项写批注'}
-                          onClick={() => (editing === i ? setEditing(null) : beginNote(i))}
-                        >
-                          <IconPencil size={14} />
-                        </button>
-                      )}
-                      {answered && editing === i ? (
-                        <div className="opt-note-edit">
-                          <textarea
-                            className="opt-note-input"
-                            data-note-input="1"
-                            rows={2}
-                            autoFocus
-                            value={draft}
-                            placeholder="这个选项为什么对、为什么错，写下来下次一眼看到"
-                            onChange={(e) => setDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Escape') { setEditing(null); return; }
-                              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                                e.preventDefault();
-                                commitNote(i);
-                              }
-                            }}
-                            onBlur={() => commitNote(i)}
-                          />
-                          <span className="opt-note-hint">Ctrl/⌘+Enter 保存 · Esc 取消 · 清空即删除</span>
-                        </div>
-                      ) : answered && note ? (
+                      {/* 批注入口不绑「已作答」：X 型题要按交卷才算作答，入口挂在判分状态上时，
+                          勾完选项还没交卷就去点铅笔，看到的是一片空白——这就是「X 型题无法批注」。
+                          批注是学习笔记，不该被判定流程卡住；未作答时铅笔淡一点表示「还没对答案」。 */}
+                      <button
+                        className={`btn-icon opt-note-btn${note ? ' has-note' : ''}${answered ? '' : ' idle'}`}
+                        aria-label={note ? `修改选项 ${letter} 的批注` : `给选项 ${letter} 写批注`}
+                        title={note ? '修改批注' : '给这个选项写批注'}
+                        onClick={() => (editing === i ? setEditing(null) : beginNote(i))}
+                      >
+                        <IconPencil size={14} />
+                      </button>
+                      {editing === i ? noteEditor(i) : note ? (
                         <div className="opt-note">
                           <span className="opt-note-icon" aria-hidden="true"><IconPencil size={12} /></span>
                           <span className="opt-note-text">{note}</span>
@@ -698,6 +1014,11 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
                   >
                     交卷（已选 {picked.length} 项）
                   </button>
+                  {picked.length > 0 && (
+                    <span className="quiz-picked" role="status">
+                      已选：{picked.map((i) => String.fromCharCode(65 + i)).join('、')}
+                    </span>
+                  )}
                   <span className="muted">
                     多选题：全对才算对（少选、多选都算错）
                   </span>
@@ -713,12 +1034,85 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
               <button className="btn-small" onClick={() => setRevealed(true)}>显示答案</button>
             )}
 
+            {/* 自证：答案对了不等于会做，练熟之前请人写一段推理链（折叠，不挡路） */}
+            {askRationale && rationaleVerdict === null && (
+              <details className="quiz-rationale">
+                <summary>这题做对了——写下你的推理链，确认不是蒙的（≥30 字）</summary>
+                <textarea
+                  className="quiz-reflect-input"
+                  value={rationaleText}
+                  onChange={(e) => setRationaleText(e.target.value)}
+                  placeholder="从题干线索推到这个答案，中间经过哪几步？"
+                  rows={3}
+                  aria-label="作答自证"
+                />
+                <div className="quiz-reflect-foot">
+                  <span className="muted">{rationaleHint(rationaleText)}</span>
+                  {rationaleReady(rationaleText) && (
+                    <>
+                      <button className="btn-small" onClick={() => setRationaleVerdict('closed')}>
+                        推理闭环了
+                      </button>
+                      <button
+                        className="btn-small"
+                        onClick={() => {
+                          // 答对了但自己承认推理有洞：这题要回队列，不能因为「对了」就往前排
+                          if (notePath) {
+                            if (getMistake(notePath)) lapseMistake(notePath);
+                            else recordMistake(notePath, q.stem);
+                          }
+                          setRationaleVerdict('guess');
+                          toast(
+                            notePath ? '答案对了但推理有漏洞：已记进错题本，下次优先重练' : '没有关联笔记，这条只记在本轮',
+                            notePath ? 'ok' : 'info',
+                          );
+                        }}
+                      >
+                        答案对，但推理有漏洞
+                      </button>
+                    </>
+                  )}
+                </div>
+              </details>
+            )}
+            {rationaleVerdict !== null && (
+              <p className={rationaleVerdict === 'closed' ? 'quiz-rationale-done' : 'quiz-gate'} role="status">
+                {rationaleVerdict === 'closed'
+                  ? '逻辑闭环：答案对、推理也走得通，这题可以往后排。'
+                  : '答案对但推理有漏洞——已回错题队列，下次优先重练。'}
+              </p>
+            )}
+            {/* 门控期间先给反思框，解析正文换成一行提示——对错反馈始终可见 */}
+            {gated && !gateOpen && (
+              <div className="quiz-reflect">
+                <p className="quiz-reflect-prompt">{gatePrompt(Boolean(results[idx]))}</p>
+                <textarea
+                  className="quiz-reflect-input"
+                  value={reflectText}
+                  onChange={(e) => setReflectText(e.target.value)}
+                  placeholder="这题你是怎么排除其他选项的？"
+                  rows={3}
+                  aria-label="作答反思"
+                />
+                <div className="quiz-reflect-foot">
+                  <span className="muted">{reflectionCounter(reflectText)}</span>
+                  <label className="muted">
+                    <input
+                      type="checkbox"
+                      checked={reflectAck}
+                      onChange={(e) => setReflectAck(e.target.checked)}
+                    />{' '}
+                    我想过了，直接看解析
+                  </label>
+                </div>
+              </div>
+            )}
             {answered && expls.length === 1 && (
               <>
                 {expls[0].source && <p className="muted">解析来源：{expls[0].source}</p>}
                 <div className={`quiz-expl ${results[idx] ? 'is-right' : 'is-wrong'}`}>
                   <b>{results[idx] ? '✓ 答对了' : '✗ 答错了'}</b>
-                  <p>{expls[0].text}</p>
+                  <p>{gateOpen ? expls[0].text : gatedHint}</p>
                 </div>
               </>
             )}
@@ -740,9 +1134,13 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
                 {/* 与单条分支同结构：多解析也要看到「答对/答错」，否则答完这一块毫无反馈 */}
                 <div className={`quiz-expl ${results[idx] ? 'is-right' : 'is-wrong'}`}>
                   <b>{results[idx] ? '✓ 答对了' : '✗ 答错了'}</b>
-                  <p>{expls[explIdx]?.text}</p>
+                  <p>{gateOpen ? expls[explIdx]?.text : gatedHint}</p>
                 </div>
               </>
+            )}
+            {/* 作答复盘：把「错」拆成漏选/多选/错选，单选题答错也落到具体项上 */}
+            {answered && !results[idx] && picked.length > 0 && (
+              <p className="muted" role="status">{pickHint(analyzePick(q, picked))}</p>
             )}
             {/* 把握度对照：只把「报的」和「实际」并排摆出来，不下「你高估了」这种结论 */}
             {answered && confidence !== null && (
@@ -763,6 +1161,30 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
                 <button className="btn-small danger" onClick={() => void judge(false)}>我答错了</button>
               </div>
             )}
+          </div>
+
+          {/* 前后翻题常驻：不必先答完这题才能走（题量大时靠「下一题」一题题磨过去不现实） */}
+          <div className="quiz-nav">
+            <button className="btn-small" disabled={idx === 0} onClick={() => goTo(idx - 1)}>
+              ← 上一题
+            </button>
+            <label className="quiz-jump">
+              第
+              <input
+                key={idx}
+                type="number"
+                min={1}
+                max={session.questions.length}
+                defaultValue={idx + 1}
+                aria-label="跳到第几题"
+                // 只在回车/失焦时跳：边输边跳会把人扔到别处
+                onBlur={(e) => goTo(Number(e.target.value) - 1)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') goTo(Number((e.target as HTMLInputElement).value) - 1);
+                }}
+              />
+              / {session.questions.length} 题
+            </label>
           </div>
 
           {answered && (
@@ -859,7 +1281,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
                 const b = (await loadBanks()).find((x) => x.name === session.bankName);
                 if (b) start(b, session.rules); // 沿用同一套组题规则，不偷偷换回「全部」
               }}>再练一轮</button>
-              <button className="btn-small" onClick={() => setSession(null)}>返回题库列表</button>
+              <button className="btn-small" onClick={exitToList}>返回题库列表</button>
             </div>
           </div>
         </DialogSurface>
@@ -1200,6 +1622,49 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
           </div>
         ) : (
         <div className="quiz-banks">
+          {todayKnowledge && (
+            <div className={`quiz-resume quiz-knowledge${knowDone ? ' is-done' : ''}`} role="status">
+              <div className="quiz-resume__text">
+                <b>
+                  今日知识点 · {todayKnowledge.chapter}
+                  {knowDone && <span className="quiz-knowledge__flag">今天看过了</span>}
+                </b>
+                <span className="muted">
+                  「{todayKnowledge.bank}」这个知识点 {todayKnowledge.count} 题
+                  {todayKnowledge.wrong > 0 && ` · 错过 ${todayKnowledge.wrong} 次`}
+                  {todayKnowledge.due > 0 && ` · ${todayKnowledge.due} 题到期`}
+                  {todayKnowledge.count > 0 && ` · 掌握度 ${Math.round(todayKnowledge.mastery * 100)}%`}
+                  {todayKnowledge.reason === 'fresh' && ' · 还没练过'}
+                </span>
+              </div>
+              <button className="btn-primary" onClick={() => startKnowledge(todayKnowledge)}>
+                练这 5 题
+              </button>
+              {!knowDone && (
+                <button
+                  className="btn-small"
+                  onClick={() => {
+                    if (markKnowledgeDone(todayKnowledge)) setKnowDoneKey(`${todayKnowledge.date}|${todayKnowledge.bank}|${todayKnowledge.chapter}`);
+                  }}
+                >
+                  今天看过了
+                </button>
+              )}
+            </div>
+          )}
+          {cursor && banks.some((b) => b.name === cursor.bank) && (
+            <div className="quiz-resume" role="status">
+              <div className="quiz-resume__text">
+                <b>上次没练完</b>
+                <span className="muted">
+                  「{cursor.bank}」练到第 {cursor.idx + 1}/{cursor.qids.length} 题
+                  {new Date(cursor.at).toLocaleString()} · 已答过的题在逐题记录里
+                </span>
+              </div>
+              <button className="btn-primary" onClick={() => resumeLast(cursor)}>继续上次</button>
+              <button className="btn-small" onClick={() => { clearCursor(); setCursor(null); }}>不用了</button>
+            </div>
+          )}
           {banks.length === 0 && (
             <div className="quiz-empty">
               <h2>还没有题库</h2>
@@ -1207,10 +1672,23 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
               <button className="btn-primary" onClick={() => setImportOpen(true)}>导入第一份题库</button>
             </div>
           )}
+          {banks.length > 0 && (
+            <div className="bank-toolbar">
+              <span className="muted">{banks.length} 个题库</span>
+              <button
+                className="btn-small"
+                aria-pressed={openBankActions.size === banks.length}
+                onClick={() => toggleAllBankActions(openBankActions.size < banks.length)}
+              >
+                {openBankActions.size === banks.length ? '收起操作' : '展开操作'}
+              </button>
+            </div>
+          )}
           {banks.map((b, i) => {
             const p = progress.get(b.name);
+            const open = openBankActions.has(b.name);
             return (
-              <div key={b.name} className="bank-item stagger-item" style={{ ['--i' as string]: Math.min(i, 12) }}>
+              <div key={b.name} className={`bank-item stagger-item${open ? ' is-open' : ''}`} style={{ ['--i' as string]: Math.min(i, 12) }}>
                 <div className="bank-info">
                   <div className="bank-name">{b.name}</div>
                   <div className="muted">
@@ -1225,12 +1703,19 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
                     {starCount(stars, b.name) > 0 && <> · <b className="bank-star">★ {starCount(stars, b.name)}</b></>}
                   </div>
                 </div>
-                <button className="btn-small" onClick={() => { setRules(DEFAULT_RULES); setComposing(b); }}>组题</button>
-                <button className="btn-small" onClick={() => startBeat(b, null)} title="不判分，直接摊开答案背一遍">背题</button>
-                {onOpenExam && <button className="btn-small" onClick={() => onOpenExam(b.name)} title="限时整卷，交卷自动评分">模拟考试</button>}
-                <details className="bank-more">
-                  <summary aria-label={`更多操作：${b.name}`}>更多</summary>
-                  <div className="bank-more-menu">
+                <button
+                  className="btn-small bank-actions-toggle"
+                  aria-expanded={open}
+                  aria-label={`操作：${b.name}`}
+                  onClick={() => toggleBankActions(b.name)}
+                >
+                  操作
+                </button>
+                {open && (
+                  <div className="bank-actions" role="group" aria-label={`${b.name} 的操作`}>
+                    <button className="btn-small" onClick={() => { setRules(DEFAULT_RULES); setComposing(b); }}>组题</button>
+                    <button className="btn-small" onClick={() => startBeat(b, null)} title="不判分，直接摊开答案背一遍">背题</button>
+                    {onOpenExam && <button className="btn-small" onClick={() => onOpenExam(b.name)} title="限时整卷，交卷自动评分">模拟考试</button>}
                     <button className="btn-small" title="不组题，整库洗牌后全部做完" onClick={() => start(b, null)}>整库练习</button>
                     <button className="btn-small" title="导出本题库为 Anki 导入文件" onClick={() => downloadFile(`${b.name}-anki.txt`, bankToAnki(b))}>导出 Anki</button>
                     <button
@@ -1241,7 +1726,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
                       }}
                     >删除题库</button>
                   </div>
-                </details>
+                )}
               </div>
             );
           })}

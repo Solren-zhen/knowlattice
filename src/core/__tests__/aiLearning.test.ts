@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { quizProgressReport, reviewDueReport, studySummaryReport, weakChaptersReport } from '../aiLearning';
+import { forecastDue, quizProgressReport, reviewDueReport, studySummaryReport, weakChaptersReport } from '../aiLearning';
 import { clearMistake, importMistakes, loadMistakes } from '../mistakes';
 import { recordCalibration } from '../qbankCalib';
 import type { QuizBank } from '../qbank';
@@ -10,6 +10,9 @@ const DOCS = new Map([
   ['药理/洋地黄.md', '# 洋地黄\n正性肌力。\n'],
 ]);
 const PATHS = [...DOCS.keys()];
+
+/** 固定 now：forecastDue 按天数边界分桶，用 Date.now() 会让「恰好一天」这类断言随机翻车 */
+const NOW = 1_700_000_000_000;
 
 /** 一张过期的 ts-fsrs 调度卡（loadCards 的校验字段齐全） */
 function dueCard(dueIso: string) {
@@ -58,6 +61,89 @@ describe('reviewDueReport', () => {
       '解剖/心脏.md#泵血': dueCard(new Date(Date.now() + 86_400_000).toISOString()),
     }));
     expect(reviewDueReport(PATHS, DOCS)).toContain('今天没有到期');
+  });
+
+  it('今天没到期但未来有：提前返回分支也带上前瞻', () => {
+    localStorage.setItem('knowlattice-srs', JSON.stringify({
+      '解剖/心脏.md#泵血': dueCard(new Date(NOW + 86_400_000).toISOString()),
+    }));
+    const out = reviewDueReport(PATHS, DOCS, NOW);
+    expect(out).toContain('今天没有到期');
+    expect(out).toContain('未来 7 天还会到期 1 张：明天 1 张。');
+  });
+
+  it('今天有到期时前瞻追加在已有行之后', () => {
+    localStorage.setItem('knowlattice-srs', JSON.stringify({
+      '药理/洋地黄.md': dueCard(new Date(NOW - 1000).toISOString()),
+      '解剖/心脏.md#泵血': dueCard(new Date(NOW + 2 * 86_400_000 + 3600_000).toISOString()),
+      '解剖/心脏.md#电生理': dueCard(new Date(NOW + 5 * 86_400_000).toISOString()),
+    }));
+    const out = reviewDueReport(PATHS, DOCS, NOW);
+    expect(out).toContain('今日到期 1 张');
+    expect(out.endsWith('未来 7 天还会到期 2 张：3 天后 1 张，5 天后 1 张。')).toBe(true);
+  });
+
+  it('既没有到期也没有未来到期时，前瞻明说没有', () => {
+    expect(reviewDueReport(PATHS, DOCS)).toContain('未来 7 天没有新的到期卡。');
+  });
+
+  it('前瞻最多列 3 档，总量仍算全部 7 天', () => {
+    const many = new Map(['a', 'b', 'c', 'd', 'e'].map((n) => [n + '.md', `# ${n}\n正文。\n`]));
+    const day = 86_400_000;
+    localStorage.setItem('knowlattice-srs', JSON.stringify({
+      'a.md': dueCard(new Date(NOW + day).toISOString()),
+      'b.md': dueCard(new Date(NOW + 2 * day).toISOString()),
+      'c.md': dueCard(new Date(NOW + 3 * day).toISOString()),
+      'd.md': dueCard(new Date(NOW + 4 * day).toISOString()),
+      'e.md': dueCard(new Date(NOW + 5 * day).toISOString()),
+    }));
+    const out = reviewDueReport([...many.keys()], many, NOW);
+    expect(out).toContain('未来 7 天还会到期 5 张：明天 1 张，2 天后 1 张，3 天后 1 张…');
+    expect(out).not.toContain('4 天后');
+  });
+});
+
+describe('forecastDue', () => {
+  it('空数组返回空数组', () => {
+    expect(forecastDue([], NOW)).toEqual([]);
+  });
+
+  it('逾期与刚好到期的卡不进未来桶', () => {
+    expect(forecastDue([NOW, NOW - 1, NOW - 3 * 86_400_000], NOW)).toEqual([]);
+  });
+
+  it('按剩余时间向上取整分桶，第 1/7 天在内、第 8 天越界', () => {
+    const day = 86_400_000;
+    expect(forecastDue([
+      NOW + 1,              // 今天稍后 → 第 1 天
+      NOW + day,            // 恰好一天 → 第 1 天
+      NOW + day + 1,        // 一天零一毫秒 → 第 2 天
+      NOW + 6 * day + 1,    // 第 7 天
+      NOW + 7 * day,        // 恰好第 7 天，仍在窗口内
+      NOW + 7 * day + 1,    // 第 8 天，窗口外丢弃
+    ], NOW)).toEqual([
+      { day: 1, count: 2 },
+      { day: 2, count: 1 },
+      { day: 7, count: 2 },
+    ]);
+  });
+
+  it('只返回有量的桶且按 day 升序', () => {
+    const day = 86_400_000;
+    const out = forecastDue([NOW + 3 * day + 1, NOW + 1, NOW + day + 1], NOW);
+    expect(out).toEqual([
+      { day: 1, count: 1 },
+      { day: 2, count: 1 },
+      { day: 4, count: 1 },
+    ]);
+  });
+
+  it('days 参数收窄窗口', () => {
+    const day = 86_400_000;
+    expect(forecastDue([NOW + day, NOW + 2 * day, NOW + 3 * day], NOW, 2)).toEqual([
+      { day: 1, count: 1 },
+      { day: 2, count: 1 },
+    ]);
   });
 });
 

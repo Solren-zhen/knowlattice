@@ -18,7 +18,7 @@ import { applyCardEdits, deleteCard, deletedKeys, loadCardEdits, restoreCard, sa
 import { toast, confirmBox } from '../core/feedback';
 import { markStudy } from '../core/stats';
 import { parseFrontmatterCached } from '../core/parser';
-import { recordMistake } from '../core/mistakes';
+import { advanceMistake, dueMistakes, recordMistake } from '../core/mistakes';
 import { notesToAnki, exportApkg, downloadFile } from '../core/anki';
 import { countCloze, maskCloze, revealCloze } from '../core/cloze';
 import { applyDailyCap, effectiveDailyCap, loadPlan } from '../core/reviewPlan';
@@ -42,6 +42,24 @@ interface Props {
 const RATE_KEYS: Record<string, Rating> = { a: 'again', s: 'hard', d: 'good', f: 'easy' };
 
 /** 卡键 → 好认的一行字（`路径#小节` → `笔记标题 · 小节`；标题取 H1，退到文件名） */
+/**
+ * 把「今天到期」的错题补进复习队列。
+ * 错题的到期时间由门控（core/mistakes.ts）决定，和 FSRS 卡片调度是两条线：
+ * 不补进来的话，一张卡被 FSRS 排到七天后，它的错题即使今天到期也永远复习不到，
+ * 门控就成了只进不出的摆设。追加在每日上限之后，避免当天配额把到期错题一起砍掉。
+ */
+function appendDueMistakes(queue: ReviewCard[], all: ReviewCard[]): ReviewCard[] {
+  const keys = new Set(queue.map((c) => c.key));
+  const out = [...queue];
+  for (const m of dueMistakes()) {
+    const hit = all.find((c) => c.path === m.path && !keys.has(c.key));
+    if (!hit) continue; // 笔记已删：错题留在错题本里，不进队列
+    keys.add(hit.key);
+    out.push(hit);
+  }
+  return out;
+}
+
 function keyLabel(key: string, docs: Map<string, string>): string {
   const i = key.indexOf('#');
   const path = i < 0 ? key : key.slice(0, i);
@@ -61,7 +79,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
   const [order, setOrder] = useState<string[]>(() => {
     const queue = dueQueue(cards);
     const cap = effectiveDailyCap(loadPlan(), queue.length);
-    return applyDailyCap(queue, cap).map((c) => c.key);
+    return appendDueMistakes(applyDailyCap(queue, cap), cards).map((c) => c.key);
   });
   const srsImportRef = useRef<HTMLInputElement>(null);
   const [revealed, setRevealed] = useState(false);
@@ -123,7 +141,12 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
     markStudy(); // 打卡
     // M7：点「忘了」自动收录进错题本（薄弱点统计）。存整篇：错题本按笔记展示，
     // 只存小节会把那篇的错题内容截断成片段。
-    if (r === 'again') recordMistake(card.path, docs.get(card.path) ?? card.body);
+    if (r === 'again') {
+      recordMistake(card.path, docs.get(card.path) ?? card.body);
+    } else {
+      // 门控推进：这篇若是错题，答对推进一格（同一天只认第一次，见 core/mistakes.ts）
+      advanceMistake(card.path);
+    }
     setOrder((q) => {
       // again：10 分钟后再来一次，放回队尾
       if (r === 'again') return [...q.slice(1), q[0]];
@@ -245,7 +268,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
               reader.onload = async () => {
                 try {
                   const n = importSrsFromJson(reader.result as string);
-                  setOrder(dueQueue(cards).map((c) => c.key)); // 刷新队列
+                  setOrder(appendDueMistakes(dueQueue(cards), cards).map((c) => c.key)); // 刷新队列（含到期错题）
                   toast(`已导入 ${n} 条复习数据`, 'ok');
                 } catch (err) {
                   toast(`导入失败：${(err as Error).message}`, 'err');

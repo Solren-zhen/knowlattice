@@ -9,21 +9,17 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { renderMarkdown } from '../core/markdown';
-import { FORMAT_KEYS } from '../core/formatKeys';
 import { isImagePath, parseEmbedSpec, type EmbedSpec } from '../core/imageRef';
 import { calloutLabel, isKnownCalloutType } from '../core/callout';
-import { IconFile, IconFwd, IconLattice, IconLink, IconSave, IconSearch } from './icons';
+import { splitBlockTarget } from '../core/blockAnchor';
+import { notesMarkdown, splitFootnotes } from '../core/footnote';
+import { IconSearch } from './icons';
+
+/** 块锚点占位符：渲染后换成不可见锚点，正文里不出现 `^id` 尾巴（规则见 core/blockAnchor.ts） */
+const BLK_OPEN = '\uE010';
+const BLK_CLOSE = '\uE011';
 
 /** markdown-it 实例已移至 core/markdown.ts 懒加载（首屏入口包不含它） */
-
-/** 行内格式键的展示文案，从 FORMAT_KEYS 推出——键位只此一处定义，
- *  改键/加键都不会再漏改首页提示（见 core/formatKeys.ts 顶部与 mdFormat 的相关注释）。
- *  直接遍历 FORMAT_KEYS 而不是手写键名数组：手写的那份在新增「挖空（Alt+C）」时
- *  就漏掉了，正是 previewHero 那条「提示与 FORMAT_KEYS 同源」的测试把它抓出来的。
- *  label 形如 'Alt+A'，取 '+' 后半段，按定义顺序拼成 'A S Z X C'。 */
-const FORMAT_HINT = `Alt/⌥ + ${Object.values(FORMAT_KEYS)
-  .map((k) => k.label.split('+')[1])
-  .join(' ')}`;
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -53,8 +49,13 @@ function imagePlaceholderSrc(spec: EmbedSpec): string {
 
 /** 预处理：属性键占位 + 图片嵌入占位 + wikilink 内部协议 */
 function transformSegment(src: string): string {
+  // 0. 行尾块标记 `^id` → 占位符（渲染后换成锚点，正文里不露出来）。
+  //    先做这一步：后面几条正则都以行尾为界（属性键、双链），留着 `^id` 会把它们顶歪。
+  const withBlocks = src.replace(/^([^\n]*?)\s*\^([a-z0-9]{4,10})\s*$/gm, (_m, body: string, id: string) => {
+    return `${body}${BLK_OPEN}${id}${BLK_CLOSE}`;
+  });
   // 1. 属性键："- 定义: xxx" → 私有区占位（渲染后替换为带样式的 <strong>）
-  const out = src.replace(/^(\s*-\s*)([^:\n\s][^:\n]{0,11}?)(\s*):(\s|$)/gm, (m, indent, key, space, tail) => {
+  const out = withBlocks.replace(/^(\s*-\s*)([^:\n\s][^:\n]{0,11}?)(\s*):(\s|$)/gm, (m, indent, key, space, tail) => {
     if (/[[\]]/.test(key)) return m;
     return `${indent}${PROP_OPEN}${key}${PROP_CLOSE}${space}:${tail}`;
   });
@@ -150,11 +151,18 @@ function postprocess(
             : '';
           return `<img src="${escapeHtml(url)}" alt="${alt}"${dims ? ` ${dims}` : ''} loading="lazy">`;
         })
+        // 块锚点：占位符 → 不可见锚点（点 `[[笔记#^id]]` 跳过来时靠它定位）
+        .replace(/\uE010([a-z0-9]{4,10})\uE011/g, (_m, id: string) => `<span class="blk-anchor" id="blk-${id}"></span>`)
+        // 脚注引用：占位符 → 上标（定义已摘到文末「注释」列表里）
+        .replace(/\uE020([^\uE021<]{1,20})\uE021/g, (_m, label: string) => `<sup class="fn-ref">${label}</sup>`)
         // wikilink 锚点
         .replace(/href="mv-wikilink:\/\/([^"]*)"/g, (_m, enc: string) => {
           let t = enc;
           try { t = decodeURIComponent(enc); } catch { /* 保持原样 */ }
-          const cls = resolve(t) !== null ? 'wikilink' : 'wikilink missing';
+          // `笔记#^id` 要按「笔记名」查是否存在：拿整串去 resolve 永远查不到，
+          // 于是好端端的块引用会显示成灰色「未创建」链接。
+          const { name } = splitBlockTarget(t);
+          const cls = resolve(name) !== null ? 'wikilink' : 'wikilink missing';
           return `href="javascript:void(0)" class="${cls}" data-mv-target="${escapeHtml(t)}"`;
         });
     })
@@ -178,12 +186,31 @@ interface Props {
    * 观察卡片自身并不可靠（外框尺寸不随内部内容变化时不触发）。
    */
   onRendered?: () => void;
+  /** 渲染完成后滚动到某个块并闪一下（点 `[[笔记#^id]]` 跳过来时用） */
+  focusBlock?: string | null;
 }
 
-export default function Preview({ content, resolve, onOpenLink, readFile, onSearch, onGraph, onRendered }: Props) {
+export default function Preview({ content, resolve, onOpenLink, readFile, onSearch, onGraph, onRendered, focusBlock }: Props) {
   // markdown-it 懒加载 → 异步渲染。保持上一份 html 直到新结果就绪（alive 守卫防竞态），
   // 避免切笔记时闪空白；content 为 null 时走 placeholder 分支，不消费 html
   const [html, setHtml] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+  /**
+   * 跳到某个块并闪一下。
+   * 只在本组件作用域内按 id 找：同屏可能有两个预览（分屏），用 document.getElementById
+   * 会跳到左边那一份上，于是右边点链接、左边滚走。
+   */
+  useEffect(() => {
+    if (!focusBlock || !html) return;
+    const el = rootRef.current?.querySelector<HTMLElement>(`#blk-${focusBlock}`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // 锚点本身是零宽的 span，闪要闪在它所在的块上，否则用户看不到任何变化
+    const block = el.parentElement ?? el;
+    block.classList.add('blk-flash');
+    const timer = setTimeout(() => block.classList.remove('blk-flash'), 1600);
+    return () => clearTimeout(timer);
+  }, [focusBlock, html]);
   /** onRendered 走 ref：宿主每次渲染都会传新闭包，不能让它进入 effect 依赖（会无限重渲染） */
   const renderedRef = useRef(onRendered);
   useEffect(() => { renderedRef.current = onRendered; });
@@ -195,7 +222,10 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
     let alive = true;
     // 剥离 frontmatter，元数据不进入正文渲染
     const stripped = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
-    let src = preprocess(stripped);
+    // 脚注定义先从正文里摘走，统一在文末渲染成「注释」：留着原地会变成一堆 [`^1`]: 开头的段落。
+    const { body: bodyNoNotes, notes } = splitFootnotes(stripped);
+    let src = preprocess(bodyNoNotes);
+    if (notes.length) src += notesMarkdown(notes);
     // 图片：![](vault路径) → 用 vault 内容(dataURL)替换 src。
     // 外部地址（http/https/data/blob）原样放过；**占位协议自身必须跳过**——
     // preprocess 已经把 `![[图.png|300]]` 变成 `![图.png](mv-image://…)`，
@@ -279,52 +309,28 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
   };
 
   if (content === null) {
-    // 首页文案纪律：一行只说一件事，每条 ≤ 10 个字（断言在 previewHero.dom.test.tsx，
-    // 长度按词计数、忽略分隔符）。40+ 字的文案在两列网格里会被撑成三行、
-    // 右边缘参差，首屏被拉长。设计理由（为什么这四个键要挤在左手）属于 README，不属于首屏。
+    // 兜底空态：正式首页由 HomeView 承担，这里只在单独使用 Preview 时兜底。
+    // 保持最小结构，避免把「首页该放什么」再复制一份。
     return (
       <div className="preview placeholder" data-stagger>
-        {/* 品牌锁定：晶格图腾与字标同一行。
-            旧版是「浮动图腾 + 大写字母距的渐变胶囊」，渐变 / 外发光 / uppercase tracking
-            三件套凑齐，正是通用生成器的签名；这里只留一行安静的字标。
-            图腾也不再无限呼吸：动效只传达状态，装饰性循环不留给首屏。 */}
-        <div className="hero-brand" data-reveal>
-          <span className="hero-lattice" aria-hidden="true"><IconLattice size={22} /></span>
-          <span className="hero-wordmark">晶格 · KnowLattice</span>
-        </div>
         <h1 className="hero-title" data-reveal>你的知识库，从这里开始</h1>
-        <p className="hero-sub" data-reveal>笔记沉淀知识 · 层级梳理思路 · 双链串联全局</p>
-        {/* 三条能力做成一行发丝分隔的元数据，不再做成三枚各自配色的胶囊：
-            同一屏出现三种强调色会破坏「全站一个强调色」，层级反而散掉。 */}
-        <div className="hero-proof" data-reveal aria-label="KnowLattice 特性">
-          <span><IconSave /> 本地优先</span>
-          <span><IconFile /> Markdown 存储</span>
-          <span><IconLink /> 全库互联</span>
-        </div>
         <div className="hero-cta" data-reveal>
           <button className="btn-primary hero-primary" data-magnet onClick={onSearch}>
             <IconSearch /> 快速搜索 <kbd>Ctrl K</kbd>
-            {/* 「按钮里的按钮」：尾随箭头自成一个圆形，悬停时向右上轻移（高级 CTA 的通用细节） */}
-            <span className="btn-trail" aria-hidden="true"><IconFwd size={13} /></span>
           </button>
           <button className="btn hero-graph" onClick={onGraph}>知识图谱</button>
         </div>
-        <div className="teach-steps" data-reveal>
-          <div className="teach-step"><kbd>回车</kbd><span>续写下一条</span></div>
-          <div className="teach-step"><kbd>Tab</kbd><span>缩进成子要点</span></div>
-          <div className="teach-step"><kbd>[[</kbd><span>链接到其他笔记</span></div>
-          <div className="teach-step wide format-hint"><kbd>{FORMAT_HINT}</kbd><span>加粗 / 高亮 / 斜体 / 双链</span></div>
-          {/* 第 5 条跨两列：5 个格子在 2 列网格里必然剩一个孤儿格，索性让它整行 */}
-          <div className="teach-step wide"><kbd>右键</kbd><span>打开 / 删除整篇笔记</span></div>
+        <div className="teach-strip" data-reveal>
+          <span><kbd>回车</kbd>续写</span>
+          <span><kbd>Tab</kbd>缩进</span>
+          <span><kbd>[[</kbd>双链</span>
+          <span><kbd>右键</kbd>更多</span>
         </div>
-        <p className="muted shortcut-hint" data-reveal>
-          <kbd>Ctrl</kbd>+<kbd>S</kbd> 保存 · <kbd>Alt</kbd>+<kbd>←→</kbd> 后退前进
-        </p>
       </div>
     );
   }
   return (
-    <div className="preview markdown-body" onClick={handleClick} onKeyDown={handleKeyDown}
+    <div className="preview markdown-body" ref={rootRef} onClick={handleClick} onKeyDown={handleKeyDown}
       dangerouslySetInnerHTML={{ __html: html }} />
   );
 }

@@ -1,54 +1,48 @@
 /**
- * 左侧导航轨：可展开分组标签 + 功能入口 + 字体/主题切换。
- * 字体与主题状态只有导航轨在用，收敛在此；各面板开关由 Workspace 传入回调。
+ * 左侧导航轨：只放**去处**，不放功能。
+ *
+ * 两态内容一致：收起态（66px 图标列）与展开态（208px 带文字）都只列**五个母主题**——
+ * 工作区 / 学习 / 资料 / 工具 / 系统。条目挂在母主题下。
+ *
+ * 展开态是**竖向手风琴**：点母主题就在它下面把条目摊在轨上，可以同时摊开几组、再点收回；
+ * 摊开了哪几组记在 localStorage（knowlattice-rail-open-groups）。头一次打开默认摊开当前
+ * 所在的那一组——用户没表过态时替他们露一次入口，之后一律听他们的。
+ * 收起态只有 66px，放不下文字，才用右侧浮层。
+ *
+ * 为什么是「右侧浮层」而不是球状/扇形展开：
+ *   - 扇形的命中区按角度切，要求指针从圆心笔直出去；这里的动作是「从轨道横移→选一项」，
+ *     两段折线，绕弧走必然扫过邻项，5 个母主题的扇形还会互相压住，hover 会抖。
+ *   - 66px 的轨装 6 项扇形，弧上相邻可点间距不足 32px，比 Fitts 能忍的还小。
+ *   - 键盘 Tab 没法沿弧走。纵向浮层的顺序就是 DOM 顺序，可访问性免费。
+ *   折中保留「分支」的读感：母按钮到浮层之间有一条 8px 引线，浮层顶部对齐母按钮中心。
+ *
+ * hover 容错：进 120ms 才浮出（横穿整条轨不会连闪），出 170ms 才收起（斜着划进浮层不会掉），
+ * 期间进任何浮层都取消收起。已有浮层时换组只等 60ms——换组要快，重开要慢。
+ * 滚动或窗口尺寸变了直接关：浮层是 position: fixed 按按钮屏幕坐标定位的，锚点一移就错位。
+ *
+ * 窄屏（<=1040px）走抽屉，指针悬停不可用：点母主题在该组下方原地展开。
+ * 加一个功能 = 往 railCatalog.tsx 的 RAIL_GROUPS 加一行，再去 Workspace 的 openFeature 补处理器。
  */
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import {
-  applyFont, applyTheme, currentFont, currentTheme, FONT_LABELS,
-  type Font, type Theme,
-} from '../core/theme';
-import { applyHighlight, currentHighlight, HIGHLIGHT_PRESETS } from '../core/highlight';
-import {
-  IconLogo, IconTree, IconPathway, IconChevron, IconSearch, IconHistory, IconBody, IconBrain, IconGraph, IconCards,
-  IconTarget, IconQuiz, IconTodo, IconTag, IconChart, IconAi, IconAgent, IconWand, IconBook,
-  IconConvert, IconSun, IconMoon, IconInfo, IconRestore,
-} from './icons';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { IconChevron, IconLogo } from './icons';
+import { RAIL_GROUPS, type Entry, type RailKey } from './railCatalog';
 
 interface Props {
   activeItem: string | null;
   treeOpen: boolean;
-  onToggleTree: () => void;
-  onPathway?: () => void;
   onHome: () => void;
-  onSearch: () => void;
-  onHistory: () => void;
-  onAnatomy: () => void;
-  onBrain: () => void;
-  onGraph: () => void;
-  onReview: () => void;
-  onMistake: () => void;
-  onQuiz: () => void;
-  onTodo: () => void;
-  onTag: () => void;
-  onDash: () => void;
-  onAi: () => void;
-  onAgent: () => void;
-  onDraft: () => void;
-  onPdf: () => void;
-  onConvert: () => void;
-  onImport: () => void;
-  onNotice: () => void;
+  /** 每个去处一个处理器；键必须覆盖 RailKey（漏一个会编译失败） */
+  actions: Record<RailKey, () => void>;
 }
 
+/** 浮层与母按钮之间的水平间距（px）；引线宽度跟着它走 */
+const BRANCH_GAP = 8;
+/** 手风琴展开集合的存储键 */
+const RAIL_OPEN_KEY = 'knowlattice-rail-open-groups';
+
 export default function Rail(p: Props) {
-  const [theme, setTheme] = useState<Theme>(currentTheme);
-  const [font, setFont] = useState<Font>(currentFont);
-  const [fontOpen, setFontOpen] = useState(false);
-  const fontButtonRef = useRef<HTMLButtonElement>(null);
-  const [hl, setHl] = useState<string>(currentHighlight);
-  const [hlOpen, setHlOpen] = useState(false);
-  const hlButtonRef = useRef<HTMLButtonElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const groupRefs = useRef(new Map<string, HTMLButtonElement>());
   const [isNarrow, setIsNarrow] = useState(() => window.matchMedia?.('(max-width: 1040px)').matches === true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopExpanded, setDesktopExpanded] = useState(() => {
@@ -59,7 +53,30 @@ export default function Rail(p: Props) {
         : preference === 'true';
     } catch { return false; }
   });
+  // 窄屏走抽屉；宽屏两态，宽度不同但都只列五个母主题
   const expanded = isNarrow ? mobileOpen : desktopExpanded;
+  /** 宽屏浮出的分支面板；top/left 是母按钮的屏幕坐标（面板 position: fixed，绕开 .rail-scroll 的裁剪） */
+  const [branch, setBranch] = useState<{ title: string; top: number; left: number; pinned: boolean } | null>(null);
+  /**
+   * 轨上摊开的母主题（手风琴）。用户可以单开、多开、全收，选择记在 localStorage：
+   * 「折叠还是展开」是用户的事，不该由「当前在哪一页」替他们决定。
+   */
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(RAIL_OPEN_KEY);
+      const list = raw ? (JSON.parse(raw) as unknown) : null;
+      if (Array.isArray(list)) return new Set(list.filter((title): title is string => typeof title === 'string'));
+    } catch { /* 隐私模式或坏数据：退回默认 */ }
+    // 头一次用：把当前所在那一组摊开；没有当前项时摊工作区，目录/搜索因此永远看得见
+    const key = p.treeOpen ? 'tree' : p.activeItem;
+    const here = RAIL_GROUPS.find((group) => group.entries.some((entry) => entry.key === key)) ?? RAIL_GROUPS[0];
+    return new Set([here.title]);
+  });
+  const openTimer = useRef(0);
+  const closeTimer = useRef(0);
+  const branchRef = useRef<HTMLDivElement>(null);
+  /** 这次浮出是不是键盘要的（是的话把焦点送进去，鼠标悬停不抢焦点） */
+  const wantFocus = useRef(false);
 
   useEffect(() => {
     const media = window.matchMedia?.('(max-width: 1040px)');
@@ -67,6 +84,7 @@ export default function Rail(p: Props) {
     const syncViewport = () => {
       setIsNarrow(media.matches);
       setMobileOpen(false);
+      setBranch(null);
     };
     media.addEventListener?.('change', syncViewport);
     return () => media.removeEventListener?.('change', syncViewport);
@@ -83,253 +101,296 @@ export default function Rail(p: Props) {
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [isNarrow, mobileOpen]);
 
-  return (
-    <nav
-      className={`rail${expanded ? ' rail--expanded' : ''}`}
-      aria-label="主导航"
-      onClick={(event) => {
-        if (event.target === event.currentTarget && isNarrow && mobileOpen) {
-          setMobileOpen(false);
-          return;
-        }
-        const action = (event.target as HTMLElement).closest('.rail-home, .rail-btn:not(.rail-font-btn)');
-        if (isNarrow && mobileOpen && action) setMobileOpen(false);
-      }}
-    >
+  // 浮层按屏幕坐标定位：锚点一动（轨内滚动、窗口缩放、失焦）就关掉，不做跟随。
+  // Escape 关掉并把焦点还给母按钮——键盘用户从浮层退回上一级。
+  useEffect(() => {
+    if (!branch) return;
+    const title = branch.title;
+    const close = () => setBranch(null);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setBranch(null);
+      groupRefs.current.get(title)?.focus();
+    };
+    const scroller = document.querySelector('.rail-scroll');
+    scroller?.addEventListener('scroll', close, { passive: true });
+    window.addEventListener('resize', close);
+    window.addEventListener('blur', close);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      scroller?.removeEventListener('scroll', close);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('blur', close);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [branch]);
+
+  // 键盘打开：焦点落在该组「当前项」上，没有当前项就落第一项。
+  // 悬停打开不抢焦点——鼠标用户不该被偷走输入焦点。
+  useEffect(() => {
+    if (!branch || !wantFocus.current) return;
+    wantFocus.current = false;
+    const group = RAIL_GROUPS.find((item) => item.title === branch.title);
+    if (!group) return;
+    const key = p.treeOpen ? 'tree' : p.activeItem;
+    const index = Math.max(0, group.entries.findIndex((entry) => entry.key === key));
+    const items = Array.from(branchRef.current?.querySelectorAll<HTMLButtonElement>('.rail-branch-item') ?? []);
+    (items[index] ?? items[0])?.focus();
+  }, [branch, p.activeItem, p.treeOpen]);
+
+  useEffect(() => () => {
+    window.clearTimeout(openTimer.current);
+    window.clearTimeout(closeTimer.current);
+  }, []);
+
+  /** 把浮层摆到母按钮右侧并垂直居中，再夹进视口 */
+  const placeBranch = (title: string, el: HTMLElement, pinned = false) => {
+    const group = RAIL_GROUPS.find((item) => item.title === title);
+    if (!group) return;
+    const rect = el.getBoundingClientRect();
+    // 预算高度：条目 32 + 表头 26 + 上下内边距 12；实际高度由内容决定，这里只用来居中与夹边
+    const budget = Math.min(group.entries.length * 32 + 38, window.innerHeight - 24);
+    const centered = rect.top + rect.height / 2 - budget / 2;
+    const top = Math.max(8, Math.min(centered, window.innerHeight - budget - 8));
+    setBranch({ title, top, left: rect.right + BRANCH_GAP, pinned });
+  };
+
+  /** 键盘路线：ArrowRight / Enter 打开并把焦点送进浮层当前项 */
+  const openWithKeys = (title: string, el: HTMLElement) => {
+    window.clearTimeout(openTimer.current);
+    window.clearTimeout(closeTimer.current);
+    wantFocus.current = true;
+    placeBranch(title, el, true);
+  };
+
+  /** 摊开/收起某一组（手风琴）。选择立刻落盘：用户表过的态，下次打开还是那样 */
+  const setGroupOpen = (title: string, open: boolean) => {
+    setOpenGroups((current) => {
+      if (current.has(title) === open) return current;
+      const next = new Set(current);
+      if (open) next.add(title);
+      else next.delete(title);
+      try { localStorage.setItem(RAIL_OPEN_KEY, JSON.stringify([...next])); } catch { /* 隐私模式 */ }
+      return next;
+    });
+  };
+
+  const hoverGroup = (title: string, el: HTMLElement) => {
+    // 展开态与窄屏都是手风琴：条目就在轨上，不再浮一份重复的东西
+    if (expanded || isNarrow) return;
+    window.clearTimeout(closeTimer.current);
+    if (branch?.title === title) {
+      window.clearTimeout(openTimer.current);
+      return;
+    }
+    window.clearTimeout(openTimer.current);
+    openTimer.current = window.setTimeout(() => placeBranch(title, el), branch ? 60 : 120);
+  };
+
+  const leaveRail = () => {
+    if (isNarrow) return;
+    window.clearTimeout(openTimer.current);
+    window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setBranch(null), 170);
+  };
+
+  const clickGroup = (title: string, el: HTMLElement) => {
+    window.clearTimeout(openTimer.current);
+    window.clearTimeout(closeTimer.current);
+    // 窄屏抽屉还关着：先把抽屉打开，同时摊开这一组
+    if (isNarrow && !mobileOpen) {
+      setMobileOpen(true);
+      setGroupOpen(title, true);
+      return;
+    }
+    // 展开态：点母主题 = 在轨上摊开/收起它（同一组可以再点收回）
+    if (expanded) {
+      setBranch(null);
+      setGroupOpen(title, !openGroups.has(title));
+      return;
+    }
+    // 收起态（66px 图标轨）放不下文字，只能浮层：钉住的再点一次收起，
+    // 悬停浮出来的那一个点下去是钉住而不是关掉（否则鼠标用户指过去点一下，浮层就没了）
+    if (branch?.title === title && branch.pinned) {
+      setBranch(null);
+      return;
+    }
+    placeBranch(title, el, true);
+  };
+
+  /** 一条去处的渲染模板；浮层里与窄屏内联共用，避免两套样式走散 */
+  const entryRow = (entry: Entry, inline: boolean) => {
+    const active = entry.key === 'tree' ? p.treeOpen : p.activeItem === entry.key;
+    return (
       <button
-        ref={menuButtonRef}
-        className="rail-expand"
-        aria-label={isNarrow ? (mobileOpen ? '关闭导航' : '打开导航') : (desktopExpanded ? '收起导航标签' : '展开导航标签')}
-        aria-expanded={expanded}
+        key={entry.key}
+        className={`${inline ? 'rail-btn' : 'rail-branch-item'}${active ? ' on' : ''}`}
+        aria-label={entry.label}
+        aria-current={p.activeItem === entry.key ? 'page' : undefined}
+        aria-pressed={entry.key === 'tree' ? p.treeOpen : undefined}
+        data-stay-open={entry.keepDrawer ? 'true' : undefined}
         onClick={() => {
-          if (isNarrow) {
-            setMobileOpen((open) => !open);
-            return;
-          }
-          const next = !desktopExpanded;
-          try { localStorage.setItem('knowlattice-rail-expanded', String(next)); } catch {}
-          setDesktopExpanded(next);
+          p.actions[entry.key]();
+          setBranch(null);
         }}
       >
-        <span className="rail-expand-icon"><IconChevron /></span>
-        <span className="rail-expand-label">{expanded ? '收起导航' : '展开导航'}</span>
+        {entry.icon}
+        <span className="rail-label">{entry.label}</span>
       </button>
-      {/* 滚动区：入口全部在这里（含「工具」组）。窗口变矮时只有这一区滚，
-          底部「字体 / 高亮 / 主题」三行钉住不动 —— 它们带飞出菜单，必须留在
-          不滚动的容器里，.rail 的 overflow:visible 才能保住菜单不被裁。
-          为什么不像以前那样把「工具」组也钉在底部：展开态整条轨要 963px，
-          钉住的部分越多，留给入口的滚动窗口越小 —— 实测 705px 高的窗口下，
-          原来钉住 470px，滚动区只剩 154px，20 个入口里 11 个被塞进只能显示
-          两行的小窗口；只钉底部三行后，同一窗口能看到 14 行。 */}
-      <div className="rail-scroll">
-        <button className="rail-home" aria-label="回到主界面" onClick={p.onHome}>
-          <IconLogo /><span className="rail-label">知识首页</span>
-        </button>
-        <div className="rail-section-label" aria-hidden={!expanded}>工作区</div>
-        <button
-          className={`rail-btn ${p.treeOpen ? 'on' : ''}`}
-                   aria-label="目录"
-          aria-pressed={p.treeOpen}
-          onClick={p.onToggleTree}
-        >
-          <IconTree />
-          <span className="rail-label">目录</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'search' ? ' on' : ''}`} aria-current={p.activeItem === 'search' ? 'page' : undefined} aria-label="搜索" onClick={p.onSearch}>
-          <IconSearch />
-          <span className="rail-label">搜索</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'pdf' ? ' on' : ''}`} aria-current={p.activeItem === 'pdf' ? 'page' : undefined} aria-label="PDF 对照" onClick={p.onPdf}>
-          <IconBook />
-          <span className="rail-label">PDF 对照</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'anatomy' ? ' on' : ''}`} aria-current={p.activeItem === 'anatomy' ? 'page' : undefined} aria-label="解剖图谱" onClick={p.onAnatomy}>
-          <IconBody />
-          <span className="rail-label">解剖图谱</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'brain' ? ' on' : ''}`} aria-current={p.activeItem === 'brain' ? 'page' : undefined} aria-label="脑图谱" onClick={p.onBrain}>
-          <IconBrain />
-          <span className="rail-label">脑图谱</span>
-        </button>
-        <button className={`rail-btn rail-btn--graph${p.activeItem === 'graph' ? ' on' : ''}`} aria-current={p.activeItem === 'graph' ? 'page' : undefined} aria-label="知识图谱" onClick={p.onGraph}>
-          <IconGraph />
-          <span className="rail-label">知识图谱</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'pathway' ? ' on' : ''}`} aria-current={p.activeItem === 'pathway' ? 'page' : undefined} aria-label="医学通路" onClick={() => p.onPathway?.()}>
-          <IconPathway />
-          <span className="rail-label">医学通路</span>
-        </button>
-        <div className="rail-group-divider"><span>学习</span></div>
-        <button className={`rail-btn${p.activeItem === 'review' ? ' on' : ''}`} aria-current={p.activeItem === 'review' ? 'page' : undefined} aria-label="间隔复习" onClick={p.onReview}>
-          <IconCards />
-          <span className="rail-label">间隔复习</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'mistake' ? ' on' : ''}`} aria-current={p.activeItem === 'mistake' ? 'page' : undefined} aria-label="错题本" onClick={p.onMistake}>
-          <IconTarget />
-          <span className="rail-label">错题本</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'quiz' ? ' on' : ''}`} aria-current={p.activeItem === 'quiz' ? 'page' : undefined} aria-label="题库练习" onClick={p.onQuiz}>
-          <IconQuiz />
-          <span className="rail-label">题库练习</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'todo' ? ' on' : ''}`} aria-current={p.activeItem === 'todo' ? 'page' : undefined} aria-label="待办清单" onClick={p.onTodo}>
-          <IconTodo />
-          <span className="rail-label">待办清单</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'tag' ? ' on' : ''}`} aria-current={p.activeItem === 'tag' ? 'page' : undefined} aria-label="标签" onClick={p.onTag}>
-          <IconTag />
-          <span className="rail-label">标签</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'dashboard' ? ' on' : ''}`} aria-current={p.activeItem === 'dashboard' ? 'page' : undefined} aria-label="学习统计" onClick={p.onDash}>
-          <IconChart />
-          <span className="rail-label">学习统计</span>
-        </button>
-        <div className="rail-group-divider"><span>工具</span></div>
-        <button className={`rail-btn${p.activeItem === 'ai' ? ' on' : ''}`} aria-current={p.activeItem === 'ai' ? 'page' : undefined} aria-label="AI 问答" onClick={p.onAi}>
-          <IconAi />
-          <span className="rail-label">AI 问答</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'agent' ? ' on' : ''}`} aria-current={p.activeItem === 'agent' ? 'page' : undefined} aria-label="AI 笔记" onClick={p.onAgent}>
-          <IconAgent />
-          <span className="rail-label">AI 笔记</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'draft' ? ' on' : ''}`} aria-current={p.activeItem === 'draft' ? 'page' : undefined} aria-label="智能草稿" onClick={p.onDraft}>
-          <IconWand />
-          <span className="rail-label">智能草稿</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'history' ? ' on' : ''}`} aria-current={p.activeItem === 'history' ? 'page' : undefined} aria-label="历史版本" onClick={p.onHistory}>
-          <IconHistory />
-          <span className="rail-label">历史版本</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'import' ? ' on' : ''}`} aria-current={p.activeItem === 'import' ? 'page' : undefined} aria-label="导入" onClick={p.onImport}>
-          <IconRestore />
-          <span className="rail-label">导入</span>
-        </button>
-        <button className={`rail-btn${p.activeItem === 'convert' ? ' on' : ''}`} aria-current={p.activeItem === 'convert' ? 'page' : undefined} aria-label="格式转换" onClick={p.onConvert}>
-          <IconConvert />
-          <span className="rail-label">格式转换</span>
-        </button>
-        <button className="rail-btn" aria-label="关于与许可" onClick={p.onNotice}>
-          <IconInfo />
-          <span className="rail-label">关于与许可</span>
-        </button>
-      </div>
-      <div className="rail-sep" />
-      <div className="rail-font-wrap">
-        <button
-          ref={fontButtonRef}
-          className={`rail-btn rail-font-btn ${fontOpen ? 'on' : ''}`}
-          aria-label="切换字体"
-          aria-expanded={fontOpen}
-          aria-controls="rail-font-options"
-          onClick={() => setFontOpen((v) => !v)}
-        >
-          <span className="rail-font-glyph">Aa</span>
-          <span className="rail-label">字体：{FONT_LABELS[font]}</span>
-        </button>
-        {fontOpen && (
-          <div
-            className="rail-flyout"
-            id="rail-font-options"
-            role="group"
-            aria-label="字体样式"
-            onMouseLeave={() => setFontOpen(false)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                setFontOpen(false);
-                fontButtonRef.current?.focus();
-              }
-            }}
-          >
-            {(['system', 'serif', 'mono'] as Font[]).map((f) => (
-              <button
-                key={f}
-                type="button"
-                className={font === f ? 'active' : ''}
-                aria-pressed={font === f}
-                onClick={() => { applyFont(f); setFont(f); setFontOpen(false); fontButtonRef.current?.focus(); }}
-              >
-                {FONT_LABELS[f]}
-                {f === 'serif' ? ' · 阅读' : f === 'mono' ? ' · 代码' : ''}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      {/* 高亮色：与「字体」并列的阅读外观设置。默认醒目红，预设之外可用取色器自定义
-          （颜色与反白/反黑字色都由 core/highlight.ts 落成 --hl-bg / --hl-ink）。 */}
-      <div className="rail-font-wrap">
-        <button
-          ref={hlButtonRef}
-          className={`rail-btn ${hlOpen ? 'on' : ''}`}
-          aria-label="切换高亮色"
-          aria-expanded={hlOpen}
-          aria-controls="rail-highlight-options"
-          onClick={() => setHlOpen((v) => !v)}
-        >
-          {/* 文字样张「A」+ 下半截染当前高亮色，与「字体」的「Aa」成对（见 .rail-hl-glyph 注释） */}
-          <span
-            className="rail-hl-glyph"
-            style={{ '--hl-now': hl } as CSSProperties}
-            aria-hidden="true"
-          >A</span>
-          <span className="rail-label">高亮色</span>
-        </button>
-        {hlOpen && (
-          <div
-            className="rail-flyout rail-hl-flyout"
-            id="rail-highlight-options"
-            role="group"
-            aria-label="文本高亮色"
-            onMouseLeave={() => setHlOpen(false)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                setHlOpen(false);
-                hlButtonRef.current?.focus();
-              }
-            }}
-          >
-            {/* 点预设不关面板：换色要能当场在正文里比效果，关掉再开反而多两步 */}
-            <div className="rail-hl-swatches">
-              {HIGHLIGHT_PRESETS.map((preset) => (
-                <button
-                  key={preset.bg}
-                  type="button"
-                  className={`rail-hl-swatch${hl === preset.bg ? ' active' : ''}`}
-                  style={{ background: preset.bg }}
-                  aria-label={`高亮色：${preset.name}`}
-                  aria-pressed={hl === preset.bg}
-                  title={preset.name}
-                  onClick={() => { applyHighlight(preset.bg); setHl(preset.bg); }}
-                />
-              ))}
-            </div>
-            <label className="rail-hl-custom">
-              <span>自定义</span>
-              <input
-                type="color"
-                value={hl}
-                aria-label="自定义高亮色"
-                onChange={(event) => { applyHighlight(event.target.value); setHl(event.target.value); }}
-              />
-            </label>
-          </div>
-        )}
-      </div>
-      <button
-        className="rail-btn"
-        aria-label="切换主题"
-        aria-pressed={theme === 'dark'}
+    );
+  };
+
+  // 展开态是手风琴：哪几组摊在轨上完全由用户决定（openGroups），当前所在的那一组只是默认摊开。
+
+  const openGroup = branch ? RAIL_GROUPS.find((group) => group.title === branch.title) : null;
+
+  return (
+    <Fragment>
+      <nav
+        className={`rail${expanded ? ' rail--expanded' : ''}`}
+        aria-label="主导航"
         onClick={(event) => {
-          const next: Theme = theme === 'dark' ? 'light' : 'dark';
-          // 传点击坐标：core/theme.ts 据此做一次从按钮扩散的圆形揭示
-          applyTheme(next, { x: event.clientX, y: event.clientY });
-          setTheme(next);
+          if (event.target === event.currentTarget && isNarrow && mobileOpen) {
+            setMobileOpen(false);
+            return;
+          }
+          // 选中条目才收抽屉；点母主题是「原地展开/收起」，不是离开
+          const action = (event.target as HTMLElement).closest('.rail-home, .rail-inline .rail-btn');
+          // 浮层类入口（data-stay-open）不收抽屉：收起来就点不到第二次，开关语义当场失效
+          if (isNarrow && mobileOpen && action && !action.classList.contains('rail-group-btn')
+            && !action.hasAttribute('data-stay-open')) {
+            setMobileOpen(false);
+          }
         }}
+      >
+        <button
+          ref={menuButtonRef}
+          className="rail-expand"
+          aria-label={isNarrow ? (mobileOpen ? '关闭导航' : '打开导航') : (desktopExpanded ? '收起导航标签' : '展开导航标签')}
+          aria-expanded={expanded}
+          title={expanded ? undefined : '展开导航'}
+          onClick={() => {
+            if (isNarrow) {
+              setMobileOpen((open) => !open);
+              return;
+            }
+            const next = !desktopExpanded;
+            try { localStorage.setItem('knowlattice-rail-expanded', String(next)); } catch {}
+            setDesktopExpanded(next);
+          }}
         >
-          {theme === 'dark' ? <IconSun /> : <IconMoon />}
-          <span className="rail-label">{theme === 'dark' ? '切换浅色主题' : '切换深色主题'}</span>
-      </button>
-    </nav>
+          <span className="rail-expand-icon"><IconChevron /></span>
+          <span className="rail-expand-label">{expanded ? '收起导航' : '展开导航'}</span>
+        </button>
+
+        <div className="rail-scroll">
+          <button className="rail-home" aria-label="回到主界面" onClick={p.onHome}>
+            <IconLogo /><span className="rail-label">知识首页</span>
+          </button>
+
+          {RAIL_GROUPS.map((group) => {
+            const here = group.entries.find((entry) => entry.key === (p.treeOpen ? 'tree' : p.activeItem));
+            const isOpen = branch?.title === group.title;
+            const isFolded = expanded && openGroups.has(group.title);
+            return (
+              <div className="rail-group" key={group.title}>
+                <button
+                  ref={(el) => { if (el) groupRefs.current.set(group.title, el); }}
+                  className={`rail-btn rail-group-btn${here ? ' on' : ''}${isOpen ? ' is-open' : ''}`}
+                  aria-label={group.title}
+                  aria-haspopup={expanded ? undefined : 'true'}
+                  aria-expanded={isFolded || isOpen}
+                  aria-current={here ? 'page' : undefined}
+                  onPointerEnter={(event) => hoverGroup(group.title, event.currentTarget)}
+                  onPointerLeave={leaveRail}
+                  onClick={(event) => clickGroup(group.title, event.currentTarget)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'ArrowRight' && event.key !== 'ArrowDown') return;
+                    event.preventDefault();
+                    // 手风琴：先摊开这一组，再把焦点送进第一条（下一帧才有 DOM）
+                    if (expanded || isNarrow) {
+                      setBranch(null);
+                      setGroupOpen(group.title, true);
+                      window.setTimeout(() => {
+                        groupRefs.current.get(group.title)?.parentElement
+                          ?.querySelector<HTMLButtonElement>('.rail-inline .rail-btn')?.focus();
+                      }, 0);
+                      return;
+                    }
+                    openWithKeys(group.title, event.currentTarget);
+                  }}
+                >
+                  {group.icon}
+                  <span className="rail-label">{group.title}</span>
+                  <span className="rail-group-caret" aria-hidden="true" />
+                  {/* 收起态：组内条目数与当前位置压成点阵（灰阶、不占宽、当前项实心） */}
+                  <span className="rail-group-dots" aria-hidden="true">
+                    {group.entries.map((entry) => (
+                      <i key={entry.key} className={entry.key === (p.treeOpen ? 'tree' : p.activeItem) ? 'on' : undefined} />
+                    ))}
+                  </span>
+                </button>
+                {isFolded && (
+                  <div
+                    className="rail-inline"
+                    role="group"
+                    aria-label={group.title}
+                    onKeyDown={(event) => {
+                      // 与浮层同一套键盘模型：↑↓ 组内走、Home/End 到两端、↑ 到顶退回母按钮、Esc 收起
+                      const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('.rail-btn'));
+                      const at = items.indexOf(document.activeElement as HTMLButtonElement);
+                      const focus = (next: number) => { event.preventDefault(); items[next]?.focus(); };
+                      if (event.key === 'ArrowDown') focus(Math.min(items.length - 1, at + 1));
+                      else if (event.key === 'ArrowUp') {
+                        if (at <= 0) { event.preventDefault(); groupRefs.current.get(group.title)?.focus(); }
+                        else focus(at - 1);
+                      } else if (event.key === 'Home') focus(0);
+                      else if (event.key === 'End') focus(items.length - 1);
+                      else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setGroupOpen(group.title, false);
+                        groupRefs.current.get(group.title)?.focus();
+                      }
+                    }}
+                  >
+                    {group.entries.map((entry) => entryRow(entry, true))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </nav>
+
+      {branch && openGroup && (
+        <div
+          ref={branchRef}
+          className="rail-branch"
+          role="group"
+          aria-label={openGroup.title}
+          style={{ top: branch.top, left: branch.left }}
+          onPointerEnter={() => window.clearTimeout(closeTimer.current)}
+          onPointerLeave={leaveRail}
+          onKeyDown={(event) => {
+            // 纵向浮层的键盘模型：↑↓ 在组内走，Home/End 到两端，←/Esc 退回母按钮
+            const items = Array.from(branchRef.current?.querySelectorAll<HTMLButtonElement>('.rail-branch-item') ?? []);
+            const at = items.indexOf(document.activeElement as HTMLButtonElement);
+            const focus = (next: number) => { event.preventDefault(); items[next]?.focus(); };
+            if (event.key === 'ArrowDown') focus(Math.min(items.length - 1, at + 1));
+            else if (event.key === 'ArrowUp') {
+              if (at <= 0) { event.preventDefault(); groupRefs.current.get(openGroup.title)?.focus(); }
+              else focus(at - 1);
+            } else if (event.key === 'Home') focus(0);
+            else if (event.key === 'End') focus(items.length - 1);
+          }}
+        >
+          <div className="rail-branch-head">
+            <span>{openGroup.title}</span>
+            <span className="rail-branch-count">{openGroup.entries.length}</span>
+          </div>
+          {openGroup.entries.map((entry) => entryRow(entry, false))}
+        </div>
+      )}
+    </Fragment>
   );
 }

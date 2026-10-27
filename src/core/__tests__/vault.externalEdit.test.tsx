@@ -109,16 +109,16 @@ describe('保存前的外部改动检测', () => {
     expect(h.snapshots.map((s) => s.content)).toEqual(['应用里改的\n']);
   });
 
-  it('本次会话没打开过的路径：没有基线，直接写', async () => {
+  it('本次会话没打开过的路径：保存前读取磁盘也能发现外部改动', async () => {
     render(<Probe />);
     await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
-    // 不点「打开」：磁盘上已是别的内容，但应用无从判断（没有基线）
+    // 不点「打开」：没有 mtime 基线，但仍应读盘比对内容
     h.disk.set('a.md', '外部编辑器改的\n');
     h.mtimes.set('a.md', 2);
 
     fireEvent.click(screen.getByText('保存'));
     await waitFor(() => expect(h.disk.get('a.md')).toBe('应用里改的\n'));
 
-    expect(h.snapshots.map((s) => s.content)).toEqual(['应用里改的\n']);
+    expect(h.snapshots.map((s) => s.content)).toEqual(['外部编辑器改的\n', '应用里改的\n']);
   });
 });

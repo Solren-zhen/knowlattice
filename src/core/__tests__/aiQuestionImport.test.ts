@@ -122,6 +122,30 @@ B. 选项2很长的文字
       expect(questions[0].answerText).toBe('选项2很长的文字');
     });
 
+    it('多选题保留全部正确项（答案：BCD）', () => {
+      const text = [
+        '【题1】下列哪些属于左心衰表现',
+        'A. 端坐呼吸',
+        'B. 颈静脉怒张',
+        'C. 夜间阵发性呼吸困难',
+        'D. 双下肢水肿',
+        '答案：AC',
+        '解析：左右心衰的鉴别。',
+      ].join('\n');
+
+      const [q] = parseAiQuestions(text);
+      expect(q.answer).toBe(0);
+      expect(q.answers).toEqual([0, 2]);
+      expect(q.answerText).toBe('端坐呼吸');
+    });
+
+    it('单选题不带 answers 字段（既有数据语义不变）', () => {
+      const text = ['【题1】题干', 'A. 选项1', 'B. 选项2', '答案：B'].join('\n');
+      const [q] = parseAiQuestions(text);
+      expect(q.answer).toBe(1);
+      expect(q.answers).toBeUndefined();
+    });
+
     it('处理无明确标记的单题', () => {
       const text = `
 题干文本

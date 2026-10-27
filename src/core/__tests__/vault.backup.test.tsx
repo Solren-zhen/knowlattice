@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { getAllQuestionStats, resetQbankStorageForTests } from '../../storage/qbank';
 import { initializeStats, recordAnswer, resetQbankStatsForTests, statOf } from '../qbankStats';
+import { getPdfBook, putPdfBook, removePdfBook, savePdfPage } from '../pdfLib';
 import type { ImportResult } from '../vault';
 
 const h = vi.hoisted(() => ({
@@ -50,6 +51,8 @@ let backupText = '';
 let captured: Blob | null = null;
 /** 每次点「导入」都追加一条结果，供逐次断言（幂等测试要看第二次） */
 const results: ImportResult[] = [];
+/** 每次点「导出计数」都追加 exportAll 的返回（跳过的大附件数） */
+const skippedCounts: number[] = [];
 
 function Probe() {
   const v = useVault();
@@ -57,6 +60,7 @@ function Probe() {
     <div>
       <span data-testid="state">{!v.loaded ? 'loading' : v.loadError ? 'error' : 'ok'}</span>
       <button onClick={v.exportAll}>导出</button>
+      <button onClick={() => { void v.exportAll().then((r) => { skippedCounts.push(r.skippedAttachments); }); }}>导出计数</button>
       <button onClick={() => { void v.importBackup(backupText).then((r) => { results.push(r); }); }}>导入</button>
     </div>
   );
@@ -87,6 +91,7 @@ beforeEach(async () => {
   backupText = '';
   captured = null;
   results.length = 0;
+  skippedCounts.length = 0;
   Object.defineProperty(URL, 'createObjectURL', {
     value: (b: Blob) => { captured = b; return 'blob:test'; }, writable: true, configurable: true,
   });
@@ -94,6 +99,56 @@ beforeEach(async () => {
 });
 
 afterEach(() => cleanup());
+
+describe('整包备份：超大附件不进 JSON', () => {
+  it('单件超过 20MB 的附件直接跳过并把数量报出来，小附件照常进备份', async () => {
+    h.attachments = async () => new Map<string, Blob>([
+      ['_attachments/small.bin', new Blob(['hi'])],
+      ['_attachments/huge.bin', new Blob([new Uint8Array(21 * 1024 * 1024)])],
+    ]);
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    fireEvent.click(screen.getByText('导出计数'));
+    await waitFor(() => expect(skippedCounts.length).toBe(1));
+    // 只跳过 21MB 那份；小附件不计入跳过数
+    expect(skippedCounts[0]).toBe(1);
+    await waitFor(() => expect(captured).not.toBeNull());
+    const payload = JSON.parse(await captured!.text()) as { files: Array<{ path: string }> };
+    const paths = payload.files.map((f) => f.path);
+    expect(paths).toContain('_attachments/small.bin');
+    expect(paths).not.toContain('_attachments/huge.bin');
+  });
+});
+
+describe('整包备份：PDF 书架随备份走', () => {
+  it('导出 PDF 正文与页码，恢复后能读回同一本书', async () => {
+    await removePdfBook('备份书.pdf').catch(() => {});
+    await putPdfBook('备份书.pdf', new TextEncoder().encode('pdf-body').buffer as ArrayBuffer, 1);
+    await savePdfPage('备份书.pdf', 17);
+
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    fireEvent.click(screen.getByText('导出'));
+    await waitFor(() => expect(captured).not.toBeNull());
+
+    const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
+    expect(payload.version).toBe(15);
+    expect(payload.pdfBooks).toEqual([
+      expect.objectContaining({ name: '备份书.pdf', page: 17, data: expect.any(String) }),
+    ]);
+
+    await removePdfBook('备份书.pdf');
+    expect(await getPdfBook('备份书.pdf')).toBeNull();
+
+    backupText = JSON.stringify(payload);
+    const r = await importOnce();
+    expect(r.failed).toBe(0);
+    expect(r.storeMerges?.find((s) => s.name === 'PDF 书架')).toEqual({ name: 'PDF 书架', added: 1, kept: 0 });
+    const rec = await getPdfBook('备份书.pdf');
+    expect(new TextDecoder().decode(new Uint8Array(rec!.data))).toBe('pdf-body');
+    expect(rec?.page).toBe(17);
+  });
+});
 
 describe('整包备份：专注记录不丢', () => {
   it('导出带上专注记录，清空后导入能回来（待办里的专注次数也一起）', async () => {
@@ -113,7 +168,7 @@ describe('整包备份：专注记录不丢', () => {
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
     expect(payload.app).toBe('knowlattice');
-    expect(payload.version).toBe(12);
+    expect(payload.version).toBe(15);
     expect(payload).toHaveProperty('stars'); // v11：收藏/重点题随备份走
     expect(payload.qbankStats).toMatchObject({ '备份题库': { 'q-1': { wrong: 1 } } });
     expect(payload.pomodoros).toEqual([
@@ -305,7 +360,7 @@ describe('旧备份兼容（缺字段照旧恢复）', () => {
     await waitFor(() => expect(captured).not.toBeNull());
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
-    expect(payload.version).toBe(12);
+    expect(payload.version).toBe(15);
     expect(payload.noteMedia).toEqual({
       '呼吸音笔记.md': { audio: '_attachments/呼吸音.mp3', subtitle: '_attachments/呼吸音.srt' },
     });
@@ -351,7 +406,7 @@ describe('v12：导图偏好（布局/主题/视图/连线/编号）随备份走
     await waitFor(() => expect(captured).not.toBeNull());
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
-    expect(payload.version).toBe(12);
+    expect(payload.version).toBe(15);
     expect(payload.mindmapPrefs).toEqual({ '呼吸音笔记.md': { direction: 'down', theme: 'warm' } });
 
     localStorage.removeItem('knowlattice-mindmap-prefs');
@@ -374,5 +429,66 @@ describe('v12：导图偏好（布局/主题/视图/连线/编号）随备份走
     expect(r.failed).toBe(0);
     // 合并语义：旧备份根本没提偏好这件事，本地那一条原样留着（缺字段 ≠ 清空）
     expect(prefsStore()['旧偏好.md']).toEqual({ theme: 'eye' });
+  });
+});
+
+describe('v14：视频片段收藏随备份走', () => {
+  const CLIPS = [
+    { id: 'v-1', media: '生理学-01.mp4|100|1700000000000', start: 30, end: 45, label: '胃的运动形式', tags: ['胃'], at: 1 },
+    { id: 'v-2', media: 'bili:BV1xx411c7mD:p1', start: 754, end: null, label: '', tags: [], at: 2 },
+  ];
+
+  it('导出带上片段；换设备（本地清空）后导入能回来', async () => {
+    // 片段只活在 localStorage，锚点写在正文里能随笔记走 —— 片段不随备份走就会整批消失，
+    // 而笔记里的 `#vn=` 锚点还在、清单却是空的（比彻底没有更让人困惑），所以这条必须钉住。
+    localStorage.setItem('knowlattice-video-clips', JSON.stringify(CLIPS));
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    fireEvent.click(screen.getByText('导出'));
+    await waitFor(() => expect(captured).not.toBeNull());
+
+    const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
+    expect(payload.version).toBe(15);
+    expect(payload.videoClips).toEqual(CLIPS);
+
+    localStorage.removeItem('knowlattice-video-clips');
+    backupText = JSON.stringify(payload);
+    const r = await importOnce();
+    expect(r.failed).toBe(0);
+    expect(r.storeMerges?.find((s) => s.name === '视频片段')).toEqual({ name: '视频片段', added: 2, kept: 0 });
+    expect(store('knowlattice-video-clips')).toEqual(CLIPS);
+  });
+
+  it('恢复只补不覆盖：本机同 id 的片段保留本地那份（旧备份不冲掉新备注）', async () => {
+    localStorage.setItem('knowlattice-video-clips', JSON.stringify([
+      { ...CLIPS[0], label: '本机较新的备注' },
+    ]));
+    backupText = JSON.stringify({
+      app: 'knowlattice', version: 14,
+      files: [{ path: '笔记.md', content: '# 笔记\n' }],
+      videoClips: CLIPS,
+    });
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    const r = await importOnce();
+    expect(r.failed).toBe(0);
+    expect(r.storeMerges?.find((s) => s.name === '视频片段')).toEqual({ name: '视频片段', added: 1, kept: 1 });
+    const after = store('knowlattice-video-clips') as Array<{ id: string; label: string }>;
+    expect(after.find((c) => c.id === 'v-1')?.label).toBe('本机较新的备注');
+    expect(after.some((c) => c.id === 'v-2')).toBe(true);
+  });
+
+  it('旧备份（没有 videoClips 字段）照旧导入成功，也不清空本地已有片段', async () => {
+    localStorage.setItem('knowlattice-video-clips', JSON.stringify(CLIPS));
+    backupText = JSON.stringify({
+      app: 'knowlattice', version: 13,
+      files: [{ path: '笔记.md', content: '# 笔记\n' }],
+    });
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    const r = await importOnce();
+    expect(r.failed).toBe(0);
+    expect(r.storeMerges?.some((s) => s.name === '视频片段')).toBeFalsy();
+    expect(store('knowlattice-video-clips')).toEqual(CLIPS);
   });
 });

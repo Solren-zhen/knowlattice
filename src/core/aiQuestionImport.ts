@@ -42,6 +42,12 @@ export interface ParsedAiQuestion {
   stem: string;
   options: string[];
   answer: number;
+  /**
+   * 多选题的正确项全集：AI 常出 X 型题并写「答案：BCD」。
+   * 只在真的解析出多个正确项时出现——单选语义与既有数据完全不变，
+   * 判分仍走 qbank 的 correctIndices()（存在 answers 就按全对才算对）。
+   */
+  answers?: number[];
   answerText: string;
   explanation?: string;
 }
@@ -153,11 +159,14 @@ function parseQuestionSegment(segment: string): ParsedAiQuestion | null {
 
   // 确定答案索引
   let answer = 0;
+  let answers: number[] | undefined;
   let answerText = '';
 
   if (options.length > 0) {
-    // 选择题：解析答案字母
-    answer = parseAnswerIndex(answerLine, options);
+    // 选择题：解析答案字母（多选题会有多个）
+    const indices = parseAnswerIndices(answerLine, options);
+    answer = indices[0] ?? 0;
+    answers = indices.length > 1 ? indices : undefined;
     answerText = options[answer] || '';
   } else {
     // 简答题：答案就是文本
@@ -170,35 +179,36 @@ function parseQuestionSegment(segment: string): ParsedAiQuestion | null {
     stem,
     options,
     answer,
+    ...(answers ? { answers } : {}),
     answerText,
     explanation: explanationLine || undefined,
   };
 }
 
 /**
- * 解析答案标识（A / B / 选项文本）到索引
+ * 解析答案标识（A / B / ABD / 选项文本）到索引集合。
+ * 多选题必须保留全部正确项，否则变式题练下来会把对的判成错。
  */
-function parseAnswerIndex(answerText: string, options: string[]): number {
-  if (!answerText) return 0;
+function parseAnswerIndices(answerText: string, options: number[] | string[]): number[] {
+  const count = options.length;
+  if (!answerText) return [0];
 
-  // 提取首个字母（B、答案B、选项B 都能识别）
-  const letterMatch = /([A-Z])/.exec(answerText);
-  if (letterMatch) {
-    const letter = letterMatch[1];
-    const index = letter.charCodeAt(0) - 'A'.charCodeAt(0);
-    if (index >= 0 && index < options.length) {
-      return index;
-    }
-  }
+  // 字母集合：只取「答案：」之后、且落在选项范围内的字母，忽略解析里的正文
+  const letters = answerText.match(/[A-Z]/g) ?? [];
+  const indices = [...new Set(
+    letters
+      .map((l) => l.charCodeAt(0) - 'A'.charCodeAt(0))
+      .filter((i) => i >= 0 && i < count),
+  )].sort((a, b) => a - b);
+  if (indices.length) return indices;
 
   // 尝试匹配选项原文
-  for (let i = 0; i < options.length; i++) {
-    if (answerText.includes(options[i])) {
-      return i;
-    }
+  const texts = options as string[];
+  for (let i = 0; i < count; i++) {
+    if (typeof texts[i] === 'string' && texts[i] && answerText.includes(texts[i])) return [i];
   }
 
-  return 0;
+  return [0];
 }
 
 /**
@@ -221,6 +231,7 @@ export function convertToQuizQuestions(
       stem: q.stem,
       options: q.options,
       answer: q.answer,
+      ...(q.answers ? { answers: q.answers } : {}),
       answerText: q.answerText,
       explanation: q.explanation,
       chapter,

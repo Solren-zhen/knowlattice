@@ -54,6 +54,15 @@ knowlattice-题库-*.md
 四功能可行性分析.md
 审计报告-*.md
 
+# 本机内容包 / 上传缓存 / 代理工作目录（体积大，运行时生成）
+content-packs/
+.dsh-uploads/
+.yanagent/
+
+# 根目录视觉审计截图（临时产物，已由 .shots/ 统一承载）
+/home-map-*.png
+/settings-after*.png
+
 # 运行日志（dev server 持续写入，入库会让 git status 永远脏）
 *.log
 
@@ -72,3 +81,16 @@ src-tauri/private.key
 src-tauri/*.key*
 # 更新器元数据（发版产物，由 scripts/pack/make-latest-json.mjs 本地生成）
 /latest.json
+
+# 医考素材归档（安装包原件 + 解包副本 + 医记通样本，约 390MB，本地留存不入库）
+med-archive/sources/
+
+# 速查/图集生成物与本地图片（node tools/ingest-app-data.mjs 可再生成）
+public/app-data/
+
+# 只作资料分享、不进构建的素材
+med-archive/share-only/**
+!med-archive/share-only/README.md
+
+# 本机分析副本与调研抓取物（target.work / .work 里是第三方镜像，不入库、不参与 lint）
+.work/

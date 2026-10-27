@@ -1,13 +1,17 @@
-import { useEffect, useRef, type KeyboardEvent, type MouseEventHandler, type ReactNode } from 'react';
+import { useEffect, useRef, type CSSProperties, type KeyboardEvent, type MouseEventHandler, type ReactNode } from 'react';
+import { useDialogDrag } from './usePanelDrag';
 
 interface Props {
   label: string;
   className: string;
   children: ReactNode;
   onClick?: MouseEventHandler<HTMLDivElement>;
+  /** 额外样式（例如习题面板的整体缩放）；拖动偏移会叠加在它之后 */
+  style?: CSSProperties;
 }
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
 const activeDialogs = new Set<HTMLElement>();
 let returnFocusTarget: HTMLElement | null = null;
 let restoreFrame: number | null = null;
@@ -20,8 +24,14 @@ function focusableElements(dialog: HTMLElement): HTMLElement[] {
   });
 }
 
-export default function DialogSurface({ label, className, children, onClick }: Props) {
+export default function DialogSurface({ label, className, children, onClick, style }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  /**
+   * 弹窗可自由拖动：抓手是除控件以外的任意位置（标题、边距、空白）。
+   * 具体换算在 usePanelDrag 的 useDialogDrag 里，这里只管接线——
+   * 所有走 DialogSurface 的界面（题库/考试/待办/报告/导入/导出/设置…）一并生效。
+   */
+  const drag = useDialogDrag(() => dialogRef.current);
 
   useEffect(() => {
     if (restoreFrame !== null) {
@@ -109,6 +119,8 @@ export default function DialogSurface({ label, className, children, onClick }: P
       tabIndex={-1}
       onClick={onClick}
       onKeyDown={trapTab}
+      onPointerDown={drag.onPointerDown}
+      style={{ ...style, ...(drag.style ?? {}) }}
     >
       {children}
     </div>

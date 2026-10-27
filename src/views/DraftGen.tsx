@@ -5,7 +5,7 @@
 import { useRef, useState } from 'react';
 import { useEsc, escThenClose } from './useEsc';
 import { generateDraft, draftToMarkdown, type Draft } from '../core/noteGen';
-import { loadPdfjs } from '../core/pdfLib';
+import { openPdf } from '../core/pdfLib';
 import { IconWand, IconClose } from './icons';
 import { toast } from '../core/feedback';
 import { netErrorHint } from '../core/netError';
@@ -33,9 +33,8 @@ export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
   const importPdf = async (file: File) => {
     setBusy(true);
     try {
-      const pdfjs = await loadPdfjs();
       const buf = await file.arrayBuffer();
-      const doc = await pdfjs.getDocument({ data: buf }).promise;
+      const doc = await openPdf(buf);
       let txt = '';
       for (let p = 1; p <= doc.numPages; p++) {
         const page = await doc.getPage(p);

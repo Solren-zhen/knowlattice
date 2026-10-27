@@ -55,3 +55,47 @@ export function trimToolResults<M extends { role: string; content?: unknown }>(
   }
   return out;
 }
+
+/* ------------------------------------------------------- 整轮总预算（分段） */
+
+/**
+ * 整轮上下文总预算（字符）。中文约 1 字 ≈ 1 token，60k 字符 ≈ 60k token。
+ *
+ * 上面两道闸各自独立：单条 8k、整轮工具结果 40k、会话历史另有 20k。
+ * 两道同时满载（40k 工具 + 20k 历史 + 系统提示与教材摘要）就破 60k 了，
+ * 而这两个数字谁都不知道对方占了多久。这里给整轮一个总数：
+ * 工具结果只拿「总数减去其它段实际占用」剩下的余量。
+ */
+export const CONTEXT_TOTAL_BUDGET = 60_000;
+/** 输出与工具清单的固定开销，不参与输入预算分配 */
+const OUTPUT_RESERVE = 6_000;
+/**
+ * 工具结果保底。真挤到这个数以下时，模型每步都会重读同一篇笔记，
+ * 比超一点预算更浪费——宁可靠近上限，也不要让它原地打转。
+ */
+const TOOL_FLOOR = 12_000;
+
+/** 非工具消息（system / 历史 / 用户输入 / 助手回答）占用的字符数 */
+export function reservedChars(messages: readonly { role: string; content?: unknown }[]): number {
+  let n = 0;
+  for (const m of messages) {
+    if (m.role === 'tool') continue;
+    if (typeof m.content === 'string') n += m.content.length;
+  }
+  return n;
+}
+
+/**
+ * 工具结果这一段本次可用的预算：总预算减去别的段实际占用，
+ * 夹在 [TOOL_FLOOR, totalLimit] 之间（空载时与原来的 40k 完全一致）。
+ */
+export function fitToolBudget(
+  reserved: number,
+  totalLimit = TOOL_RESULT_TOTAL_LIMIT,
+  totalBudget = CONTEXT_TOTAL_BUDGET,
+): number {
+  const room = totalBudget - OUTPUT_RESERVE - reserved;
+  // 保底也跟着 totalLimit 收窄：调用方显式给更小的上限（测试收窄）时不应被放大回去
+  const floor = Math.min(TOOL_FLOOR, totalLimit);
+  return Math.max(floor, Math.min(totalLimit, room));
+}

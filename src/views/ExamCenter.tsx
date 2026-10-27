@@ -12,7 +12,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DialogSurface from './DialogSurface';
 import { useEsc } from './useEsc';
-import { loadBanks, type QuizBank, type QuizQuestion } from '../core/qbank';
+import { correctIndices, explanationsOf, isCorrectPick, loadBanks, type QuizBank, type QuizQuestion } from '../core/qbank';
+import { letterOf } from '../core/answerReview';
 import { chapterCounts, filterPool } from '../core/qbankCompose';
 import { initializeStats, loadStats, recordAnswer, type StatsMap } from '../core/qbankStats';
 import { initializeStars, loadStars, type StarMap } from '../core/qbankStarred';
@@ -27,7 +28,7 @@ import {
 } from '../core/dailyPractice';
 import { difficultyCounts, DIFFICULTY_LABELS, highFreqChapters, Q_TAG_LABELS, tagCounts, type DifficultyBand, type QTag } from '../core/qbankTags';
 import { markStudy } from '../core/stats';
-import { toast } from '../core/feedback';
+import { toast, confirmBox } from '../core/feedback';
 import { IconCards, IconChart, IconClose, IconQuiz, IconTarget } from './icons';
 
 interface Props {
@@ -65,7 +66,6 @@ function gradeOne(q: QuizQuestion, picked: number[]): boolean {
 }
 
 export default function ExamCenter({ onClose, initialBank }: Props) {
-  useEsc(onClose);
   const [banks, setBanks] = useState<QuizBank[]>([]);
   const [ready, setReady] = useState(false);
   const [stats, setStats] = useState<StatsMap>(loadStats);
@@ -211,6 +211,25 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
   const submitRef = useRef(submit);
   submitRef.current = submit;
 
+  /**
+   * 退出策略：答题中（phase === 'running'）点面板外面、点 ✕、按 Esc 都先确认。
+   * 遮罩 `.panel-backdrop.quiz-overlay` 铺满整屏并挂了 onClick，所以「点外面的按钮」实际点到的都是它；
+   * 本轮答案只存在内存里（交卷那一刻才 recordAnswer 回写），误点一下整份卷子就没了。
+   * 交卷后（report）与选题页（home / config）没有可丢的进度，照旧直接关。
+   */
+  const requestClose = useCallback(() => {
+    if (phase !== 'running') { onClose(); return; }
+    const answered = answers.filter((a) => a && a.length).length;
+    void confirmBox({
+      title: '这一轮还没交卷，确定退出？',
+      detail: `已答 ${answered} / ${items.length} 题 · 未交卷的答案不会保存`,
+      okText: '退出',
+      danger: true,
+    }).then((ok) => { if (ok) onClose(); });
+  }, [phase, answers, items.length, onClose]);
+
+  useEsc(requestClose);
+
   // 限时倒计时：到点自动交卷
   useEffect(() => {
     if (phase !== 'running' || deadline <= 0) return;
@@ -249,13 +268,13 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
     const isMulti = Boolean(it.q.answers && it.q.answers.length > 1);
     const answeredCount = answers.filter((a) => a && a.length).length;
     return (
-      <div className="panel-backdrop quiz-overlay" onClick={onClose}>
+      <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
         <DialogSurface className="panel quiz-panel exam-panel" label={`${MODE_LABELS[mode]}，第 ${cur + 1} 题`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">{(mode === 'exam' ? bank?.name : MODE_LABELS[mode]) ?? ''} · 第 {cur + 1} / {items.length} 题</span>
             {deadline > 0 && <span className={`exam-timer${remainMs < 60_000 ? ' low' : ''}`}>{formatClock(remainMs)}</span>}
             <span className="muted">已答 {answeredCount}</span>
-            <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
+            <button className="btn-icon" onClick={requestClose} aria-label="关闭"><IconClose /></button>
           </div>
           <div className="quiz-progress"><i style={{ width: `${((cur + (picked.length ? 1 : 0)) / items.length) * 100}%` }} /></div>
 
@@ -310,7 +329,6 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
   if (phase === 'report' && result) {
     const delta = mode === 'exam' ? scoreDelta(result, history.filter((r) => r.id !== result.id)) : null;
     const weak = weakChapters(result);
-    const wrongItems = result.wrongIds.map((id) => items.find((x) => x.q.id === id)).filter((x): x is PaperItem => Boolean(x));
     return (
       <div className="panel-backdrop quiz-overlay" onClick={onClose}>
         <DialogSurface className="panel quiz-panel exam-panel" label={`${MODE_LABELS[mode]}成绩`} onClick={(e) => e.stopPropagation()}>
@@ -350,17 +368,54 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
                 </p>
               )}
 
-              {wrongItems.length > 0 && (
-                <details className="exam-wrong">
-                  <summary>答错的 {wrongItems.length} 题</summary>
-                  <div className="quiz-wrong-list">
-                    {wrongItems.map((it) => (
-                      <div key={it.q.id} className="quiz-wrong-item">
-                        <span>{it.q.stem}</span>
-                        <i>正解：{it.q.answerText}</i>
-                      </div>
-                    ))}
-                  </div>
+              {items.length > 0 && (
+                <details className="exam-review" open={result.wrongIds.length > 0}>
+                  <summary>逐题回顾（{result.correct}/{result.total} 答对）</summary>
+                  <ol className="exam-review-list">
+                    {items.map((it, i) => {
+                      const picked = answers[i] ?? [];
+                      const ok = picked.length > 0 && isCorrectPick(it.q, picked);
+                      const right = correctIndices(it.q);
+                      const expls = explanationsOf(it.q);
+                      return (
+                        <li key={it.q.id} className={`exam-review-item${ok ? ' ok' : ''}`}>
+                          <details>
+                            <summary>
+                              <b className="exam-review-mark">{ok ? '✓' : '✗'}</b>
+                              <span className="exam-review-stem">{i + 1}. {it.q.stem}</span>
+                            </summary>
+                            <div className="exam-review-body">
+                              {it.q.options.length > 0 && (
+                                <ul className="exam-review-options">
+                                  {it.q.options.map((o, oi) => {
+                                    const isRight = right.includes(oi);
+                                    const isPick = picked.includes(oi);
+                                    return (
+                                      <li key={oi} className={`${isRight ? 'right' : ''}${isPick && !isRight ? ' wrong' : ''}`.trim()}>
+                                        {letterOf(oi)}. {o}
+                                        {isPick && <em> ← 你选的</em>}
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              )}
+                              <p className="muted">
+                                你的作答：{picked.length > 0 ? picked.map(letterOf).join('') : '未作答'}
+                                {' · '}正解：{right.length > 0 ? right.map(letterOf).join('') : it.q.answerText}
+                              </p>
+                              {expls.length > 0 && (
+                                <div className="exam-review-expl">
+                                  {expls.map((e, ei) => (
+                                    <p key={ei}>{e.source ? `【${e.source}】` : ''}{e.text}</p>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </details>
+                        </li>
+                      );
+                    })}
+                  </ol>
                 </details>
               )}
 

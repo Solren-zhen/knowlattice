@@ -12,7 +12,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { ImportResult, TreeNode } from '../core/vault';
 import { NOTE_TYPE_LABELS, type NoteType } from '../core/parser';
-import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore, IconTrash } from './icons';
+import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore, IconTrash, IconImage } from './icons';
 import { toast, confirmBox } from '../core/feedback';
 import { clickable } from './a11y';
 import { useEsc } from './useEsc';
@@ -57,6 +57,10 @@ interface Props {
   onMigrateFromBrowser?: () => Promise<{ notes: number; attachments: number; failed: number }>;
   /** 桌面端：更换库文件夹（系统目录选择框）；浏览器版不传即隐藏入口 */
   onChangeVaultFolder?: () => Promise<string | null>;
+  /** 附件图片总数：为 0 时图片入口仍然显示（用户要知道「这里为什么是空的」），只是计数为 0 */
+  attachmentImageCount?: number;
+  /** 打开图片库（附件里的图片统一入口）；不传则不显示该行 */
+  onOpenImageLibrary?: () => void;
   /** 当前库文件夹（用于菜单项提示），桌面端为默认根名或用户所选绝对路径 */
   vaultDir?: string | null;
   /** 批量删除选中的笔记 */
@@ -65,6 +69,8 @@ interface Props {
   onFindOrphanAttachments?: () => Promise<{ orphans: string[]; referenced: number; total: number }>;
   /** 真删这些附件（实现里只接受 `_attachments/` 下的路径），返回删失败的清单 */
   onRemoveAttachments?: (paths: string[]) => Promise<{ removed: number; failed: string[] }>;
+  /** 首页「新建笔记」快捷入口：值一变化就打开新建表单（自增信号，不改变目录本身） */
+  newNoteSignal?: number;
 }
 /**
  * 行缩进（目录行与笔记行**共用**）：每层 14px + 统一 8px 左边距。
@@ -202,9 +208,17 @@ const Row = memo(function Row({
   );
 });
 
-export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExport, onExportFolder, onImport, onImportMd, onImportPack, onUnifiedImport, onDownloadExamplePack, onMigrateFromBrowser, onChangeVaultFolder, vaultDir, autoRepairReport, onRemove, onFindOrphanAttachments, onRemoveAttachments }: Props) {
+export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExport, onExportFolder, onImport, onImportMd, onImportPack, onUnifiedImport, onDownloadExamplePack, onMigrateFromBrowser, onChangeVaultFolder, vaultDir, autoRepairReport, onRemove, onFindOrphanAttachments, onRemoveAttachments, attachmentImageCount, onOpenImageLibrary, newNoteSignal }: Props) {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
+  /* 首页「新建笔记」快捷入口：信号一变就展开新建表单。
+   * 在渲染期比对上一次的值（React 官方的「随 prop 调整 state」写法），比 effect 少一轮渲染；
+   * 而这个组件可能是信号自增之后才挂载的（目录收起时没渲染），初值 0 让这次挂载也算一次变化。 */
+  const [seenSignal, setSeenSignal] = useState(0);
+  if ((newNoteSignal ?? 0) !== seenSignal) {
+    setSeenSignal(newNoteSignal ?? 0);
+    if (newNoteSignal) setCreating(true);
+  }
   /** 新建笔记的目标目录：点击目录行时设为该目录，可点提示取消 */
   const [targetDir, setTargetDir] = useState('');
   /** 笔记类型向导：决定生成的骨架 */
@@ -875,6 +889,14 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
             </button>
           </div>
         </div>
+      )}
+      {/* 图片入口：附件图片不进 .md 树，没有这一行它们只存在于「谁记得在哪篇笔记里」 */}
+      {onOpenImageLibrary && (
+        <button className="tree-attach-row" onClick={onOpenImageLibrary} title="浏览库里的全部图片，可插入当前笔记">
+          <IconImage size={14} />
+          <span>图片</span>
+          <span className="tree-attach-row__count">{attachmentImageCount ?? 0}</span>
+        </button>
       )}
       <div
         className="tree"

@@ -60,7 +60,7 @@ beforeAll(async () => {
 
 describe('AI 改写当前打开的笔记', () => {
   it('应用后编辑器跟着换内容，随后的自动保存不会把 AI 的改动顶回旧内容', async () => {
-    localStorage.setItem('knowlattice-ai-agent-settings', JSON.stringify({ baseUrl: 'http://mock.local/v1', apiKey: 'sk-test', model: 'mock' }));
+    localStorage.setItem('knowlattice-ai-agent-settings', JSON.stringify({ baseUrl: 'https://mock.local/v1', apiKey: 'sk-test', model: 'mock' }));
     let call = 0;
     vi.stubGlobal('fetch', vi.fn(async () => {
       call += 1;
@@ -77,7 +77,10 @@ describe('AI 改写当前打开的笔记', () => {
     fireEvent.click([...container.querySelectorAll('.tree-row.file')].find((r) => r.textContent?.includes('心脏')) as HTMLElement);
     await waitFor(() => expect(container.querySelector('.cm-content')?.textContent).toContain('心肌收缩泵血'), { timeout: 8000 });
 
-    fireEvent.click(screen.getByLabelText('AI 笔记'));
+    // 一个 AI 入口：挂在「学习」母主题下（先浮出该组），笔记助手在面板内切过去
+    fireEvent.click(screen.getByRole('button', { name: '学习' }));
+    fireEvent.click(screen.getByLabelText('AI 助手'));
+    fireEvent.click(screen.getByLabelText('切到笔记助手'));
     const ta = await screen.findByLabelText('对 AI 笔记说点什么');
     fireEvent.change(ta, { target: { value: '改一下心肌那句', selectionStart: 8, selectionEnd: 8 } });
     const send = screen.getByRole('button', { name: '发送' }) as HTMLButtonElement;

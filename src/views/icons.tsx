@@ -152,6 +152,14 @@ export const IconTodo = ({ size = 15 }: P) => (
   </svg>
 );
 
+/** 视频笔记：画面框 + 播放三角（轨上要一眼认成「放视频」，不能和题库那张答题卡糊成同一个方框） */
+export const IconVideo = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <rect x="3.2" y="5.2" width="17.6" height="13.6" rx="3.4" {...wash} fillOpacity={0.1} />
+    <path d="M10.2 9.1v5.8l5.1-2.9z" {...solid} />
+  </svg>
+);
+
 /** 标签：吊牌 */
 export const IconTag = ({ size = 15 }: P) => (
   <svg {...base(size)}>

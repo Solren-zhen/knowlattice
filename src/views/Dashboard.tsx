@@ -9,7 +9,7 @@ import { useEsc } from './useEsc';
 import { srsStats } from '../core/srs';
 import { buildCards } from '../core/srsCards';
 import { toast } from '../core/feedback';
-import { loadMistakes } from '../core/mistakes';
+import { dueMistakes, loadMistakes } from '../core/mistakes';
 import { loadBanks } from '../core/qbank';
 import { chapterMastery, initializeStats, type ChapterMastery } from '../core/qbankStats';
 import { mergeMastery, radarAxes, systemMastery, weakestChapters, type RadarAxis } from '../core/qbankWeakness';
@@ -30,6 +30,8 @@ interface Props {
   onClose: () => void;
   onOpenReview: () => void;
   onOpenQuiz: () => void;
+  /** 打开错题本（「今天做什么」那一行用） */
+  onOpenMistakes?: () => void;
   /** 打开考试中心（模拟考试 / 每日一练 / 错题重练） */
   onOpenExam?: () => void;
 }
@@ -64,7 +66,7 @@ function Radar({ axes }: { axes: RadarAxis[] }) {
   );
 }
 
-export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onOpenExam }: Props) {
+export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onOpenMistakes, onOpenExam }: Props) {
   // Esc 关闭（接进全局 Esc 栈，与其余面板一致）
   useEsc(onClose);
   const [qbank, setQbank] = useState<{ bankCount: number; totalQ: number; mastery: ChapterMastery[] }>({ bankCount: 0, totalQ: 0, mastery: [] });
@@ -99,6 +101,9 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
 
   /** 每日一练：独立于总打卡的连续天数与今日状态 */
   const daily = useMemo(() => ({ streak: dailyStreak(), done: isDailyDone(todayKey()), week: last7Daily() }), []);
+  /** 错题池里今天该清的条数：复习卡 / 错题 / 每日一练 三套调度各取一个数，
+   *  否则用户要开三个面板自己对比才知道今天先干哪个。 */
+  const dueMistakeCount = useMemo(() => dueMistakes().length, []);
 
   /**
    * 成就：汇总统计 → 评估 → 落盘。
@@ -221,6 +226,28 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
                   : `考试已过 ${-examDays} 天`}
               {plan.dailyCap > 0 ? ` · 每日上限 ${plan.dailyCap} 张` : ''}
             </p>
+          )}
+        </section>
+
+        {/* 今天做什么：三套调度（SRS 卡 / 错题 stage / 每日一练）本来各在各的面板里，
+            这里合成一行，点哪一项就去哪个面板 */}
+        <section className="dash-today" data-reveal aria-label="今天要做什么">
+          <span className="dash-today-label muted">今天</span>
+          <button type="button" className={`dash-today-item${rep.r.dueNow > 0 ? ' hot' : ''}`} onClick={onOpenReview}>
+            <b>{rep.r.dueNow}</b><span>张复习卡到期</span>
+          </button>
+          <button
+            type="button"
+            className={`dash-today-item${dueMistakeCount > 0 ? ' hot' : ''}`}
+            onClick={onOpenMistakes}
+            disabled={!onOpenMistakes}
+          >
+            <b>{dueMistakeCount}</b><span>条错题待清</span>
+          </button>
+          {onOpenExam && (
+            <button type="button" className={`dash-today-item${daily.done ? ' done' : ''}`} onClick={onOpenExam}>
+              <b>{daily.done ? '✓' : '—'}</b><span>每日一练{daily.done ? '已完成' : '未开始'}</span>
+            </button>
           )}
         </section>
 

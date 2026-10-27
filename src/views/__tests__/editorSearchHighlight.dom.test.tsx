@@ -16,7 +16,7 @@
  * 另守 nonce 契约：effect 若依赖 value，用户每敲一个字都会被拽回第一处命中。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import Editor from '../Editor';
 
 // jsdom 没实现 scrollIntoView（CodeMirror 把选区滚进视口时会调）
@@ -63,6 +63,23 @@ const hitLines = (container: HTMLElement): number[] =>
     .filter((n) => n > 0);
 
 describe('Editor 搜索命中跳转与高亮', () => {
+  it('滚轮在正文上时滚动 CodeMirror 自己的滚动容器', async () => {
+    const { container } = await setup(null);
+    const scroller = container.querySelector<HTMLElement>('.cm-scroller');
+    const content = container.querySelector<HTMLElement>('.cm-content');
+    expect(scroller).toBeTruthy();
+    expect(content).toBeTruthy();
+    Object.defineProperty(scroller!, 'scrollHeight', { configurable: true, value: 1200 });
+    Object.defineProperty(scroller!, 'clientHeight', { configurable: true, value: 400 });
+    scroller!.scrollTop = 80;
+
+    const notPrevented = fireEvent.wheel(content!, { deltaY: 120, deltaMode: 0 });
+
+    expect(notPrevented).toBe(false);
+    expect(scroller!.scrollTop).toBe(200);
+    cleanup();
+  }, 20000);
+
   it('带命中词打开：跳到第一处，其余命中全部标出来', async () => {
     const { container } = await setup({ query: '氧解离曲线', nonce: 1 });
 

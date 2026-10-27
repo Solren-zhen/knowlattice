@@ -1,7 +1,7 @@
 /**
  * 编辑器（M1+M3）：CodeMirror 6 + Markdown + [[双链自动补全。
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
@@ -17,10 +17,16 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { livePreview, toggleLivePreview } from '../core/livePreview';
 import { safeExternalUrl } from '../core/domSanitize';
+import { parseAnchorHref } from '../core/videoNotes';
 import { FORMAT_KEYS, toggleCloze, toggleMark, wikiLink } from '../core/mdFormat';
 import { insertTable, tableSkeleton, TABLE_MAX_COLS, TABLE_MAX_ROWS, textToTable } from '../core/mdTable';
+import { blockRef, ensureBlockId } from '../core/blockAnchor';
+import { appendTableRow, insertFootnote } from '../core/footnote';
 import { toast } from '../core/feedback';
+import { copyText } from './clipboard';
 import { IconEye } from './icons';
+import { detectSlash, matchSlash, type SlashCommand } from '../core/slashCommands';
+import SlashMenu from './SlashMenu';
 
 /** 行内标记：工具栏按钮与快捷键共用同一段实现（见 applyMark / applyWikiLink）。 */
 const MARK_BOLD = ['**', '加粗内容'] as const;
@@ -37,6 +43,33 @@ const selBounds = (v: EditorView) => {
   const { from, to } = v.state.selection.main;
   return from <= to ? { from, to } : { from: to, to: from };
 };
+
+/** 滚轮 deltaMode → 像素：行模式按一行 24px，页模式按当前可视高度。 */
+function wheelPixels(e: WheelEvent, pageHeight: number): number {
+  if (e.deltaMode === 1) return e.deltaY * 24;
+  if (e.deltaMode === 2) return e.deltaY * pageHeight;
+  return e.deltaY;
+}
+
+/**
+ * 编辑器外包了 .editor-host，内部才是 CodeMirror 的 .cm-scroller。
+ * 原生滚轮在部分 WebView / 嵌入浏览器里会落到外层而不再滚内层，看起来就是「滚轮完全失效」。
+ * 这里把正文上的纵向滚轮明确送给真正的滚动容器；如果指针正处在更深的可滚动块里则放行，
+ * 避免抢走代码块等嵌套区域的滚动。
+ */
+function nestedVerticalScroller(target: EventTarget | null, root: HTMLElement, scroller: HTMLElement) {
+  let node = target instanceof Element ? target : null;
+  while (node && node !== root) {
+    if (node !== scroller) {
+      const style = getComputedStyle(node);
+      const scrollable = /^(auto|scroll)$/.test(style.overflowY)
+        && node.scrollHeight > node.clientHeight + 1;
+      if (scrollable) return true;
+    }
+    node = node.parentElement;
+  }
+  return false;
+}
 
 const applyWikiLink = (v: EditorView) => {
   const { from, to } = v.state.selection.main;
@@ -92,34 +125,6 @@ const FORMAT_ACTIONS: Array<{ name: string; key: (typeof FORMAT_KEYS)[keyof type
   { name: '插入双链', key: FORMAT_KEYS.wiki, run: (v) => applyWikiLink(v) },
 ];
 
-/**
- * 写剪贴板：优先 Clipboard API；非安全上下文或未授权时退回临时 textarea + execCommand。
- * 自定义右键菜单接管了系统菜单，复制/剪切必须自己可靠地完成。
- */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // 落到下面的兜底
-  }
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('aria-hidden', 'true');
-    ta.style.position = 'fixed';
-    ta.style.top = '-1000px';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  }
-}
 
 /** 读剪贴板：只有 Clipboard API 一条路，失败返回 null 由调用方提示（按 Ctrl+V 仍可粘贴） */
 async function readClipboardText(): Promise<string | null> {
@@ -138,12 +143,16 @@ interface Props {
   linkNames?: string[];
   /** 点击 [[双链]] 时跳转到对应笔记（编辑器内点链直达） */
   onOpenLink?: (name: string) => void;
+  /** 点 `[▶ 12:34](#vn=754)` 这类视频锚点：交给播放器 seek。返回 true 表示已处理 */
+  onJumpAnchor?: (seconds: number) => boolean;
   /** 粘贴/拖入图片时保存附件（Blob 直接入库，不转 base64），返回 vault 路径（M1 图片支持） */
   onAttach?: (filename: string, blob: Blob) => Promise<string>;
   /** 「草稿」按钮：把选中文本交给智能草稿 */
   onDraft?: (text: string) => void;
   /** 右键菜单「问 AI」：把选中文本作为引用上下文交给 AI 助手面板 */
   onAskAi?: (text: string) => void;
+  /** 右键菜单「收进生词本」：选中术语一键入册（一行一个，能拆出中英对照就自动分列） */
+  onCollectWord?: (text: string) => void;
   /** 注册需要在当前光标处执行的通路插入操作 */
   onPathwayReady?: (insert: ((markdown: string) => void) | null) => void;
   /** vault 相对路径 → 文件内容，用于实时预览内联渲染图片 */
@@ -158,11 +167,19 @@ interface Props {
   headingLines?: number[];
   /** 光标所在小节的标题行号变化时回调（在编辑器内部去重，跨节才通知） */
   onActiveHeading?: (line: number | null) => void;
+  /** 本笔记的链接名（生成块引用时用；缺省时退化成「本篇笔记」） */
+  noteName?: string;
+  /** 打印当前笔记 / 存为 PDF（挂在工具条上：它作用的对象就是这篇笔记） */
+  onPrint?: () => void;
+  /** 历史版本（当前笔记的命脉：误删/被 AI 改写后要能找回） */
+  onHistory?: () => void;
+  /** 视频笔记（时间点锚点 / A-B 复读 / 收藏片段） */
+  onVideo?: () => void;
   /** 注册「跳转到指定行」（本页目录点击 → 滚动 + 光标定位）；卸载时回调 null */
   onJumpReady?: (jump: ((line: number) => void) | null) => void;
 }
 
-export default function Editor({ value, onChange, linkNames = [], onOpenLink, onAttach, onDraft, onAskAi, onPathwayReady, readFile, highlight, headingLines = [], onActiveHeading, onJumpReady }: Props) {
+export default function Editor({ value, onChange, linkNames = [], onOpenLink, onJumpAnchor, onAttach, onDraft, onAskAi, onCollectWord, onPathwayReady, readFile, highlight, headingLines = [], onActiveHeading, onJumpReady, noteName = '', onPrint, onHistory, onVideo }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -171,11 +188,32 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   const lowerNamesRef = useRef<string[] | null>(null);
   const attachRef = useRef(onAttach);
   const openLinkRef = useRef(onOpenLink);
+  const jumpAnchorRef = useRef(onJumpAnchor);
   /** mousedown 命中过的链接部件（部件随即被换回源码，click 时只能靠它认目标） */
   const pressedLinkRef = useRef<{ kind: 'wiki' | 'link'; value: string; at: number } | null>(null);
   const readFileRef = useRef(readFile);
   /** 右键菜单位置（视口坐标）；null = 关闭。CM 的事件处理器只建一次，用 ref 改状态 */
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  /**
+   * 斜杠命令菜单。菜单开着时按键必须由编辑器统一处置：
+   * 只有菜单「不进焦点」、按键在 CM 的 keydown 里被吃掉，才能一边打字一边过滤。
+   * 所以坐标与选中项都放 state，实际判定走 slashRef（扩展只建一次，闭包读不到新 state）。
+   */
+  const [slash, setSlash] = useState<{ query: string; from: number; to: number; x: number; y: number; active: number } | null>(null);
+  const slashRef = useRef(slash);
+  slashRef.current = slash;
+  const applySlash = useCallback((cmd: SlashCommand) => {
+    const view = viewRef.current;
+    const at = slashRef.current;
+    if (!view || !at) return;
+    const caret = at.from + (cmd.cursorOffset ?? cmd.insert.length);
+    view.dispatch({
+      changes: { from: at.from, to: at.to, insert: cmd.insert },
+      selection: { anchor: caret },
+    });
+    setSlash(null);
+    view.focus();
+  }, []);
   const menuAtRef = useRef(setMenuAt);
   /** 简易表格面板：点格子选行列，或把选中的多行文字一键转成表格 */
   const [tableOpen, setTableOpen] = useState(false);
@@ -205,6 +243,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   }
   attachRef.current = onAttach;
   openLinkRef.current = onOpenLink;
+  jumpAnchorRef.current = onJumpAnchor;
   readFileRef.current = readFile;
   menuAtRef.current = setMenuAt;
   tableOpenRef.current = tableOpen;
@@ -260,6 +299,17 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
      * 这里只记录，不拦截事件：选词、拖选、点空白处放光标一切照旧。
      */
     const host = hostRef.current!;
+    const routeWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.altKey || e.shiftKey || e.deltaY === 0) return;
+      const scroller = host.querySelector<HTMLElement>('.cm-scroller');
+      if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 1) return;
+      if (nestedVerticalScroller(e.target, host, scroller)) return;
+      const before = scroller.scrollTop;
+      const max = scroller.scrollHeight - scroller.clientHeight;
+      scroller.scrollTop = Math.max(0, Math.min(max, before + wheelPixels(e, scroller.clientHeight)));
+      if (scroller.scrollTop !== before) e.preventDefault();
+    };
+    host.addEventListener('wheel', routeWheel, { passive: false });
     const rememberPressed = (e: MouseEvent) => {
       const el = (e.target as HTMLElement | null)?.closest?.('.lp-wiki, .lp-link') as HTMLElement | null;
       if (!el) { pressedLinkRef.current = null; return; }
@@ -326,6 +376,22 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
           livePreview(() => readFileRef.current),
           EditorView.lineWrapping,
           EditorView.domEventHandlers({
+            // 斜杠菜单开着时把方向键/回车/Tab/Esc 全收走，否则同一个键会同时在菜单和正文里生效
+            keydown: (e) => {
+              const at = slashRef.current;
+              if (!at) return false;
+              const items = matchSlash(at.query);
+              if (!items.length) return false;
+              if (e.key === 'Escape') { setSlash(null); return true; }
+              if (e.key === 'ArrowDown') { e.preventDefault(); setSlash({ ...at, active: (at.active + 1) % items.length }); return true; }
+              if (e.key === 'ArrowUp') { e.preventDefault(); setSlash({ ...at, active: (at.active - 1 + items.length) % items.length }); return true; }
+              if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                applySlash(items[Math.min(at.active, items.length - 1)]);
+                return true;
+              }
+              return false;
+            },
             // 原生撤销/重做事件同样要拦（键盘之外还有菜单等入口），否则它会绕过 CM 的撤销栈
             beforeinput: (e) => {
               if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
@@ -347,6 +413,14 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               const linkEl = target.closest?.('.lp-link') as HTMLElement | null;
               if (linkEl) {
                 const url = linkEl.getAttribute('data-lp-url');
+                // 视频锚点 `#vn=754`：交给播放器跳转，不走外链白名单（它不是外部地址）
+                if (url && jumpAnchorRef.current) {
+                  const at = parseAnchorHref(url);
+                  if (at != null && jumpAnchorRef.current(at)) {
+                    e.preventDefault();
+                    return true;
+                  }
+                }
                 // 白名单协议才开窗（javascript:/file:/自定义协议一律拒绝）
                 const safe = url ? safeExternalUrl(url) : null;
                 if (safe) {
@@ -405,6 +479,8 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
                 if (col >= m.index && col <= m.index + m[0].length) {
                   e.preventDefault();
                   // 源码模式兜底同样过白名单（这里抓的是原文 URL，更要把不可信协议拦下）
+                  const at = jumpAnchorRef.current ? parseAnchorHref(m[2]) : null;
+                  if (at != null && jumpAnchorRef.current?.(at)) { e.preventDefault(); return true; }
                   const safe = safeExternalUrl(m[2]);
                   if (safe) {
                     window.open(safe, '_blank', 'noopener');
@@ -459,6 +535,23 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
           }),
           EditorView.updateListener.of((u) => {
             if (u.docChanged && !applyingRef.current) onChangeRef.current(u.state.doc.toString());
+            // 斜杠命令：只在「光标在行首附近的 /xxx」时弹；选区非空、光标不在同一行都不算
+            if (u.docChanged || u.selectionSet) {
+              const sel = u.state.selection.main;
+              let hit = null;
+              let coords = null;
+              if (sel.empty) {
+                const line = u.state.doc.lineAt(sel.head);
+                hit = detectSlash(u.state.sliceDoc(line.from, line.to), line.from, sel.head);
+                if (hit) coords = u.view.coordsAtPos(sel.head);
+              }
+              const prev = slashRef.current;
+              if (hit) {
+                const x = coords ? coords.left : 0;
+                const y = coords ? coords.bottom : 0;
+                setSlash({ query: hit.query, from: hit.from, to: hit.to, x, y, active: prev && prev.query === hit.query ? prev.active : 0 });
+              } else if (prev) setSlash(null);
+            }
             // 表格面板打开时同步选区，供「转成表格」入口使用：渲染期不再直接读 viewRef，
             // 面板打开后选区变化也能即时刷新（闭包里读不到本次渲染的选区）。
             if (u.selectionSet && tableOpenRef.current) {
@@ -512,6 +605,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
     });
     return () => {
       host.removeEventListener('mousedown', rememberPressed, true);
+      host.removeEventListener('wheel', routeWheel);
       pathwayReadyRef.current?.(null);
       jumpReadyRef.current?.(null);
       viewRef.current = null;
@@ -714,6 +808,45 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
       run: (v) => v.dispatch(v.state.replaceSelection('\n- 口诀: ')),
     },
     {
+      label: '^',
+      title: '复制这一段的块引用（给这段分配块 id，复制 [[笔记#^id]]）',
+      run: (v) => {
+        const doc = v.state.doc.toString();
+        const pos = v.state.selection.main.head;
+        const r = ensureBlockId(doc, pos);
+        if (!r) {
+          toast('这一段是空的，没有内容可以引用', 'info');
+          return;
+        }
+        if (r.edit) v.dispatch(r.edit);
+        const ref = blockRef(noteName || '本篇笔记', r.id);
+        void copyText(ref).then((ok) => {
+          toast(ok ? `已复制块引用：${ref}` : `块 id 已写入，但剪贴板没授权。引用串：${ref}`,
+            ok ? 'ok' : 'info', ok ? 4200 : 9000);
+        });
+      },
+    },
+    {
+      label: '[^]',
+      title: '插入脚注（选中文字则把它变成脚注正文）',
+      run: (v) => {
+        const { from, to } = selBounds(v);
+        v.dispatch(insertFootnote(v.state.doc.toString(), from, to));
+      },
+    },
+    {
+      label: '＋行',
+      title: '在光标所在表格末尾加一行',
+      run: (v) => {
+        const edit = appendTableRow(v.state.doc.toString(), v.state.selection.main.head);
+        if (!edit) {
+          toast('光标不在表格里', 'info');
+          return;
+        }
+        v.dispatch(edit);
+      },
+    },
+    {
       label: '草稿', title: '把选中文本整理成原子笔记草稿（未选中则用全文）',
       run: (v) => {
         const sel = v.state.selection.main;
@@ -721,6 +854,10 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
         draftRef.current?.(text);
       },
     },
+    // 下面三个动作作用在「这篇笔记」上：打印、回滚、边看边记
+    ...(onPrint ? [{ label: '打印', title: '打印当前笔记 / 存为 PDF（Ctrl+P）', run: () => onPrint() }] : []),
+    ...(onHistory ? [{ label: '历史', title: '这篇笔记的历史版本', run: () => onHistory() }] : []),
+    ...(onVideo ? [{ label: '视频', title: '视频笔记：记时间点 / A-B 复读 / 收藏片段', run: () => onVideo() }] : []),
   ];
 
   /** 选中文字后的右键菜单：格式一栏（另一种施加方式是快捷键），都不需要手打标记符 */
@@ -765,6 +902,16 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
 
   return (
     <div className="editor-wrap">
+      {slash && (
+        <SlashMenu
+          items={matchSlash(slash.query)}
+          active={slash.active}
+          x={slash.x}
+          y={slash.y}
+          onPick={applySlash}
+          onHover={(i) => setSlash((prev) => (prev ? { ...prev, active: i } : prev))}
+        />
+      )}
       <div className="cm-toolbar">
         {toolbarActions.map((a, i) => (
           <button
@@ -876,6 +1023,21 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
             >
               <span>✦ 问 AI</span>
               <kbd>选中即问</kbd>
+            </button>
+          )}
+          {onCollectWord && (
+            <button
+              className="cm-ctx-item"
+              type="button"
+              role="menuitem"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (selText.trim()) onCollectWord(selText);
+                closeMenu(false);
+              }}
+            >
+              <span>✎ 收进生词本</span>
+              <kbd>一行一个</kbd>
             </button>
           )}
           <div className="cm-ctx-sep" role="separator" />

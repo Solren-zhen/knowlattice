@@ -11,7 +11,7 @@ import type { RunAgentOptions } from '../aiAgent';
 import { TOOL_RESULT_LIMIT, TOOL_RESULT_TOTAL_LIMIT } from '../aiBudget';
 import { runPiAgent, trimPiToolResults } from '../piAgent';
 
-const SETTINGS = { baseUrl: 'http://mock.local/v1/', apiKey: 'sk-test', model: 'mock' };
+const SETTINGS = { baseUrl: 'https://mock.local/v1/', apiKey: 'sk-test', model: 'mock' };
 const piUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 
 const TOOLS: RunAgentOptions['tools'] = [

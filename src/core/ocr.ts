@@ -68,6 +68,54 @@ export function collapseCjkSpaces(s: string): string {
   return s.replace(/(?<=[\u4e00-\u9fff])[ \t]+(?=[\u4e00-\u9fff])/g, '');
 }
 
+/**
+ * 建一个识别 worker。两份用途（PDF 整页 / 单张图片）共用同一套离线路径与日志口径——
+ * 分开写两份 `createWorker({...})` 的后果是：某天只改了其中一份的路径，另一份静默走上网。
+ * `cap` 是「初始化阶段最多占多少进度」，剩下的留给真正的识别循环。
+ */
+async function createOcrWorker(
+  onProgress?: (p: OcrProgress) => void,
+  cap = 0.45
+) {
+  const { createWorker } = await import('tesseract.js');
+  return createWorker(['chi_sim', 'eng'], 1, {
+    workerPath: BASE + 'tesseract/worker.min.js',
+    corePath: BASE + 'tesseract/',
+    // 必须为 false，否则 worker 跑在 blob: URL 上、core 定位不到自己的 .wasm（详见文件头注释）
+    workerBlobURL: false,
+    langPath: BASE + 'tessdata',
+    gzip: true,
+    logger: (m: { status?: string; progress?: number }) => {
+      const label = m.status ? (STATUS_LABEL[m.status] ?? m.status) : '';
+      if (label) onProgress?.({ ratio: Math.min(cap, m.progress ?? 0) * cap, label });
+    },
+  });
+}
+
+/**
+ * 单张图片（截图、讲义片段、扫描页照片）→ 纯文本。
+ *
+ * 与 PDF 那条路的区别只在输入：tesseract 直接吃 Blob/File，不必先经 pdf.js 渲染；
+ * 因此这里不需要 canvas，也不受页数上限约束。
+ * 返回的文本已折叠汉字间空格、去空行，供调用方直接插入笔记或复制。
+ */
+export async function ocrImageToText(
+  input: Blob,
+  onProgress?: (p: OcrProgress) => void
+): Promise<string> {
+  const worker = await createOcrWorker(onProgress, 0.6);
+  try {
+    onProgress?.({ ratio: 0.6, label: '识别文字' });
+    const res = await worker.recognize(input);
+    const text = collapseCjkSpaces(res.data.text).replace(/\n{3,}/g, '\n\n').trim();
+    if (!text) throw new Error('这张图里没识别出文字。请确认截图清晰、方向正确，或者文字太小。');
+    onProgress?.({ ratio: 1, label: '识别完成' });
+    return text;
+  } finally {
+    await worker.terminate();
+  }
+}
+
 /** 把 pdf.js 的一页渲染成 canvas，交给 tesseract 识别 */
 async function renderPage(doc: { getPage: (n: number) => Promise<unknown> }, n: number): Promise<HTMLCanvasElement> {
   const page = (await doc.getPage(n)) as {
@@ -106,20 +154,7 @@ export async function ocrPdfToMarkdown(
 
   const total = Math.min(doc.numPages, MAX_OCR_PAGES);
   const truncated = doc.numPages > total;
-  const { createWorker } = await import('tesseract.js');
-
-  const worker = await createWorker(['chi_sim', 'eng'], 1, {
-    workerPath: BASE + 'tesseract/worker.min.js',
-    corePath: BASE + 'tesseract/',
-    // 必须为 false，否则 worker 跑在 blob: URL 上、core 定位不到自己的 .wasm（详见文件头注释）
-    workerBlobURL: false,
-    langPath: BASE + 'tessdata',
-    gzip: true,
-    logger: (m: { status?: string; progress?: number }) => {
-      const label = m.status ? (STATUS_LABEL[m.status] ?? m.status) : '';
-      if (label) onProgress?.({ ratio: Math.min(0.45, m.progress ?? 0) * 0.45, label });
-    },
-  });
+  const worker = await createOcrWorker(onProgress, 0.45);
 
   const pages: Array<{ page: number; text: string }> = [];
   try {

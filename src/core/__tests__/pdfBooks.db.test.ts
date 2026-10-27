@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDB } from 'idb';
 import {
   listPdfBooks, getPdfBook, putPdfBook, removePdfBook, savePdfPage,
-  setCurrentPdfBook, getCurrentPdfName, migrateLegacyPdf,
+  setCurrentPdfBook, getCurrentPdfName, migrateLegacyPdf, exportPdfLibrary, importPdfLibrary,
 } from '../pdfLib';
 
 const buf = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
@@ -114,5 +114,39 @@ describe('pdfLib 书架', () => {
     const db2 = await openDB('knowlattice-pdfs', 2);
     expect(await db2.get('pdfs', 'current')).toBeUndefined();
     db2.close();
+  });
+});
+
+describe('PDF 书架备份', () => {
+  it('导出正文与阅读页码，恢复后能读回同一本书', async () => {
+    await putPdfBook('A.pdf', buf('hello'), 1);
+    await savePdfPage('A.pdf', 42);
+
+    const exported = await exportPdfLibrary();
+    expect(exported.books).toHaveLength(1);
+    expect(exported.books[0]).toMatchObject({ name: 'A.pdf', page: 42 });
+    expect(exported.books[0].data).toBe(btoa('hello'));
+
+    await removePdfBook('A.pdf');
+    expect(await getPdfBook('A.pdf')).toBeNull();
+
+    const imported = await importPdfLibrary(exported.books);
+    expect(imported).toMatchObject({ added: 1, kept: 0, failed: 0 });
+    const rec = await getPdfBook('A.pdf');
+    expect(new TextDecoder().decode(new Uint8Array(rec!.data))).toBe('hello');
+    expect(rec?.page).toBe(42);
+  });
+
+  it('同名书已存在时保留本机版本，不覆盖正文和页码', async () => {
+    await putPdfBook('A.pdf', buf('new'), 1);
+    await savePdfPage('A.pdf', 9);
+
+    const imported = await importPdfLibrary([
+      { name: 'A.pdf', at: 0, page: 2, data: btoa('old') },
+    ]);
+    expect(imported).toMatchObject({ added: 0, kept: 1, failed: 0 });
+    const rec = await getPdfBook('A.pdf');
+    expect(new TextDecoder().decode(new Uint8Array(rec!.data))).toBe('new');
+    expect(rec?.page).toBe(9);
   });
 });

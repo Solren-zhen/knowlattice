@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["public/draco/**", "public/tesseract/**", "dist/**", "KnowLattice-离线版-*/**"],
+  "ignorePatterns": ["public/draco/**", "public/tesseract/**", "dist/**", "KnowLattice-离线版-*/**", ".work/**"],
   "plugins": ["react", "typescript", "oxc"],
   "rules": {
     "react/rules-of-hooks": "error",

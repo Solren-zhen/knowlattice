@@ -8,10 +8,10 @@
  * - pi 相关运行时全部走动态 import：主包零增量，首次对话时才加载
  */
 import {
-  estimateTokens, isAbortError,
+  estimateTokens, isAbortError, isAllowedAgentBaseUrl,
   type AgentSettings, type RunAgentOptions, type RunAgentResult, type WireMessage,
 } from './aiAgent';
-import { TOOL_RESULT_TOTAL_LIMIT, capToolResult } from './aiBudget';
+import { TOOL_RESULT_TOTAL_LIMIT, capToolResult, fitToolBudget } from './aiBudget';
 
 type AssistantWire = Extract<WireMessage, { role: 'assistant' }>;
 type AgentTool = import('@earendil-works/pi-agent-core').AgentTool;
@@ -56,8 +56,17 @@ function isTransientError(text: unknown): boolean {
 async function retryDelay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    // 正常退避结束时要把 abort 监听摘掉：这个 signal 活整轮任务，
+    // 只 clearTimeout 不清监听，每次重试都会往它身上多挂一个闭包。
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -160,6 +169,23 @@ const PI_TRIM_MIN_KEEP = 600;
 function isPiTextBlock(b: unknown): b is PiTextBlock {
   return !!b && typeof b === 'object'
     && (b as PiTextBlock).type === 'text' && typeof (b as PiTextBlock).text === 'string';
+}
+
+/**
+ * 非工具结果消息（system / 用户 / 助手）占用的字符数：整轮总预算里给工具那一段算余量用。
+ * 与内置引擎的 aiBudget.reservedChars 同口径——这里多认一种形态：content 直接是字符串。
+ */
+function piReservedChars(messages: readonly AgentMessage[]): number {
+  let n = 0;
+  for (const raw of messages) {
+    const m = raw as Partial<PiToolResult>;
+    if (!m || typeof m !== 'object' || m.role === 'toolResult') continue;
+    const content: unknown = m.content;
+    if (typeof content === 'string') { n += content.length; continue; }
+    if (!Array.isArray(content)) continue;
+    for (const b of content) if (isPiTextBlock(b)) n += b.text.length;
+  }
+  return n;
 }
 
 /**
@@ -273,6 +299,9 @@ async function streamWithRetry(
       first = await it.next();
     } catch (e) {
       if (isAbortError(e) || attempt >= delays.length) throw e;
+      // 丢弃这个失败的流：重试会建一条新流，旧迭代器没人再读，
+      // 不关掉它底下的 fetch reader 就一直挂着（长会话里会攒住连接）。
+      void it.return?.();
       await retryDelay(delays[attempt], signal);
       continue;
     }
@@ -281,6 +310,7 @@ async function streamWithRetry(
       !first.done && ev?.type === 'error' && ev.reason === 'error'
       && isTransientError(ev.error?.errorMessage) && attempt < delays.length
     ) {
+      void it.return?.();
       await retryDelay(delays[attempt], signal);
       continue;
     }
@@ -302,6 +332,9 @@ export interface PiAgentDeps {
  * 事件流映射到 onDelta / onThinking / onAssistantMessage / onUsage 回调。
  */
 export async function runPiAgent(o: RunAgentOptions, deps: PiAgentDeps = {}): Promise<RunAgentResult> {
+  if (!isAllowedAgentBaseUrl(o.settings.baseUrl)) {
+    throw new Error('接口地址必须使用 HTTPS；HTTP 仅限 localhost / 127.0.0.1 / [::1]');
+  }
   type PiCore = typeof import('@earendil-works/pi-agent-core');
   type PiAi = typeof import('@earendil-works/pi-ai');
   let core: PiCore;
@@ -373,10 +406,11 @@ export async function runPiAgent(o: RunAgentOptions, deps: PiAgentDeps = {}): Pr
     streamFn,
     toolExecution: 'sequential',
     // 累计上限（与内置引擎同口径）：每次请求模型前把更早的工具结果换成占位说明。
+    // 预算按整轮算：system 与历史先占，工具结果只拿剩下的余量（见 aiBudget）。
     // pi 契约要求该钩子不得抛出，故整段 try/catch，任何异常都原样返回 messages。
     transformContext: async (messages) => {
       try {
-        return trimPiToolResults(messages);
+        return trimPiToolResults(messages, fitToolBudget(piReservedChars(messages)));
       } catch {
         return messages;
       }

@@ -10,15 +10,36 @@
  * 批量：逐文件处理、单个失败不中断整批；每条结果都逐行报出来（「哪个文件、识别成什么、
  * 成了没有、为什么」），不静默丢弃——这是本项目的硬纪律。
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { escThenClose, useEsc } from './useEsc';
 import { detectImportFormat, extOf, IMPORT_FORMAT_LABELS, IMPORT_FORMATS_HINT, type ImportFormat } from '../core/importFormat';
 import { parseQbankFile } from '../core/qbankParse';
-import { addBank, loadBanks } from '../core/qbank';
+import { addBank, addBankBatch, loadBanks, type QuizQuestion } from '../core/qbank';
 import { mergeQuestions, mergeSummary } from '../core/qbankMerge';
 import { docxToMarkdown, pdfToMarkdown, type ConvertedImage } from '../core/convert';
 import { apkgSummary, apkgToVaultFiles, readAnkiTsv, readApkg } from '../core/ankiImport';
 import { datasetToVaultFiles, detectDataset } from '../core/datasetImport';
+import { looksLikeKnowledgeTopics, parseKnowledgeTopics, saveKnowledgeAudio } from '../core/knowledgeAudio';
+import {
+  collectPackRefs,
+  detectContentPack,
+  packBundleUnits,
+  packIndexSummary,
+  packUnitTitle,
+  packUnitToQuestions,
+} from '../core/contentPack';
+import {
+  bookMarkdown,
+  bookNotePath,
+  groupBooks,
+  looksLikePageLinks,
+  looksLikePages,
+  packPageLinks,
+  packPages,
+  unitBriefIndex,
+  type ItemBrief,
+  type PackPage,
+} from '../core/contentPackNotes';
 import type { VaultFile } from '../core/importToVault';
 import { isImagePath } from '../core/imageRef';
 import { toast } from '../core/feedback';
@@ -50,29 +71,161 @@ function needsText(name: string): boolean {
   return ext === 'json' || ext === 'md' || ext === 'markdown' || ext === 'txt' || ext === 'tsv';
 }
 
+/** 选中文件在**选中根目录内**的相对路径（去掉最外层文件夹名，与目录树导入同一口径） */
+function relPathOf(f: File): string {
+  return ((f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name).replace(/^[^/]+\//, '');
+}
+
 export default function ImportView({ onImportBackup, onImportMd, onImportPack, onAttach, onClose }: Props) {
   useEsc(escThenClose(onClose));
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const [report, setReport] = useState<ReportItem[] | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  /**
+   * 内容包的图片是 8,574 张 / 约 1.9 GB 的素材，整批写进库要几分钟。
+   * 默认不导图：先把题目和讲义页文字导进去（几秒到几十秒），确认没问题再勾上补一遍图。
+   * 不默认导图还有一个原因——中途写爆配额或卡住，用户会以为「导入功能坏了」。
+   */
+  const [withMedia, setWithMedia] = useState(false);
+  /**
+   * 本机题库数。内容包导入的是**题库**，进的是「题库练习」，不会出现在「文件/笔记」树里——
+   * 这两处对不上，就是「导入了却看不到文件」的主要来源。把数字摆在导入面板上，
+   * 用户一眼能判断到底进没进去，不用猜。
+   */
+  const [bankCount, setBankCount] = useState<number | null>(null);
+  const refreshBankCount = () => {
+    void loadBanks().then((b) => setBankCount(b.length)).catch(() => setBankCount(null));
+  };
+  useEffect(refreshBankCount, []);
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
 
   const run = async (files: File[]) => {
-    const list = files.filter(Boolean);
-    if (busy || list.length === 0) return;
+    const picked = files.filter(Boolean);
+    if (busy || picked.length === 0) return;
+    /**
+     * 图片不是「要识别格式的文档」，是给内容包正文里的图片位当素材的：整包导入时一批就有
+     * 八千多张，如果让它们也走一遍格式识别，报告里会多出八千行「无法识别」，真错误被埋在
+     * 里面，用户看到的就是「导入失败」。所以先分池：文档走分派，图片只进索引。
+     */
+    const list = picked.filter((f) => !isImagePath(f.name));
+    const imagePool = withMedia ? picked.filter((f) => isImagePath(f.name)) : [];
+    if (list.length === 0) {
+      toast(`这批文件里只有 ${imagePool.length} 张图片：图片是配图素材，只随内容包的题目一起落库`, 'info', 6000);
+      return;
+    }
     setBusy(true);
     setReport(null);
     const items: ReportItem[] = [];
     /** 汇总所有「落成笔记」的文件，最后**一次性**走 onImportMd（批量，单次报告） */
     const pending: Array<{ file: string; files: VaultFile[] }> = [];
     const seenPaths = new Set<string>();
+    /**
+     * 内容包里的图片：单元正文只写 `{"t":"image","v":"<ref>"}`，图本身是同一批文件里的
+     * `media/files/<ref>.<ext>`。按「文件名去扩展名 == ref」索引即可命中，不必读 media/index.json。
+     * 懒建：普通导入不该为它多遍历一遍文件名。
+     */
+    let packImages: Map<string, File> | null = null;
+    const getPackImages = (): Map<string, File> => {
+      if (!packImages) {
+        packImages = new Map();
+        for (const f of [...list, ...imagePool]) {
+          const m = /(?:^|\/)media\/files\/([^/]+)$/.exec(relPathOf(f));
+          if (m) packImages.set(m[1].replace(/\.[^.]+$/, ''), f);
+        }
+      }
+      return packImages;
+    };
+    /** 同一个 ref 可能被几十道题引用：落一次库，后面直接复用路径 */
+    const packAttached = new Map<string, string>();
+    /** 讲义页落库：ref → vault 路径；图不在本批文件里时返回 null（跳过这张，不整页放弃） */
+    const attachRef = async (ref: string): Promise<string | null> => {
+      const cached = packAttached.get(ref);
+      if (cached) return cached;
+      const f = getPackImages().get(ref);
+      if (!f) return null;
+      try {
+        const path = await onAttach(f.name, f);
+        packAttached.set(ref, path);
+        return path;
+      } catch {
+        return null;
+      }
+    };
+    /**
+     * 讲义页与页题映射要等**整批**处理完才能落笔记：同一批里 pages 可能排在 unit 前面，
+     * 先写就只剩「图片在、题干看不到」。所以先缓存，循环结束后再统一生成。
+     */
+    const pageBuffer: PackPage[] = [];
+    let linkMap: Record<string, string[]> = {};
+    /** 题目 id → 题干摘要，来自本批选中的 unit 文件 */
+    const briefIndex = new Map<string, ItemBrief>();
     const push = (file: string, kind: ImportFormat, ok: boolean, detail: string) =>
       items.push({ file, kind, ok, detail });
 
+    /**
+     * 一个单元 → 待写入的题库（不落盘）。合集要先把几十个单元都算出来，再用一次
+     * addBankBatch 写盘：逐个 addBank 每次都读全库，327 个单元会退化成 O(n²)。
+     */
+    const buildUnit = async (
+      pack: unknown,
+      label: string,
+    ): Promise<{ name: string; questions: QuizQuestion[]; imgNote: string } | null> => {
+      // 顺手收一份「题目 id → 题干」，供同批的讲义页笔记引用（讲义页本身不含题干）
+      for (const [qid, brief] of unitBriefIndex(pack)) briefIndex.set(qid, brief);
+      // 图片先落库、再建题：顺序反了会留下一批「图在引用里、vault 里没有」的碎图题，
+      // 而这种半截状态在界面上看不出来（就是个灰图标），事后无从归因。
+      const refs = collectPackRefs(pack);
+      const missing: string[] = [];
+      let attached = 0;
+      for (const ref of refs) {
+        if (packAttached.has(ref)) continue;
+        if (!withMedia) continue;
+        const f = getPackImages().get(ref);
+        if (!f) { missing.push(ref); continue; }
+        try {
+          packAttached.set(ref, await onAttach(f.name, f));
+          attached += 1;
+          if (attached % 20 === 0) setProgress(`${label} · 图片 ${attached}/${refs.length}`);
+        } catch { missing.push(ref); }
+      }
+      const { questions, dropped } = packUnitToQuestions(pack, (r) => packAttached.get(r));
+      if (!questions.length) {
+        push(label, 'content-pack', false, `这个单元里没有能建成的题目（${refs.length ? `${refs.length} 张图已处理；` : ''}每题至少需要题干与答案）。`);
+        return null;
+      }
+      const imgNote = !refs.length
+        ? ''
+        : !withMedia
+          ? `；图未导（勾上「连图片一起导」再导一次可补 ${refs.length} 张）`
+          : `；图 ${refs.length - missing.length}/${refs.length} 已落 _attachments/`
+            + `${missing.length ? `（${missing.length} 张不在本批文件里）` : ''}`
+            + `${dropped ? `，另有 ${dropped} 张在解析正文里，题库模型没有对应位置` : ''}`;
+      // 题库名取「科目 · 分组 · 标题」的稳定值：同名再次导入走增量合并，
+      // 题目 id 与已完成进度都保住（addBank 整库覆盖会把进度整体作废）
+      return { name: packUnitTitle(pack), questions, imgNote };
+    };
+
+    /** 单个单元：算完直接写（一次读写，够快） */
+    const importUnit = async (pack: unknown, label: string): Promise<void> => {
+      const built = await buildUnit(pack, label);
+      if (!built) return;
+      const prev = (await loadBanks()).find((b) => b.name === built.name);
+      if (prev) {
+        const merged = mergeQuestions(prev.questions, built.questions);
+        if (merged.added > 0 || merged.enriched > 0) await addBank(built.name, merged.questions);
+        push(label, 'content-pack', true, `题库「${built.name}」：${mergeSummary(merged)}${built.imgNote}`);
+      } else {
+        await addBank(built.name, built.questions);
+        push(label, 'content-pack', true, `题库「${built.name}」：${built.questions.length} 题${built.imgNote}`);
+      }
+    };
+
+    let done = 0;
     for (const file of list) {
-      setProgress(file.name);
+      done += 1;
+      setProgress(`${done}/${list.length} · ${file.name}`);
       let fmt: ImportFormat = 'unknown';
       /** 这次文件是否疑似非 UTF-8（给下面那条提示用） */
       let mojibake = false;
@@ -171,6 +324,71 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
             }
             break;
           }
+          case 'content-pack': {
+            const pack: unknown = JSON.parse(text ?? (await file.text()));
+            const role = detectContentPack(pack);
+            // 合集：一个文件装几十个单元。先全部算出来，再一次写盘（批量读写，不逐个抖库）。
+            if (role === 'bundle') {
+              const units = packBundleUnits(pack);
+              const built: Array<{ name: string; questions: QuizQuestion[]; imgNote: string }> = [];
+              for (const [i, u] of units.entries()) {
+                setProgress(`${file.name} · 单元 ${i + 1}/${units.length}`);
+                const one = await buildUnit(u, `${file.name} · ${packUnitTitle(u)}`);
+                if (one) built.push(one);
+              }
+              if (built.length) {
+                setProgress(`${file.name} · 写入 ${built.length} 个题库（${built.reduce((n, b) => n + b.questions.length, 0)} 题）…`);
+                await addBankBatch(built.map(({ name, questions }) => ({ name, questions })));
+                const total = built.reduce((n, b) => n + b.questions.length, 0);
+                const imgRefs = units.reduce((n: number, u) => n + collectPackRefs(u).length, 0);
+                push(file.name, fmt, true,
+                  `写入 ${built.length} 个题库、共 ${total} 题`
+                  + `${units.length - built.length ? `（${units.length - built.length} 个单元没建成，见上面逐条）` : ''}`
+                  + `${imgRefs
+                    ? (!withMedia
+                      ? `；图未导（勾上「连图片一起导」再导一次可补 ${imgRefs} 张）`
+                      : `；图 ${packAttached.size} 张已落 _attachments/`)
+                    : ''}`);
+              } else {
+                push(file.name, fmt, false, '合集里没有能建成的题目（每单元至少需要题干与答案）。原始文件没有被改动。');
+              }
+              break;
+            }
+            if (role === 'index') {
+              // 索引本身不含题目。只导入索引时说清「为什么一道题都没有」，并指路到单元文件，
+              // 否则用户看到的是「导入成功 + 0 题」这种最容易被当成 bug 的结果。
+              push(file.name, fmt, true, `内容包索引：${packIndexSummary(pack)}。索引里没有题目——把 unit/ 里的文件一起选进来（或整包选中 out 文件夹）才会导入。`);
+              break;
+            }
+            if (role !== 'unit') {
+              push(file.name, fmt, false, '像是内容包的 JSON，但既不是合集（units 里是单元对象）、索引（units 里是文件名）也不是单元（缺 unitId/items）。原始文件没有被改动。');
+              break;
+            }
+            await importUnit(pack, file.name);
+            break;
+          }
+          case 'content-pack-pages': {
+            const raw: unknown = JSON.parse(text ?? (await file.text()));
+            if (looksLikePages(raw)) {
+              const pages = packPages(raw);
+              if (!pages.length) {
+                push(file.name, fmt, false, '没有可用的页：每页至少要有 paper 与 page 两个字段。原始文件没有被改动。');
+                break;
+              }
+              pageBuffer.push(...pages);
+              push(file.name, fmt, true, `讲义页 ${pages.length} 页，等整批处理完一起写成讲义笔记`);
+              break;
+            }
+            if (looksLikePageLinks(raw)) {
+              const links = packPageLinks(raw);
+              // 映射本身不含图片与正文：单独导入没有意义，必须和讲义页文件一起用
+              linkMap = { ...linkMap, ...links };
+              push(file.name, fmt, true, `页题映射 ${Object.keys(links).length} 页；和讲义页文件一起选进来就能在每页下看到相关题`);
+              break;
+            }
+            push(file.name, fmt, false, '像是讲义页数据，但既不是页列表（缺 paper/page）也不是页题映射（键不是「paper:页码」）。原始文件没有被改动。');
+            break;
+          }
           case 'document': {
             const isPdf = extOf(file.name) === 'pdf';
             const r = isPdf
@@ -192,6 +410,37 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
             break;
           }
           default:
+            // 空的页题映射不是坏文件：这份内容的讲义页确实没有题目关联（源数据只给了页级题干片段）。
+            // 按「无法识别」报会让人以为文件坏了，去找一个根本不存在的问题。
+            if (/page2item\.json$/i.test(file.name)) {
+              push(file.name, fmt, true, '页题映射为空：这份内容的讲义页与题目在源数据里没有关联。讲义页本身可正常导入（按页看图、看页要点）。');
+              break;
+            }
+            // 知识点索引用的是 topic/ 与 link/ 下的文件：题库模型只有章节字段，没有知识点表。
+            // 按「无法识别」报等于让人去找一个不存在的坏文件，这里认下来并说清现状。
+            if (/.json$/i.test(file.name)) {
+              // 坏 JSON 不该把「无法识别的文件格式」变成一句 JS 报错原文
+              let rawTopics: unknown = null;
+              try { rawTopics = JSON.parse(await file.text()) as unknown; } catch { rawTopics = null; }
+              if (looksLikeKnowledgeTopics(rawTopics)) {
+                const topics = parseKnowledgeTopics(rawTopics);
+                const saved = saveKnowledgeAudio(topics);
+                const withAudio = topics.filter((t) => t.audio).length;
+                push(
+                  file.name,
+                  fmt,
+                  saved.ok,
+                  saved.ok
+                    ? `知识点录音 ${topics.length} 条（${withAudio} 条有录音），本机共 ${saved.total} 条；在「医学速查 → 听课」里听`
+                    : '知识点没存上：本机存储已满或被禁用',
+                );
+                break;
+              }
+            }
+            if (/(?:^|\/)(?:topic|link)\//.test(relPathOf(file))) {
+              push(file.name, fmt, true, '知识点索引：暂不导入（题库按章节归类，知识点录音已单独入库）');
+              break;
+            }
             push(file.name, fmt, false, `无法识别的文件格式（支持 ${IMPORT_FORMATS_HINT}）`);
         }
       } catch (err) {
@@ -201,6 +450,44 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
       if (mojibake && items.length > at) {
         items[at] = { ...items[at], detail: `${items[at].detail}；⚠ 出现替换字符「\uFFFD」：这份文件可能不是 UTF-8（如 GBK 导出），已按原样写入，内容可能是乱码，建议另存为 UTF-8 后重新导入` };
       }
+    }
+
+    // 讲义页 → 一本讲义一篇笔记。放在整批循环之后：同一批里 pages 可能排在 unit 前面，
+    // 提前写就只能拿到图片、拿不到「这一页对应哪几道题」。
+    if (pageBuffer.length) {
+      setProgress('写入讲义笔记…');
+      const books = groupBooks(pageBuffer);
+      let attached = 0;
+      let missing = 0;
+      let linked = 0;
+      for (const book of books) {
+        /** 本册已落库的图：ref → `_attachments/…`（同一 ref 在全库只落一次） */
+        const paths = new Map<string, string>();
+        for (const p of book.pages) {
+          for (const ref of p.images) {
+            if (paths.has(ref)) continue;
+            const got = await attachRef(ref);
+            if (got) { paths.set(ref, got); attached += 1; } else missing += 1;
+          }
+        }
+        const md = bookMarkdown(book, {
+          links: linkMap,
+          index: briefIndex,
+          mediaPath: (ref) => paths.get(ref) ?? null,
+        });
+        if (Object.keys(linkMap).length) linked += book.pages.filter((p) => linkMap[`${p.paper}:${p.page}`]).length;
+        pending.push({ file: `讲义 ${book.label}`, files: [{ path: bookNotePath(book), content: md }] });
+      }
+      items.push({
+        file: '（讲义页）',
+        kind: 'content-pack-pages',
+        ok: books.length > 0,
+        detail: `讲义 ${books.length} 本、${pageBuffer.length} 页已加入待写入；`
+          + (!withMedia && pageBuffer.some((p) => p.images.length)
+            ? '图未导（勾上「连图片一起导」再导一次，讲义页才有图）'
+            : `图 ${attached} 张落库${missing ? `，${missing} 张不在本批文件里` : ''}`)
+          + `${linked ? `，${linked} 页带上了相关题` : ''}`,
+      });
     }
 
     // 批量写入所有「落成笔记」的文件（同一批里去重路径，避免自造同名冲突）
@@ -231,6 +518,7 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
     setReport(items);
     setBusy(false);
     setProgress('');
+    refreshBankCount();
     const okN = items.filter((i) => i.ok).length;
     if (okN === items.length) toast(`导入完成：${items.length} 个文件全部处理成功`, 'ok', 4200);
     else toast(`导入完成：${okN}/${items.length} 个成功，逐条原因见面板`, 'info', 7000);
@@ -250,11 +538,23 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
   const runFolder = async (files: File[]) => {
     if (busy) return;
     const notes = files.filter((f) => /\.(md|markdown)$/i.test(f.name));
-    if (!notes.length) { toast('这个文件夹里没有 Markdown 笔记（.md）', 'info', 6000); return; }
+    if (!notes.length) {
+      // 内容包整包：文件夹里没有 md，但有 .json —— 直接转交统一导入通道。
+      // 让用户为三百多个单元文件去文件选择器里 Ctrl+A，是把「能导入」变成「知道怎么导入」的差别。
+      // 不按 unit/topic/link 目录名筛选：用户经常直接选 out\unit 这一层，路径里就没有 unit/ 前缀了。
+      const packFiles = files.filter((f) => /\.json$/i.test(f.name) && !/(^|\/)media\//.test(relPathOf(f)));
+      if (packFiles.length) {
+        // 图片要显式勾选才带：默认只导题与讲义文字，先让用户看到结果，再补图
+        const imgs = withMedia ? files.filter((f) => isImagePath(f.name)) : [];
+        await run([...packFiles, ...imgs]);
+        return;
+      }
+      toast('这个文件夹里没有 Markdown 笔记（.md）', 'info', 6000); return;
+    }
     const images = files.filter((f) => isImagePath(f.name));
     setBusy(true);
     setReport(null);
-    const relPath = (f: File) => ((f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name).replace(/^[^/]+\//, '');
+    const relPath = relPathOf; // 与统一通道里给内容包图片建索引时同一口径（都去掉最外层文件夹名）
     let attachOk = 0;
     let attachFailed = 0;
     if (images.length) {
@@ -341,7 +641,12 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
             type="file"
             multiple
             style={{ display: 'none' }}
-            onChange={(e) => { void run([...(e.target.files ?? [])]); e.target.value = ''; }}
+            onChange={(e) => {
+              const picked = [...(e.target.files ?? [])];
+              e.target.value = '';
+              void run(picked).catch((err: unknown) =>
+                toast(`导入中断：${(err as Error)?.message ?? String(err)}`, 'err', 12000));
+            }}
           />
           {/* 整个文件夹：吃 .md + 图片（图片落到 _attachments/ 下同相对路径），走 webkitdirectory */}
           <input
@@ -350,11 +655,26 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
             multiple
             {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
             style={{ display: 'none' }}
-            onChange={(e) => { void runFolder([...(e.target.files ?? [])]); e.target.value = ''; }}
+            onChange={(e) => {
+              const picked = [...(e.target.files ?? [])];
+              e.target.value = '';
+              // 不接住异常的话，出错时页面只会「什么都不发生」——那看起来就像导入功能坏了
+              void runFolder(picked).catch((err: unknown) =>
+                toast(`导入中断：${(err as Error)?.message ?? String(err)}`, 'err', 12000));
+            }}
           />
           <div className="quiz-actions import-actions">
             <button className="btn-small" disabled={busy} onClick={() => fileRef.current?.click()}>选择文件（可多选）</button>
             <button className="btn-small" disabled={busy} onClick={() => folderRef.current?.click()}>导入整个文件夹（.md + 图片）</button>
+            <label className="import-with-media">
+              <input type="checkbox" checked={withMedia} disabled={busy} onChange={(e) => setWithMedia(e.target.checked)} />
+              连图片一起导（8,574 张 / 约 1.9 GB，会慢几分钟）
+            </label>
+            {bankCount !== null && (
+              <span className="muted import-bankcount">
+                本机已有 {bankCount} 个题库（在「题库练习」里，不在「文件」里）
+              </span>
+            )}
           </div>
         </div>
 

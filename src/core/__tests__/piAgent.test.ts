@@ -5,7 +5,7 @@ import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStre
 import { isAbortError, type RunAgentOptions, type WireMessage } from '../aiAgent';
 import { runPiAgent, toPiMessages } from '../piAgent';
 
-const SETTINGS = { baseUrl: 'http://mock.local/v1/', apiKey: 'sk-test', model: 'mock' };
+const SETTINGS = { baseUrl: 'https://mock.local/v1/', apiKey: 'sk-test', model: 'mock' };
 
 const piUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 
@@ -91,6 +91,15 @@ function run(
 }
 
 describe('runPiAgent（pi 引擎适配）', () => {
+  it('远程 HTTP 接口在启动引擎前就被拒绝', async () => {
+    await expect(runPiAgent({
+      settings: { ...SETTINGS, baseUrl: 'http://api.example.com/v1/' },
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [],
+      executeTool: vi.fn(),
+    }, { streamFn: vi.fn() as unknown as StreamFn })).rejects.toThrow('HTTPS');
+  });
+
   it('文本直答：正文增量、最终消息、本地估算用量', async () => {
     const onDelta = vi.fn();
     const onAssistantMessage = vi.fn();

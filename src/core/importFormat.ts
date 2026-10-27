@@ -13,10 +13,14 @@
 import { detectQbankSchema } from './qbankMapper';
 import { detectDataset } from './datasetImport';
 import { PACK_FORMAT } from './knowledgePack';
+import { detectContentPack } from './contentPack';
+import { looksLikePageLinks, looksLikePages } from './contentPackNotes';
 
 export type ImportFormat =
   | 'vault-backup'   // 晶格/medvault 备份 .json（笔记 + 题库 + 复习进度）
   | 'knowledge-pack' // 晶格知识包 .json（一组现成笔记）
+  | 'content-pack'   // 内容包 .json（kq.pack.v1：索引 + 单元，题目按单元成库）
+  | 'content-pack-pages' // 内容包的讲义页 / 页题映射（图片落库 + 落成讲义笔记）
   | 'qbank-json'     // 题库 .json（本项目格式或同业可映射形状）
   | 'dataset-json'   // 结构化数据集 .json（症状→疾病 / 口诀 / 术语表）
   | 'anki-apkg'      // Anki 牌组包 .apkg
@@ -29,6 +33,8 @@ export type ImportFormat =
 export const IMPORT_FORMAT_LABELS: Record<ImportFormat, string> = {
   'vault-backup': '笔记备份',
   'knowledge-pack': '知识包',
+  'content-pack': '内容包',
+  'content-pack-pages': '讲义页',
   'qbank-json': '题库',
   'dataset-json': '数据集',
   'anki-apkg': 'Anki 牌组',
@@ -68,6 +74,12 @@ export function detectJsonFormat(text: string): ImportFormat {
     if (typeof o.app === 'string' && BACKUP_APPS.has(o.app) && Array.isArray(o.files)) return 'vault-backup';
     if (o.format === PACK_FORMAT) return 'knowledge-pack';
   }
+  // 内容包排在题库形状探测**之前**：单元文件本身就是 {…, items:[…]}，
+  // 让它落到题库通道会被当成「没识别出题目」，白跑一趟又给一条误导性的失败原因。
+  if (detectContentPack(raw) !== 'unknown') return 'content-pack';
+  // 讲义页 / 页题映射也是内容包的一部分，但落地方是「笔记 + 图片」而不是题库：
+  // 页码顺序是讲义的全部上下文，摊成题目就丢了。
+  if (looksLikePages(raw) || looksLikePageLinks(raw)) return 'content-pack-pages';
   if (detectDataset(raw).kind !== 'unknown') return 'dataset-json';
   if (detectQbankSchema(raw).kind !== 'unknown') return 'qbank-json';
   return 'unknown';

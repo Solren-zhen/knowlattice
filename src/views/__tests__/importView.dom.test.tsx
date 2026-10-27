@@ -219,7 +219,10 @@ describe('ImportView · 报告不再吞掉底层的跳过与冲突', () => {
 
     await waitFor(() => expect(onImportMd).toHaveBeenCalled());
     expect((onImportMd.mock.calls[0][0] as Array<{ path: string }>).map((f) => f.path)).toEqual(['同名甲.md']);
-    expect(report().map((li) => li.textContent).join('\n')).toContain('另有 1 篇同名路径只写入第一篇');
+    // 报告是异步链末端的一次 setState：必须等它提交，直接断言会读到上一帧的空列表
+    // （整套并行跑时机器一慢就假红，单跑却全绿）。
+    await waitFor(() =>
+      expect(report().map((li) => li.textContent).join('\n')).toContain('另有 1 篇同名路径只写入第一篇'));
   });
 
   it('疑似非 UTF-8（出现替换字符）：照常导入，但在那一条上给出编码提示', async () => {

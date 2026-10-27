@@ -17,7 +17,7 @@ import '@react-pdf-viewer/default-layout/lib/styles/index.css';
 import {
   detectScannedPdf, loadPdfjs, listPdfBooks, getPdfBook, putPdfBook,
   removePdfBook, savePdfPage, setCurrentPdfBook, getCurrentPdfName,
-  migrateLegacyPdf, type PdfBook,
+  migrateLegacyPdf, pdfDocumentParams, type PdfBook,
 } from '../core/pdfLib';
 import { renderAsync } from 'docx-preview';
 import { sanitizeRenderedHyperlinks } from '../core/domSanitize';
@@ -104,6 +104,9 @@ function PdfViewer({ doc, plugin, onPageChange }: {
       // （切书后画布停在上本、或直接空白，就是这里）。key 由调用方给（书名 + 打开序号）。
       fileUrl={doc.data}
       plugins={[plugin]}
+      // <Viewer> 内部自己调 getDocument：中文讲义要的 CMap 不在这里补，文字层就是空的
+      // （页面画得出来、却选不中字 → 摘录功能像是坏了）。
+      transformGetDocumentParams={(params) => ({ ...params, ...pdfDocumentParams() })}
       // 说明：这里不设 initialPage —— default-layout 下没人消费它（只被 core 收下），
       // 实测切书后仍停在第 1 页。也没有稳定的跳页途径（jumpToPage 需等插件 store 就绪、
       // 直接改 .rpv-core__inner-pages 的 scrollTop 会被它的虚拟滚动重置）。

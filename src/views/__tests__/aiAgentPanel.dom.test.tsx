@@ -90,7 +90,7 @@ const BASE_DOCS = new Map([['解剖/心脏.md', '# 心脏\n心肌收缩泵血。
 
 function seedSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-    baseUrl: 'http://mock.local/v1', apiKey: 'sk-test', model: 'mock',
+    baseUrl: 'https://mock.local/v1', apiKey: 'sk-test', model: 'mock',
   }));
 }
 
@@ -138,6 +138,20 @@ afterEach(() => {
 });
 
 describe('AI 笔记助手审批流', () => {
+  it('远程 HTTP 接口不允许保存，避免 API Key 明文传输', () => {
+    localStorage.clear();
+    renderPanel();
+
+    fireEvent.change(screen.getByPlaceholderText('https://api.xiaomimimo.com/v1'), {
+      target: { value: 'http://api.example.com/v1' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('如 deepseek-chat / glm-4.6 / kimi-k2'), {
+      target: { value: 'test-model' },
+    });
+
+    expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('应用：diff 卡出现 → 点应用 → onSave 调用、卡片转已应用、模型收到写入结果', async () => {
     const fetchMock = stubFetch([
       async () => sseResponse(patchCallChunks('c1', '心肌收缩泵血。', '心肌收缩泵血，维持循环。')),
@@ -574,6 +588,8 @@ describe('Claudian 式交互', () => {
 
     // 发送：wire 消息带选段原文与来源路径
     await sendMessage('这段话什么意思？');
+    // sendMessage 只保证 UI 进入运行态；请求是异步发出的，等它落地再断言 wire
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 2000 });
     const userWire = bodies[0].messages.find((m) => m.role === 'user');
     expect(userWire?.content).toContain('【用户选中的原文】');
     expect(userWire?.content).toContain('（来自：解剖/心脏.md）');
@@ -611,6 +627,7 @@ describe('Claudian 式交互', () => {
     renderPanel();
 
     await sendMessage('第一条');
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1), { timeout: 2000 });
     await sendMessage('第二条');
     expect(await screen.findByText('第二条', { selector: '.agent-queued-text' })).toBeTruthy();
 

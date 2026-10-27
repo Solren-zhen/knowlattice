@@ -53,6 +53,13 @@ export interface QuizQuestion {
    * 单条解析仍走 `explanation`（既有数据、既有渲染不动）；两者都有时以本字段为准。
    */
   explanations?: Array<{ source: string; text: string }>;
+  /**
+   * 讲解音频（远端直链）：有的题库给每题配一段讲解录音。
+   * 只播放、不下载——链接是源站签名地址，存下来也会过期，进备份只会带一堆死链。
+   */
+  audio?: string;
+  /** 讲解音频时长（秒）。只用于在界面上写「5:21」，拿不到就不显示时长 */
+  audioDur?: number;
   /** 正确答案文本（choice 自动取选项原文；recall 为答案原文） */
   answerText: string;
   explanation?: string;
@@ -144,6 +151,40 @@ export async function addBank(name: string, questions: QuizQuestion[]): Promise<
   banks.unshift({ name, importedAt: Date.now(), questions: merged });
   await putBank(banks[0]);
   return banks;
+}
+
+/**
+ * 批量写入多个题库：一次读、一次写。
+ *
+ * 逐个 addBank 是 O(n²) —— 每次都会 getAllBanks() 把已有题库（含全部题目）读一遍再反序列化。
+ * 内容包一次导入 327 个题库、19 万题时，这条路会把几十分钟花在重复读盘上，
+ * 表现得就像「卡死/没反应」。所以批量通道单开一个：
+ * 读一次现有题库 → 在内存里按名字合并 → 一次 putBanks。
+ *
+ * 语义与 addBank 一致（同名合并、旧选项批注按题干+选项接回），不要在这里另立规则。
+ */
+export async function addBankBatch(
+  items: Array<{ name: string; questions: QuizQuestion[] }>,
+): Promise<QuizBank[]> {
+  if (!items.length) return loadBanks();
+  const all = await loadBanks();
+  const byName = new Map(all.map((b) => [b.name, b]));
+  const touched: QuizBank[] = [];
+  for (const { name, questions } of items) {
+    const prev = byName.get(name);
+    const carried = prev ? noteIndex(prev.questions) : null;
+    const merged = carried
+      ? questions.map((q) => {
+          const notes = q.optionNotes ?? carried.get(questionKey(q));
+          return notes ? { ...q, optionNotes: notes } : q;
+        })
+      : questions;
+    const bank: QuizBank = { name, importedAt: Date.now(), questions: merged };
+    byName.set(name, bank);
+    touched.push(bank);
+  }
+  await putBanks(touched);
+  return [...touched.reverse(), ...[...byName.values()].filter((b) => !touched.includes(b))];
 }
 
 /**
@@ -269,14 +310,23 @@ function chaptersFrom(src: Record<string, unknown>): string[] {
   return [];
 }
 
-/** "B" / "b" / 0 / "容易放氧" → 正确项下标 */
+/** "B" / "b" / "Ｂ" / 0 / "容易放氧" → 正确项下标 */
 function answerIndex(raw: unknown, options: string[]): number {
   if (typeof raw === 'number' && raw >= 0 && raw < options.length) return raw;
   const s = String(raw ?? '').trim();
+  // 全角字母/数字先折成半角再识别：Word、微信里粘出来的题库常写「答案：Ｂ」「答案：ＡＣ」，
+  // 只认半角时它们会被判成「无正确项」(answer = -1)，那题从此永远判错且一声不响。
+  const norm = s.normalize('NFKC');
   // 字母答案常带标点/空格：B / B. / B、 / B.
-  const letter = /^([A-Za-z])\s*[.、．)）:：]?\s*$/.exec(s);
+  const letter = /^([A-Za-z])\s*[.、．)）:：]?\s*$/.exec(norm);
   if (letter) return letter[1].toUpperCase().charCodeAt(0) - 65;
-  const byText = options.findIndex((o) => o.trim() === s.replace(/^[A-Za-z][.、]\s*/, ''));
+  // 选项原文匹配：两边都折成 NFKC 再比（选项本身可能带全角标点），原文直比优先
+  const bare = s.replace(/^[A-Za-z][.、]\s*/, '');
+  const bareNorm = bare.normalize('NFKC');
+  const byText = options.findIndex((o) => {
+    const t = o.trim();
+    return t === bare || t.normalize('NFKC') === bareNorm;
+  });
   return byText;
 }
 
@@ -303,9 +353,10 @@ export function answerIndices(raw: unknown, options: string[]): number[] {
     push(raw);
   } else {
     const s = String(raw ?? '').trim();
-    // 连续字母串（ABC / A、C / A;B）拆成单个字母逐个解析；
+    // 连续字母串（ABC / A、C / A;B / ＡＣ）拆成单个字母逐个解析；先 NFKC 折全角，
+    // 否则「ＡＣ」不是 [A-Za-z]+，会整串落到 answerIndex 里没人认识 → 无正确项。
     // 单个字母（"B."）与选项原文仍交给 answerIndex——它们各有既定写法，拆开反而会错。
-    const compact = s.replace(/[\s、,，;；/|.．)）:：]/g, '');
+    const compact = s.normalize('NFKC').replace(/[\s、,，;；/|.．)）:：]/g, '');
     if (compact.length > 1 && /^[A-Za-z]+$/.test(compact)) for (const ch of compact) push(ch);
     else push(s);
   }
@@ -388,6 +439,11 @@ export function normalizeQuestions(raw: unknown): QuizQuestion[] {
     const { texts: options, images: optImages } = optionsFrom(firstOf<unknown>(src, ['options', 'choices', '选项']));
     const rawAnswer = firstOf<unknown>(src, ['answer', 'correct', '答案', '正确答案']);
     const rawAnswers = firstOf<unknown>(src, ['answers', 'correctAnswers', '多选答案']);
+    // 讲解音频是远端直链，只播放不下载（签名地址会过期，进备份只会带死链）
+    const audioRaw = firstOf<unknown>(src, ['audio', 'audioUrl', '音频', '讲解音频']);
+    const audio = typeof audioRaw === 'string' && audioRaw.trim() ? audioRaw.trim() : undefined;
+    const audioDurRaw = firstOf<unknown>(src, ['audioDur', '音频时长']);
+    const audioDur = typeof audioDurRaw === 'number' && audioDurRaw > 0 ? audioDurRaw : undefined;
     const explanation = firstOf<string>(src, ['explanation', '解析', '解释']);
     const chapter = firstOf<string>(src, ['chapter', '章节', '科目']);
     // 一题多章节（可选增量）：只在真的解析出 ≥2 个章节时才带上这个键，形状与既有题一致
@@ -405,6 +461,9 @@ export function normalizeQuestions(raw: unknown): QuizQuestion[] {
     const base = {
       id,
       stem: String(stem).trim(),
+      // 可选字段只在真有时出现：旧题库解析出来的键集合必须一个字不差
+      ...(audio ? { audio } : {}),
+      ...(audioDur ? { audioDur } : {}),
       explanation: explanation ? String(explanation) : undefined,
       // 一题多套解析：只在真的解析出内容时才带上，不留空数组
       explanations: explanations.length ? explanations : undefined,

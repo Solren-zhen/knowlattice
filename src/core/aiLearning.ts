@@ -40,6 +40,37 @@ export const LEARNING_TOOLS: AgentToolDef[] = [
 ];
 
 const DAY_MS = 86_400_000;
+const FORECAST_DAYS = 7;
+
+/**
+ * 未来到期前瞻：把「还没到期」的调度按剩余天数向上取整分桶，day 从 1 开始。
+ * 已到期/逾期的卡归今天的队列，不进未来桶；越出 days 窗口的卡直接丢弃。
+ * 只回有量的桶并按 day 升序——调用方拿到就能直接拼成一句人话。
+ */
+export function forecastDue(dueAts: readonly number[], now: number, days = 7): Array<{ day: number; count: number }> {
+  const buckets = new Map<number, number>();
+  for (const at of dueAts) {
+    if (at <= now) continue;
+    const day = Math.ceil((at - now) / DAY_MS);
+    if (day > days) continue;
+    buckets.set(day, (buckets.get(day) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([day, count]) => ({ day, count }));
+}
+
+/**
+ * 前瞻一句话：今天没到期不等于未来七天没有，提前说出来模型才会建议「今天顺手预习」，
+ * 而不是等积压爆发。最多列 3 档，防止 7 天各有一张时把报告刷成流水账。
+ */
+function forecastLine(futureAt: readonly number[], now: number): string {
+  const buckets = forecastDue(futureAt, now, FORECAST_DAYS);
+  if (!buckets.length) return `未来 ${FORECAST_DAYS} 天没有新的到期卡。`;
+  const total = buckets.reduce((a, b) => a + b.count, 0);
+  const shown = buckets.slice(0, 3).map((b) => `${b.day === 1 ? '明天' : `${b.day} 天后`} ${b.count} 张`);
+  return `未来 ${FORECAST_DAYS} 天还会到期 ${total} 张：${shown.join('，')}${buckets.length > 3 ? '…' : '。'}`;
+}
 
 /** 今日到期报告：模型可据此建议「先复习再整理」或挑薄弱小节出题 */
 export function reviewDueReport(paths: string[], docs: Map<string, string>, now = Date.now()): string {
@@ -47,6 +78,8 @@ export function reviewDueReport(paths: string[], docs: Map<string, string>, now 
   if (!cards.length) return '知识库里还没有笔记，没有复习卡。';
   const schedules = loadCards();
   const due: Array<{ card: ReviewCard; at: number }> = [];
+  // 顺路收集未来到期时间，前瞻段复用这次 loadCards，不再读一遍存储
+  const futureAt: number[] = [];
   let newCount = 0;
   for (const c of cards) {
     const s = scheduleOf(schedules, c);
@@ -54,11 +87,15 @@ export function reviewDueReport(paths: string[], docs: Map<string, string>, now 
     else {
       const at = new Date(s.due).getTime();
       if (at <= now) due.push({ card: c, at });
+      else futureAt.push(at);
     }
   }
   due.sort((a, b) => a.at - b.at);
   if (!due.length) {
-    return `今天没有到期的复习卡。另有 ${newCount} 张新卡还没排程（共 ${cards.length} 张）。`;
+    return [
+      `今天没有到期的复习卡。另有 ${newCount} 张新卡还没排程（共 ${cards.length} 张）。`,
+      forecastLine(futureAt, now),
+    ].join('\n');
   }
   const overdue = due.filter((d) => d.at < now - DAY_MS).length;
   const shown = due.slice(0, 8)
@@ -69,6 +106,8 @@ export function reviewDueReport(paths: string[], docs: Map<string, string>, now 
     '最紧的几张：',
     ...shown,
     ...(rest > 0 ? [`…（其余 ${rest} 张省略）`] : []),
+    // 新增内容只追加在末尾：已有行（含测试里 toContain 的断言）保持原样
+    forecastLine(futureAt, now),
   ].join('\n');
 }
 

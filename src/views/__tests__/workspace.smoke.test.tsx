@@ -5,10 +5,26 @@
  * 只断言「结构存在 + 关键流程可达」，不测像素。
  */
 import 'fake-indexeddb/auto';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
 import { openDB } from 'idb';
 import Workspace from '../Workspace';
+import { RAIL_GROUPS } from '../railCatalog';
+
+/**
+ * 入口挂在母主题下：先点母主题浮出该组，再点条目。
+ * 已经开着的组不要重复点——母主题是开关，再点一次会把浮层收起来。
+ */
+function clickEntry(name: string): void {
+  const group = RAIL_GROUPS.find((item) => item.entries.some((entry) => entry.label === name));
+  if (!group) throw new Error(`rail 里没有这个入口：${name}`);
+  const trigger = screen.getByRole('button', { name: group.title });
+  // 宽屏看浮层，窄屏看 aria-expanded（原地展开）；已经开着就别再点，母主题是开关
+  const already = document.querySelector('.rail-branch')?.getAttribute('aria-label') === group.title
+    || trigger.getAttribute('aria-expanded') === 'true';
+  if (!already) fireEvent.click(trigger);
+  fireEvent.click(screen.getByLabelText(name));
+}
 
 // jsdom 没有 ResizeObserver（ChapterTree 虚拟滚动用到）
 class ROStub {
@@ -49,24 +65,30 @@ beforeAll(async () => {
 });
 
 describe('Workspace 布局冒烟', () => {
-  it('导航轨完整渲染（17 个入口）', async () => {
-    render(<Workspace />);
+  afterEach(cleanup);
+
+  it('导航轨只有五个母主题：收起态与展开态装的是同一批东西', async () => {
+    const { container } = render(<Workspace />);
     await waitFor(() => expect(screen.getByLabelText('回到主界面')).toBeTruthy());
-    for (const name of ['目录', '搜索', '历史版本', '解剖图谱', '知识图谱', '间隔复习', '错题本',
-      '题库练习', '待办清单', '标签', '学习统计', 'AI 问答', 'AI 笔记', '智能草稿', 'PDF 对照', '格式转换', '切换主题']) {
-      expect(screen.getByLabelText(name), `缺少 rail 入口：${name}`).toBeTruthy();
+    // 收起来也扫得出软件能干什么：五类母主题，条目指到哪一组就浮在哪一组
+    for (const title of ['工作区', '学习', '资料', '工具', '系统']) {
+      expect(screen.getByRole('button', { name: title }), `缺少母主题：${title}`).toBeTruthy();
     }
-    cleanup();
+    // 轨道上就这五个母主题：条目只以「当前那一组摊开」的形式出现，不会两态各列一套
+    expect(container.querySelectorAll('.rail-group-btn')).toHaveLength(5);
+    expect(container.querySelector('.rail-branch')).toBeNull();
   });
 
-  it('导航可展开为带分组的文字标签，并记住偏好', async () => {
+  it('导航可展开为文字标签，并记住偏好', async () => {
     localStorage.removeItem('knowlattice-rail-expanded');
     const { container } = render(<Workspace />);
     await waitFor(() => expect(screen.getByRole('button', { name: '展开导航标签' })).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: '展开导航标签' }));
     expect(container.querySelector('.rail')?.classList.contains('rail--expanded')).toBe(true);
-    expect(screen.getByText('工作区')).toBeTruthy();
-    expect(screen.getByText('学习')).toBeTruthy();
+    // 首页「最近使用」也会出现同名去处，这里限定在导航轨内查
+    const rail = container.querySelector('.rail') as HTMLElement;
+    expect(within(rail).getByText('工作区')).toBeTruthy();
+    expect(within(rail).getByText('学习')).toBeTruthy();
     expect(localStorage.getItem('knowlattice-rail-expanded')).toBe('true');
     cleanup();
     localStorage.removeItem('knowlattice-rail-expanded');
@@ -74,17 +96,27 @@ describe('Workspace 布局冒烟', () => {
 
   it('目录入口会真实折叠章节卡片，并同步无障碍状态', async () => {
     const { container } = render(<Workspace />);
-    const toggle = await screen.findByRole('button', { name: '目录' });
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    /** 目录挂在「工作区」母主题下，选完浮层就收起来 —— 每次都从母主题重新进 */
+    const toggle = async () => {
+      // 浮层容器自己也带 aria-label="工作区"，按 label 查会撞车 —— 用 role + name 锁定母按钮
+      await waitFor(() => expect(screen.getByRole('button', { name: '工作区' })).toBeTruthy());
+      // 手风琴：组可能已经摊开着（默认摊当前组），已开就别点，再点会收起来
+      const trigger = screen.getByRole('button', { name: '工作区' });
+      if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger);
+      return screen.getByLabelText('目录');
+    };
+
+    const first = await toggle();
+    expect(first.getAttribute('aria-pressed')).toBe('true');
     expect(container.querySelector('.card.c-tree')).toBeTruthy();
 
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(first);
     expect(container.querySelector('.card.c-tree')).toBeNull();
     expect(container.querySelector('.deck')?.classList.contains('with-tree')).toBe(false);
 
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    const again = await toggle();
+    expect(again.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(again);
     expect(container.querySelector('.card.c-tree')).toBeTruthy();
     cleanup();
   });
@@ -102,10 +134,12 @@ describe('Workspace 布局冒烟', () => {
     await waitFor(() => expect(screen.getByText('你的知识库，从这里开始')).toBeTruthy());
     expect(container.querySelector('.card.c-tree')).toBeNull();
     expect(container.querySelector('.deck')?.classList.contains('with-tree')).toBe(false);
-    expect(screen.getByRole('button', { name: '目录' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('button', { name: '工作区' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
-    fireEvent.click(screen.getByRole('button', { name: '目录' }));
+    // 抽屉一打开就把当前所在的「工作区」摊在轨上（手风琴默认摊开当前组），不用再点母主题
+    expect(screen.getByLabelText('目录').getAttribute('aria-pressed')).toBe('false');
+    clickEntry('目录');
     expect(container.querySelector('.card.c-tree')).toBeTruthy();
     const row = [...container.querySelectorAll('.tree-row.file')]
       .find((candidate) => candidate.textContent?.includes('波尔效应'));
@@ -171,8 +205,8 @@ describe('Workspace 布局冒烟', () => {
     const { container } = render(<Workspace />);
     await waitFor(() => expect(screen.getByText('你的知识库，从这里开始')).toBeTruthy());
 
-    // 进入医学通路工作区（整屏替换三栏布局）
-    fireEvent.click(screen.getByLabelText('医学通路'));
+    // 进入医学通路工作区（整屏替换三栏布局）：通路是「工作方式」，所以留在一等入口上
+    clickEntry('医学通路');
     await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeTruthy());
     expect(container.querySelector('.deck')).toBeNull();
 
@@ -184,19 +218,63 @@ describe('Workspace 布局冒烟', () => {
 
     // 再进一次：点「目录」（切换开关）也应退出工作区；treeOpen 翻为 false 时目录卡片消失
     const treeWasOpen = container.querySelector('.deck')?.classList.contains('with-tree') ?? false;
-    fireEvent.click(screen.getByLabelText('医学通路'));
+    clickEntry('医学通路');
     await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeTruthy());
-    fireEvent.click(screen.getByLabelText('目录'));
+    clickEntry('目录');
     await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeNull());
     expect(container.querySelector('.deck')).toBeTruthy();
     // 切换后目录状态取反（切换开关语义），但三栏布局必须回来
     expect(container.querySelector('.card.c-tree') ? true : false).toBe(!treeWasOpen);
 
     // 再进一次：通路按钮本身是开关，再点一次即关闭
-    fireEvent.click(screen.getByLabelText('医学通路'));
+    clickEntry('医学通路');
     await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeTruthy());
-    fireEvent.click(screen.getByLabelText('医学通路'));
+    clickEntry('医学通路');
     await waitFor(() => expect(container.querySelector('.pathway-builder')).toBeNull());
     cleanup();
+  }, 20000);
+
+  it('首页「最近使用」记下最近点过的去处，并落盘', async () => {
+    localStorage.removeItem('knowlattice-recent-features');
+    const { container } = render(<Workspace />);
+    await waitFor(() => expect(screen.getByText('你的知识库，从这里开始')).toBeTruthy());
+    // 一条记录都没有：退化成首页默认的那 8 个去处，标题跟着换
+    expect(screen.getByText('常用入口')).toBeTruthy();
+    expect(container.querySelectorAll('.home-feat')).toHaveLength(8);
+
+    clickEntry('题库练习');
+    await waitFor(() => expect(localStorage.getItem('knowlattice-recent-features')).toContain('quiz'));
+
+    fireEvent.click(screen.getByLabelText('回到主界面'));
+    await waitFor(() => expect(screen.getByText('最近使用')).toBeTruthy());
+    expect(container.querySelector('.home-feat')?.textContent).toContain('题库练习');
+    localStorage.removeItem('knowlattice-recent-features');
+    cleanup();
+  }, 20000);
+
+  /**
+   * 回归守卫：全屏面板互斥。
+   * 每个面板自带一层 fixed inset:0 的遮罩，两个同时打开时后渲染的盖住前面的——
+   * 表现是「点了新入口没反应」或「关掉题库，冒出个错题本」。入口切换时应当先关掉其余面板。
+   */
+  it('全屏面板互斥：换一个入口时，上一个自动关掉', async () => {
+    localStorage.removeItem('knowlattice-recent-features');
+    const { container } = render(<Workspace />);
+    await waitFor(() => expect(screen.getByText('你的知识库，从这里开始')).toBeTruthy());
+
+    clickEntry('题库练习');
+    await waitFor(() => expect(container.querySelectorAll('.panel-backdrop')).toHaveLength(1), { timeout: 8000 });
+
+    // 不关题库直接点错题本：遮罩必须仍然只有一层
+    clickEntry('错题本');
+    await waitFor(() => expect(container.querySelector('.mistake-book, .panel-backdrop')).toBeTruthy());
+    expect(container.querySelectorAll('.panel-backdrop')).toHaveLength(1);
+
+    // 再切到间隔复习：同样只有一层
+    clickEntry('间隔复习');
+    await waitFor(() => expect(container.querySelectorAll('.panel-backdrop')).toHaveLength(1), { timeout: 8000 });
+
+    cleanup();
+    localStorage.removeItem('knowlattice-recent-features');
   }, 20000);
 });

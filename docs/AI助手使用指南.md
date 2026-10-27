@@ -19,6 +19,8 @@ KNOWLATTICE 支持任何 OpenAI 兼容的 `/chat/completions` 端点。面板里
 | **Ollama 本地** | `http://localhost:11434/v1` | 无需密钥；需以 `OLLAMA_ORIGINS=*` 启动以放行跨域 |
 | **自定义中转** | 中转站给的地址（通常以 `/v1` 结尾） | 粘贴后先点「测试连接」 |
 
+> 远程接口必须使用 `https://`。`http://` 只允许 `localhost`、`127.0.0.1` 和 `[::1]`，避免 API Key 明文经过网络。
+
 OpenAI / Anthropic / Azure OpenAI 等也可以，填它们提供的 OpenAI 兼容地址即可——
 模型名请以服务商控制台为准，别照抄示例。
 

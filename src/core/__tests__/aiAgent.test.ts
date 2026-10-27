@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   agentNetHint,
   buildHistoryMessages, buildNoteSystemPrompt, detectMention, expandCommand, extractMentionedNotes, formatNoteList,
-  listCommands, queryFragments, readNoteSlice, runAgent, searchNotes, truncateForModel,
+  isAllowedAgentBaseUrl, listCommands, queryFragments, readNoteSlice, runAgent, searchNotes, truncateForModel,
   type RunAgentOptions, type WireMessage,
 } from '../aiAgent';
 import { BUILTIN_AI_COMMANDS } from '../aiCommands';
@@ -26,12 +26,33 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('AI 接口地址安全', () => {
+  it('远程只允许 HTTPS，本机回环地址才允许 HTTP', () => {
+    expect(isAllowedAgentBaseUrl('https://api.example.com/v1')).toBe(true);
+    expect(isAllowedAgentBaseUrl('http://api.example.com/v1')).toBe(false);
+    expect(isAllowedAgentBaseUrl('http://localhost:11434/v1')).toBe(true);
+    expect(isAllowedAgentBaseUrl('http://127.0.0.1:11434/v1')).toBe(true);
+    expect(isAllowedAgentBaseUrl('http://[::1]:11434/v1')).toBe(true);
+    expect(isAllowedAgentBaseUrl('ftp://api.example.com/v1')).toBe(false);
+  });
+});
+
 describe('runAgent', () => {
   const baseOpts = (): RunAgentOptions => ({
     settings: { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'test-model' },
     messages: [{ role: 'user', content: '帮我改笔记' }],
     tools: [],
     executeTool: vi.fn(async () => 'OK'),
+  });
+
+  it('远程 HTTP 接口在发请求前就被拒绝', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(runAgent({
+      ...baseOpts(),
+      settings: { baseUrl: 'http://api.example.com/v1', apiKey: 'sk-test', model: 'test-model' },
+    })).rejects.toThrow('HTTPS');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('流式收集正文：onDelta 逐段回调，最终返回完整内容', async () => {
@@ -487,5 +508,32 @@ describe('输入辅助（@ 引用 / 斜杠命令）', () => {
     });
     expect(thinking).toEqual(['让我想想']);
     expect(res.content).toBe('答案');
+  });
+});
+
+describe('SSE 收尾', () => {
+  const opts = () => ({
+    settings: { baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'test-model' },
+    messages: [{ role: 'user' as const, content: 'hi' }],
+    tools: [],
+    executeTool: vi.fn(async () => 'OK'),
+  });
+
+  it('最后一帧没有换行结尾时也要解析（正文尾巴与 usage 都不能丢）', async () => {
+    // 某些网关的最后一帧不带 \n，或连接被对端正常关闭：以前这里直接丢掉 buf，
+    // 表现为「回答尾巴少一截」或「usage 一直是估算值」。
+    const body = dataLine({ choices: [{ delta: { content: '前半' } }] })
+      + `data: ${JSON.stringify({
+        choices: [{ delta: { content: '尾巴' } }],
+        usage: { prompt_tokens: 7, completion_tokens: 3 },
+      })}`;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(c) { c.enqueue(new TextEncoder().encode(body)); c.close(); },
+    }), { status: 200 })));
+
+    const usages: unknown[] = [];
+    const res = await runAgent({ ...opts(), onUsage: (u) => usages.push(u) });
+    expect(res.content).toBe('前半尾巴');
+    expect(usages).toEqual([{ promptTokens: 7, completionTokens: 3, estimated: false }]);
   });
 });

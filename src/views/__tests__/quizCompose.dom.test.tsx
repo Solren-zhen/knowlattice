@@ -9,12 +9,20 @@
  *  ③ 章节筛选真的在过滤；
  *  ④ 作答会落盘成**逐题**历史（错题加权与 FSRS 排程的唯一数据源），
  *     并同步反映到题库列表的进度行上。
+ *
+ * ⚠️ 已知偶发（全量并行时约 1/3，单跑必绿）：「答错一题」用例第二次挂载后，
+ *    组件读到的题库为空 → 面板落到「导入题库」空态 → `组题` 按钮不存在（等 12s 也不出现）。
+ *    已排除：数据丢失（失败后立刻查库 `getAllBanks() = 1`）、迁移时序（beforeEach 直接落库）、
+ *    连接缓存（storage/qbank 单连接、无 deleteDatabase）、超时不足（12s 仍失败）。
+ *    仍待查：第二次挂载时 `loadBanks()` 为何返回空数组（疑与 reset/写入交错有关）。
+ *    修复方向：让 QuizView 区分「读到空」与「读取失败」并重试一次以上；
+ *    或给 `loadBanks()` 加可重试读。**不要**为了让这条变绿而放宽断言。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import QuizView from '../QuizView';
 import type { QuizQuestion } from '../../core/qbank';
-import { getAllQuestionStats, resetQbankStorageForTests } from '../../storage/qbank';
+import { getAllQuestionStats, migrateLegacyBanks, resetQbankStorageForTests } from '../../storage/qbank';
 import { loadStats, recordAnswer, resetQbankStatsForTests } from '../../core/qbankStats';
 
 const BANK = '绿皮书·生理学';
@@ -49,9 +57,12 @@ beforeEach(async () => {
   localStorage.clear();
   resetQbankStatsForTests();
   await resetQbankStorageForTests();
-  localStorage.setItem('knowlattice-qbanks', JSON.stringify([
-    { name: BANK, importedAt: Date.now(), questions: QUESTIONS },
-  ]));
+  const seeded = [{ name: BANK, importedAt: Date.now(), questions: QUESTIONS }];
+  localStorage.setItem('knowlattice-qbanks', JSON.stringify(seeded));
+  // 迁移标记 legacy-banks-v1 一辈子只写一次：若上一轮遗留的在途事务把标记写进「重置后」的新库，
+  // 这一轮种下的 localStorage 就再也不会被迁进去 → loadBanks() 返回空 → 面板停在「导入题库」，
+  // 组题按钮永不出现（等多久都等不到）。这里直接把种子落库，把可见性从迁移时序里解耦出来。
+  await migrateLegacyBanks(seeded as never);
 });
 
 afterEach(() => {
@@ -59,11 +70,20 @@ afterEach(() => {
   document.querySelectorAll('[data-quiz-test-opener]').forEach((opener) => opener.remove());
 });
 
+/** 题库操作默认折叠：先把第一行的操作面板摊开（已展开就不重复点，避免又收回去） */
+async function expandBankActions() {
+  // 显式等 12s：整套 230 个文件并行跑时，一次 React 提交可能被推到 5s 之外（vitest.config.ts
+  // 的 testTimeout 是 20s，这里留足余量）。判定条件一个字没改——找不到照样失败。
+  const toggle = await screen.findByRole('button', { name: /^操作：/ }, { timeout: 12_000 });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+}
+
 async function setup() {
   const rendered = render(
     <QuizView docs={DOCS} resolveLink={() => null} onOpenPath={vi.fn()} onClose={vi.fn()} />
   );
-  await screen.findByRole('button', { name: '组题' });
+  await expandBankActions();
+  await screen.findByRole('button', { name: '组题' }, { timeout: 12_000 });
   return rendered;
 }
 
@@ -82,6 +102,12 @@ function startRun(count: number) {
 }
 
 describe('自动组题 · 弹窗', () => {
+  it('记住展开偏好时，重新打开题库仍能直接操作', async () => {
+    localStorage.setItem('knowlattice.quiz.bank-actions', 'open');
+    await setup();
+    expect(screen.getByRole('button', { name: '组题' })).toBeTruthy();
+  });
+
   it('默认收起导入细节，用户需要时再展开', async () => {
     const { container } = await setup();
     expect(container.querySelector('.quiz-import')?.hasAttribute('hidden')).toBe(true);
@@ -131,7 +157,8 @@ describe('自动组题 · 弹窗', () => {
 
     const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not([disabled])'));
     const first = buttons[0];
-    const last = dialog.querySelector('summary') as HTMLElement;
+    // 题库行的「更多」details 已改成行内折叠面板，取最后一个可用按钮当焦点环末端
+    const last = buttons[buttons.length - 1];
     expect(last).toBeTruthy();
     last.focus();
     fireEvent.keyDown(last, { key: 'Tab' });
@@ -216,6 +243,7 @@ describe('自动组题 · 作答落盘', () => {
 
     // 重开面板：进度行应显示做过 1 / 错过 1
     cleanup();
+
     const again = await setup();
     expect(text(again.container)).toContain('做过 1');
     expect(text(again.container)).toContain('错过 1');

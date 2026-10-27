@@ -31,11 +31,18 @@ beforeEach(async () => {
 
 afterEach(cleanup);
 
+/** 题库操作默认折叠：先把第一行的操作面板摊开（已展开就不重复点，避免又收回去） */
+async function expandBankActions() {
+  const toggle = await screen.findByRole('button', { name: /^操作：/ }, { timeout: 5000 });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+}
+
 async function setup(onUnifiedImport: () => void) {
   render(
     <QuizView docs={new Map()} resolveLink={() => null} onOpenPath={vi.fn()} onClose={vi.fn()} onUnifiedImport={onUnifiedImport} />
   );
-  await screen.findByRole('button', { name: '组题' });
+  await expandBankActions();
+  await screen.findByRole('button', { name: '组题' }, { timeout: 5000 });
   fireEvent.click(screen.getByRole('button', { name: '导入题库' }));
 }
 

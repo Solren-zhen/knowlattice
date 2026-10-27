@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { useEsc, escThenClose } from './useEsc';
 import { IconClose } from './icons';
 import Loading from './Loading';
+import { usePanelResize } from './usePanelDrag';
 
 const PRESETS = [
   { name: 'Kimi', url: 'https://kimi.moonshot.cn/', embed: true },
@@ -29,9 +30,11 @@ function normalizeHttpsUrl(value: string): string | null {
 
 interface Props {
   onClose: () => void;
+  /** 一个 AI 入口：面板内切到笔记助手（两个面板共用同一块让位空间，故互斥） */
+  onSwitchToAgent?: () => void;
 }
 
-export default function AiPanel({ onClose }: Props) {
+export default function AiPanel({ onClose, onSwitchToAgent }: Props) {
   const [src, setSrc] = useState<string>(() => normalizeHttpsUrl(localStorage.getItem(KEY) ?? '') ?? PRESETS[0].url);
   const [custom, setCustom] = useState('');
   // 内嵌页首屏是白屏：用统一载入语汇补上「正在加载」的反馈，换站点时重置
@@ -39,6 +42,12 @@ export default function AiPanel({ onClose }: Props) {
   // 延迟挂 iframe：只有用户真正「打开」过某站点才挂载，避免一开面板就主动连第三方。
   const [frameArmed, setFrameArmed] = useState(false);
 
+  /**
+   * 面板尺寸可自由拉伸（横 + 纵），双击左上角抓手复位。
+   * 与右侧「视频 + AI 笔记」栏同一套诉求：各功能空间都该能自己调大小，而不是写死 480px。
+   * usePanelResize 内部是 window 级 pointermove/up 监听，指针移出抓手也不会断。
+   */
+  const panelSize = usePanelResize('ai-panel', { minWidth: 320, minHeight: 320 });
   // Esc 快捷关闭。走全局 Esc 栈（只关最上面那一层）；焦点在输入框里时先退出输入框
   useEsc(escThenClose(onClose));
 
@@ -54,12 +63,26 @@ export default function AiPanel({ onClose }: Props) {
   const customUrl = normalizeHttpsUrl(custom);
 
   return (
-    <div className="ai-panel">
+    <div className="ai-panel" data-panel-drag-root style={panelSize.style}>
+      {/* 左上角抓手：横纵都能拖，双击复位（方向键也能调） */}
+      <button
+        type="button"
+        className="panel-resize-grip"
+        aria-label="拖动调整 AI 面板大小（双击复位）"
+        onPointerDown={panelSize.onHandlePointerDown}
+        onKeyDown={panelSize.onHandleKeyDown}
+        onDoubleClick={panelSize.reset}
+      />
       <div className="ai-header">
         <span className="ai-title">AI 问答</span>
         <button className="btn-small" onClick={openExternal} title="部分站点禁止嵌入，可在新窗口打开">
           新窗口打开
         </button>
+        {onSwitchToAgent && (
+          <button className="btn-small" onClick={onSwitchToAgent} aria-label="切到笔记助手">
+            笔记助手
+          </button>
+        )}
         <button className="btn-icon" onClick={onClose} aria-label="关闭"><IconClose /></button>
       </div>
       <div className="ai-sources">
