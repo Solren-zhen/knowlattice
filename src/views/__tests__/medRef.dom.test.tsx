@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 /**
- * 医学速查的挂载冒烟：用**真实的 public 数据**喂 fetch，确认
+ * 医学速查的挂载冒烟：用**仓库内的测试夹具**喂 fetch，确认
  * 1) 取数路径（app-data/medref/...）是对的，2) 首屏真的渲染出内容而不是空白，
  * 3) 自建条目能存能改能删（存本机，不进仓库），4) 公有领域口诀随包带着。
  *
- * 只桩 fetch（网络出口），不桩我们自己的解析逻辑——否则测的就只是 mock。
+ * 夹具必须入库：public/app-data/ 是运行时生成物（CI 上没有），测试不能依赖本机
+ * 跑过 ingest 脚本。只桩 fetch（网络出口），不桩我们自己的解析逻辑。
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,14 +14,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import MedRefView from '../MedRefView';
 import { loadUserSymptoms } from '../../core/medRefStore';
 
-const PUB = join(process.cwd(), 'public');
+const FIXTURE = join(process.cwd(), 'src', 'views', '__tests__', 'fixtures', 'medref');
 
 function stubFetch() {
   vi.stubGlobal('fetch', async (input: string | URL | Request) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
-    const rel = url.replace(/^.*app-data\//, 'app-data/');
+    const rel = url.replace(/^.*app-data\/medref\//, '');
     try {
-      const buf = readFileSync(join(PUB, rel));
+      const buf = readFileSync(join(FIXTURE, rel));
       return new Response(buf, { status: 200, headers: { 'content-type': 'application/json' } });
     } catch {
       return new Response('not found', { status: 404 });

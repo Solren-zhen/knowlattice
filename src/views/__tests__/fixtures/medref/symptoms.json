@@ -1,0 +1,14 @@
+{"format":"kq.medref.v1","symptoms":[
+  {"name":"稽留热","cat":"发热与感染","diseases":["大叶性肺炎"]},
+  {"name":"弛张热","cat":"发热与感染","diseases":["败血症"]},
+  {"name":"间歇热","cat":"发热与感染","diseases":["疟疾"]},
+  {"name":"波状热","cat":"发热与感染","diseases":["布鲁氏菌病"]},
+  {"name":"回归热","cat":"发热与感染","diseases":["回归热"]},
+  {"name":"不规则热","cat":"发热与感染","diseases":["结核"]},
+  {"name":"瘀点","cat":"血液与出血","diseases":["血管壁功能异常"]},
+  {"name":"紫癜","cat":"血液与出血","diseases":["血小板减少"]},
+  {"name":"水肿","cat":"泌尿与水肿","diseases":["肾病综合征"]},
+  {"name":"干咳","cat":"呼吸系统","diseases":["咽炎"]},
+  {"name":"咳嗽伴咯血","cat":"呼吸系统","diseases":["支气管扩张"]},
+  {"name":"胸痛","cat":"呼吸系统","diseases":["胸膜炎"]}
+]}
