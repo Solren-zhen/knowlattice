@@ -451,8 +451,15 @@ fn start_with_state(state: BiliProxyState) -> Result<(), String> {
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败：{e}"))?;
 
-    let async_listener = TcpListener::from_std(listener).map_err(|e| format!("转换监听器失败：{e}"))?;
-    tauri::async_runtime::spawn(serve(async_listener, client, state));
+    // TcpListener::from_std 需要 Tokio reactor，而 start_with_state 由 setup 在主线程调用，
+    // 此时没有运行时上下文，直接调用会 panic（"there is no reactor running"）并让整个应用
+    // 在启动阶段退出。把转换挪进 spawn 的异步任务里，失败也只写进状态，不阻塞启动。
+    tauri::async_runtime::spawn(async move {
+        match TcpListener::from_std(listener) {
+            Ok(async_listener) => serve(async_listener, client, state).await,
+            Err(e) => state.set_error(format!("转换监听器失败：{e}")),
+        }
+    });
     Ok(())
 }
 
