@@ -8,6 +8,8 @@ name: 发布安装包
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  私钥密码；没有就填空字符串
 on:
   workflow_dispatch:
+  push:
+    tags: ['v*']
 
 permissions:
   contents: read
@@ -23,6 +25,10 @@ jobs:
           cache: npm
       - name: 安装依赖
         run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - name: 构建 NSIS 与更新签名
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -49,6 +55,12 @@ jobs:
           cache: npm
       - name: 安装依赖
         run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - name: 构建 .app/.dmg 与更新签名
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -77,8 +89,12 @@ jobs:
           cache: npm
       - name: 安装依赖
         run: npm ci
-      - name: 添加 Intel 编译目标
-        run: rustup target add x86_64-apple-darwin
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - name: 构建 Intel .app/.dmg 与更新签名
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
