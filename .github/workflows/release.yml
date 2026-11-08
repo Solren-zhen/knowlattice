@@ -66,6 +66,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target aarch64-apple-darwin --bundles app,dmg
+      - name: 更新包按架构重命名（两个架构同名会互相覆盖）
+        run: |
+          node -e "const fs=require('fs');const p='src-tauri/target/aarch64-apple-darwin/release/bundle/macos';const v=require('./src-tauri/tauri.conf.json').version;const from=p+'/KnowLattice.app.tar.gz';const to=p+'/KnowLattice_'+v+'_aarch64.app.tar.gz';if(fs.existsSync(from)){fs.renameSync(from,to);fs.renameSync(from+'.sig',to+'.sig');}"
       - name: 生成本平台更新清单
         run: node scripts/make-update-manifest.mjs --no-merge
       - uses: actions/upload-artifact@v4
@@ -100,6 +103,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target x86_64-apple-darwin --bundles app,dmg
+      - name: 更新包按架构重命名（两个架构同名会互相覆盖）
+        run: |
+          node -e "const fs=require('fs');const p='src-tauri/target/x86_64-apple-darwin/release/bundle/macos';const v=require('./src-tauri/tauri.conf.json').version;const from=p+'/KnowLattice.app.tar.gz';const to=p+'/KnowLattice_'+v+'_x64.app.tar.gz';if(fs.existsSync(from)){fs.renameSync(from,to);fs.renameSync(from+'.sig',to+'.sig');}"
       - name: 生成本平台更新清单
         run: node scripts/make-update-manifest.mjs --no-merge
       - uses: actions/upload-artifact@v4
