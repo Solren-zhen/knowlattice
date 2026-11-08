@@ -1,7 +1,7 @@
 name: 发布安装包
 
-# 手动触发：产出 Windows / macOS(Apple Silicon) / macOS(Intel) 三份安装包与更新签名，
-# 再合并成一份含三平台的 latest.json。上传到 GitHub Release 后，已安装用户即可应用内更新。
+# 手动触发：产出 Windows 与 macOS(Apple Silicon) 两份安装包与更新签名，
+# 再合并成一份含两个平台的 latest.json。上传到 GitHub Release 后，已安装用户即可应用内更新。
 #
 # 仓库 Secrets 需要：
 #   TAURI_SIGNING_PRIVATE_KEY           更新私钥内容（与 src-tauri/tauri.conf.json 的 pubkey 配对）
@@ -66,7 +66,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target aarch64-apple-darwin --bundles app,dmg
-      - name: 更新包按架构重命名（两个架构同名会互相覆盖）
+      - name: 更新包按架构重命名（Release 资产名固定带架构后缀）
         run: |
           node -e "const fs=require('fs');const p='src-tauri/target/aarch64-apple-darwin/release/bundle/macos';const v=require('./src-tauri/tauri.conf.json').version;const from=p+'/KnowLattice.app.tar.gz';const to=p+'/KnowLattice_'+v+'_aarch64.app.tar.gz';if(fs.existsSync(from)){fs.renameSync(from,to);fs.renameSync(from+'.sig',to+'.sig');}"
       - name: 生成本平台更新清单
@@ -81,45 +81,8 @@ jobs:
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/aarch64-apple-darwin/release/bundle/macos/latest.json
 
-  macos-x64:
-    # 在 arm64 runner 上交叉编译 Intel 版本：Xcode 自带 x86_64 SDK，不需要单独的 Intel 机器。
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: 安装依赖
-        run: npm ci
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-      - name: 构建 Intel .app/.dmg 与更新签名
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --target x86_64-apple-darwin --bundles app,dmg
-      - name: 更新包按架构重命名（两个架构同名会互相覆盖）
-        run: |
-          node -e "const fs=require('fs');const p='src-tauri/target/x86_64-apple-darwin/release/bundle/macos';const v=require('./src-tauri/tauri.conf.json').version;const from=p+'/KnowLattice.app.tar.gz';const to=p+'/KnowLattice_'+v+'_x64.app.tar.gz';if(fs.existsSync(from)){fs.renameSync(from,to);fs.renameSync(from+'.sig',to+'.sig');}"
-      - name: 生成本平台更新清单
-        run: node scripts/make-update-manifest.mjs --no-merge
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-x64
-          if-no-files-found: error
-          path: |
-            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/latest.json
-
   merge:
-    needs: [windows, macos-arm64, macos-x64]
+    needs: [windows, macos-arm64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -129,7 +92,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: 合并三平台更新清单
+      - name: 合并两平台更新清单
         run: |
           mapfile -t files < <(find artifacts -name latest.json | sort)
           printf '  %s\n' "${files[@]}"
