@@ -46,7 +46,7 @@ jobs:
             src-tauri/target/release/bundle/nsis/latest.json
 
   macos-arm64:
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -80,7 +80,7 @@ jobs:
 
   macos-x64:
     # 在 arm64 runner 上交叉编译 Intel 版本：Xcode 自带 x86_64 SDK，不需要单独的 Intel 机器。
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
