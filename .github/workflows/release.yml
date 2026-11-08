@@ -130,7 +130,10 @@ jobs:
         with:
           path: artifacts
       - name: 合并三平台更新清单
-        run: node scripts/merge-latest.mjs artifacts/*/latest.json
+        run: |
+          mapfile -t files < <(find artifacts -name latest.json | sort)
+          printf '  %s\n' "${files[@]}"
+          node scripts/merge-latest.mjs "${files[@]}"
       - name: 汇总待上传文件
         run: |
           mkdir -p release-upload
