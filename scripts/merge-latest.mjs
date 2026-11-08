@@ -14,7 +14,11 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 const outIdx = args.indexOf('-o');
 const outFile = outIdx >= 0 ? args[outIdx + 1] : 'latest.json';
-const files = args.filter((a, i) => !a.startsWith('-') && i !== outIdx + 1);
+// 没有 -o 时 outIdx 为 -1，旧的 `i !== outIdx + 1` 会把第 0 个文件悄悄丢掉
+// （CI 上表现：三个平台清单只合并了两份，darwin-aarch64 从 latest.json 里消失）。
+const files = outIdx >= 0
+  ? args.filter((_, i) => i !== outIdx && i !== outIdx + 1)
+  : args.filter((a) => !a.startsWith('-'));
 if (!files.length) {
   console.error('用法: node scripts/merge-latest.mjs <latest.json...> [-o 输出文件]');
   process.exit(1);
