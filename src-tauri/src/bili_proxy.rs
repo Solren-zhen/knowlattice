@@ -329,6 +329,12 @@ async fn proxy(
         if matches!(name, "connection" | "transfer-encoding") {
             continue;
         }
+        // 上游（B 站）自己也会返回 access-control-* 头，其中 allow-origin 指向 bilibili.com。
+        // 原样转发后与本代理追加的 allow-origin: * 并存，浏览器看到多个 ACAO 会判定响应无效，
+        // fetch 直接抛 "Failed to fetch"（安装版表现为「原生播放不可用，已退回内嵌播放器」）。
+        if name.starts_with("access-control-") {
+            continue;
+        }
         if let (Ok(n), Ok(val)) = (HeaderName::from_bytes(name.as_bytes()), HeaderValue::from_bytes(v.as_bytes())) {
             out = out.header(n, val);
         }
