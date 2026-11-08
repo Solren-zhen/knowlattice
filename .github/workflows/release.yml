@@ -1,0 +1,122 @@
+name: 发布安装包
+
+# 手动触发：产出 Windows / macOS(Apple Silicon) / macOS(Intel) 三份安装包与更新签名，
+# 再合并成一份含三平台的 latest.json。上传到 GitHub Release 后，已安装用户即可应用内更新。
+#
+# 仓库 Secrets 需要：
+#   TAURI_SIGNING_PRIVATE_KEY           更新私钥内容（与 src-tauri/tauri.conf.json 的 pubkey 配对）
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  私钥密码；没有就填空字符串
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 构建 NSIS 与更新签名
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --bundles nsis
+      - name: 生成本平台更新清单
+        run: node scripts/make-update-manifest.mjs --no-merge
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+            src-tauri/target/release/bundle/nsis/latest.json
+
+  macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 构建 .app/.dmg 与更新签名
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --target aarch64-apple-darwin --bundles app,dmg
+      - name: 生成本平台更新清单
+        run: node scripts/make-update-manifest.mjs --no-merge
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          if-no-files-found: error
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/latest.json
+
+  macos-x64:
+    # 在 arm64 runner 上交叉编译 Intel 版本：Xcode 自带 x86_64 SDK，不需要单独的 Intel 机器。
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 添加 Intel 编译目标
+        run: rustup target add x86_64-apple-darwin
+      - name: 构建 Intel .app/.dmg 与更新签名
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --target x86_64-apple-darwin --bundles app,dmg
+      - name: 生成本平台更新清单
+        run: node scripts/make-update-manifest.mjs --no-merge
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64
+          if-no-files-found: error
+          path: |
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/latest.json
+
+  merge:
+    needs: [windows, macos-arm64, macos-x64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 合并三平台更新清单
+        run: node scripts/merge-latest.mjs artifacts/*/latest.json
+      - name: 汇总待上传文件
+        run: |
+          mkdir -p release-upload
+          find artifacts -type f \( -name '*-setup.exe' -o -name '*.exe.sig' -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' -o -name '*.dmg' \) -exec cp {} release-upload/ \;
+          cp latest.json release-upload/latest.json
+          ls -lh release-upload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-upload
+          if-no-files-found: error
+          path: release-upload/
