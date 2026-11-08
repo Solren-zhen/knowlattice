@@ -28,6 +28,12 @@ export default defineConfig({
      *  单测预算必须大于用例里所有等待之和，否则先到点的永远是 vitest 自己的超时。）
      */
     testTimeout: 20_000,
+    /**
+     * 不要开 `isolate: false`：本机实测 270 个文件时可省约 46s，但会有 7 个用例
+     * 因模块级单例 / IndexedDB 状态跨文件串味而失败（vault 迁移、题库批注等）。
+     * 提速要先拆掉那些模块级可变状态，不能只改这一行。
+     */
+    // isolate: false,
     // benchmark 默认 include 是 **/*.bench.ts，会把 .pack-staging/ 里的源码副本也扫进来，
     // 同一份基准跑两遍。收窄到 src 下。
     benchmark: {

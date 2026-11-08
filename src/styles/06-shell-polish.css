@@ -1,0 +1,591 @@
+/* ============================================================ 关于、许可与安全边界 */
+/* 关于/许可弹层引用的 modal-in 此前从未定义 —— 动画静默失效，面板是没有入场直接
+   出现的。补上定义：微上浮 + 略放大后落定，用软过冲收在静止位。 */
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.notice-overlay {
+  position: fixed; inset: 0; z-index: 95; display: grid; place-items: center;
+  padding: 24px; background: rgba(15, 23, 42, 0.28); backdrop-filter: blur(5px);
+}
+.notice-panel {
+  width: min(620px, 100%); max-height: min(720px, 88vh); overflow: auto;
+  background: var(--bg-raised); color: var(--text); border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-modal);
+}
+.notice-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--border);
+}
+.notice-header h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fs-title); }
+.notice-body { display: grid; gap: var(--sp-5); padding: var(--sp-5); }
+.notice-body section { display: grid; gap: 6px; }
+.notice-body h3 { margin: 0; font-size: var(--fs-body); }
+.notice-body p { margin: 0; color: var(--text-2); font-size: var(--fs-caption); line-height: 1.7; }
+.notice-link { color: var(--accent); font-size: var(--fs-caption); }
+
+/* ============================================================ 视觉打磨：树 / 编辑区 */
+/* 章节树行：可交互行需相对定位 */
+.tree-row { position: relative; }
+.tree-row.file:hover { background: var(--panel-deep); }
+/* 选中只留一条指示：左侧发光条由 00-foundation 的 ::before 画，
+   原来的 inset 2px 贴边是同一件事的第二遍，已删；保留 1px 描边把整行收住 */
+.tree-row.file.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--border-accent);
+}
+/* 目录行 hover 跟着整体走强调色，而不是再来一层灰底 */
+.tree-row.dir:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* 编辑器：光标所在行轻微高亮 + 行号着色，聚焦更清晰 */
+.editor-host .cm-activeLine { background: rgba(79, 70, 229, 0.05); }
+.editor-host .cm-activeLineGutter {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+}
+/* 编辑区聚焦游标呼吸感（保持克制） */
+.editor-host .cm-cursor { border-left-width: 2px; }
+
+/* ============================================================ 界面统一打磨（答题/复习/错题等高频界面） */
+/* 答题进度条：渐变 + 轻微流光，进度感更清晰 */
+.quiz-progress { height: 4px; }
+.quiz-progress i {
+  background: linear-gradient(90deg, var(--accent), #a5b4fc, var(--accent));
+  background-size: 200% 100%;
+  animation: progress-shimmer 2.2s linear infinite;
+}
+@keyframes progress-shimmer { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
+
+/* 答题选项：默认可点状态微上浮，更“可交互” */
+.opt:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+}
+/* 复习评分按钮 / 主按钮：统一按压与悬浮（复用动效语言） */
+.rate { box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }
+.rate:hover { transform: translateY(-2px) scale(1.01); }
+/* 错题本热力条：更细腻的圆角+阴影 */
+.heat-track { box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04); }
+
+/* ============================================================ yunwu.ai 细节仿制（追加覆盖，安全可回退） */
+/* 主按钮 → 蓝渐变胶囊 + 柔和投影（yunwu 的 Sign in 样式） */
+.btn-primary {
+  display: block; width: 100%;
+  background: var(--grad-primary);
+/* .btn-primary 的按下态只在上面定义一次：这里原本又写了一遍 scale(0.985)，
+   把带内阴影的那条整条盖掉（改上面那个值完全没效果）。已合并。 */
+  border-radius: 999px;
+  padding: 12px 0;
+  font-size: var(--fs-lead); font-weight: 600; letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.28);
+  transition: background var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease), transform var(--t-fast) var(--ease);
+}
+.btn-primary:hover {
+  background: var(--grad-primary-hover);
+  box-shadow: 0 8px 22px rgba(79, 70, 229, 0.36);
+  transform: translateY(-1px);
+}
+/* .btn-primary 的按下态只在上面定义一次：这里原本又写了一遍 scale(0.985)，把带内阴影
+   的那条整条盖掉（改上面那个值完全没效果）。已合并到单一定义。 */
+.btn-primary:disabled { opacity: 0.5; box-shadow: none; transform: none; }
+
+/* 弹层/卡片 → 白色圆角大卡 + 更柔和的悬浮阴影（yunwu 卡片语言） */
+.quiz-panel, .mistake-panel, .review-card {
+  border-radius: var(--r-lg);
+}
+.quiz-panel, .mistake-panel { box-shadow: 0 24px 70px rgba(15, 23, 42, 0.14), 0 4px 14px rgba(15, 23, 42, 0.06); }
+
+/* 顶部工具栏 → 清爽白色导航条（yunwu 顶栏）：白底 + 底部细线，动作区右对齐 */
+.editor-toolbar {
+  background: var(--bg-raised);
+  background-image: none;
+}
+.sidebar-header {
+  background: var(--bg-raised);
+  background-image: none;
+}
+
+/* 可点卡片 hover 上浮（列表项）：更“可交互” */
+.bank-item:hover { transform: translateY(-1px); }
+.excerpt-item:hover { transform: translateY(-1px); }
+.heat-row:hover .heat-fill { filter: brightness(1.08); }
+
+/* 选项/评分按钮：圆角更柔和 */
+.opt, .rate, .type-chip { border-radius: 10px; }
+
+/* 行内主按钮（入库/下一题/再练一轮）：保持胶囊但页面内行内右对齐，不被 block/100% 拉通 */
+.draft-gen, .quiz-next, .quiz-result .btn-primary {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: auto;
+}
+
+.editor-fallback {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: var(--fs-caption);
+}
+
+/* ============================================================ 全局框架：左侧导航轨 + 悬浮卡片工作台
+   布局重构（方案 A）：顶栏被取消，导航收进 66px 图标轨；
+   正文变成三张悬浮卡片（目录 / 编辑 / 关联）漂在背景之上。 */
+.app {
+  height: 100%; display: flex; flex-direction: row;
+  /* 右侧 AI 面板打开时让位用（见下方 .app.agent-open / .ai-open） */
+  --rail-w: 66px;
+  transition: padding-right var(--t-slow) var(--ease);
+}
+/* 展开态导航轨占 208px，让位计算要扣掉。这个值由 Workspace 的 useLayoutEffect 实测后
+ * 写在 .app 的行内样式上（见 Workspace.tsx「让位宽度要扣掉导航轨」）——首帧绘制前就量好，
+ * 所以不依赖 :has() 选择器。这里的 66px 只是测量前的兜底（轨默认收起态）。 */
+/*
+ * .deck 里三列可独立开关：目录 248px / 关联 236px 固定，编辑器占剩余（正常约 600px）。
+ * 让位时至少给 .deck 留下「编辑器 400px + 当前实际打开的列」，否则编辑器会被挤成一条缝。
+ * 下面按列组合给出下限（三列同时开的规则特异度更高，自动胜出）。
+ */
+.app { --deck-min: 430px; }                        /* 仅编辑器 */
+.app:has(.c-insp) { --deck-min: 680px; }           /* + 关联 */
+.app:has(.c-tree) { --deck-min: 690px; }           /* + 目录 */
+.app:has(.c-tree):has(.c-insp) { --deck-min: 940px; } /* + 目录 + 关联 */
+
+/*
+ * 右侧 AI 面板（AI 笔记助手 / AI 助手）是 position: fixed 的覆盖层，打开时会压住编辑器右半边。
+ * 这里让它同时「挤窄主区」：给 .app 撑出等宽的右内边距，flex 布局自动把 .deck 收窄；
+ * 面板是 fixed，不受 padding 影响，视觉上仍贴右滑入。
+ *
+ * 关键是不能让位过头 —— 把「让位宽度」和「面板宽度」绑到同一个 --side-w，并用 clamp 兜底：
+ * 至少给 .deck 留 --deck-min（见上方按列组合算出的下限），否则编辑器会被挤成一条缝。
+ * 窄屏（≤1040px，与导航轨抽屉同一断点）放不下并排，继续用覆盖层，故只在宽屏启用。
+ */
+@media (min-width: 1041px) {
+  /*
+   * 让位宽度跟着右侧功能栏的**实际宽度**走（--dock-w 由 Workspace 从 useDockSplit 写进 .app），
+   * 不再是固定的 600px 上限：用户把整栏拖窄后主区不再白留一大截，拖宽也不会被面板压住。
+   * 仍然先用 --deck-min 卡住上限——宁可面板压一点，也不能把编辑列挤成一条缝。
+   * --dock-w 没写过（没拖过）时退回功能栏的 CSS 默认宽度 min(620px, 96vw)。
+   */
+  .app.agent-open {
+    --side-w: clamp(320px, min(var(--dock-w, 620px), 96vw, calc(100% - var(--rail-w) - var(--deck-min))), 620px);
+  }
+  .app.ai-open { --side-w: clamp(320px, calc(100% - var(--rail-w) - var(--deck-min)), 480px); }
+  .app.agent-open, .app.ai-open { padding-right: var(--side-w); }
+  .app.agent-open > .agent-panel { width: var(--side-w); }
+  .app.ai-open > .ai-panel { width: var(--side-w); }
+}
+
+/* ---------- 导航轨 ---------- */
+.rail {
+  width: 66px; flex-shrink: 0;
+  /* 曜石中控台质感：实底搭配右侧极细微光脊线 */
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  box-shadow: 1px 0 0 var(--border), 4px 0 24px -4px rgba(0, 0, 0, 0.12);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 12px 0 10px; gap: 4px;
+  overflow: visible;
+  /* 抬升层级，保证飞出菜单（字体菜单）稳定压在右侧卡片之上 */
+  position: relative; z-index: 30;
+}
+.rail-expand {
+  width: 42px; height: 42px; flex-shrink: 0; margin: 0 0 6px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  border: 1px solid transparent; border-radius: var(--r-md);
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.rail-expand:hover { color: var(--accent); background: var(--accent-soft); }
+.rail-expand-icon { width: 30px; height: 30px; display: grid; place-items: center; flex-shrink: 0; }
+.rail-expand-icon svg { width: 16px; height: 16px; }
+.rail--expanded .rail-expand-icon svg { transform: rotate(180deg); }
+.rail-expand-label, .rail-label, .rail-section-label, .rail-group-divider span { display: none; }
+.rail-home {
+  width: 42px; height: 42px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: var(--r-md);
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.rail-home:hover { color: var(--accent); background: var(--accent-soft); }
+.rail-home > svg, .rail-home > img { width: 30px; height: 30px; }
+.rail-home > img { display: block; flex: 0 0 30px; border-radius: 8px; object-fit: cover; }
+/* 品牌标：同时是「回到主界面」按钮 */
+.rail-home {
+  width: 40px; height: 40px; border-radius: 13px;
+  border: none; padding: 0; background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 10px; flex-shrink: 0;
+  cursor: pointer;
+  transition: var(--tr-interact);
+}
+/* 按下反馈：与 .rail-btn:active 同一套按压令牌（42px 图标按钮档）。
+   历史遗留：下面这几条规则原先写在 .rail-logo 上，而全仓库没有任何元素使用该类名，
+   所以这个按钮一直没有按下态。已删除死规则并改挂到真正在用的 .rail-home。 */
+.rail-home:active {
+  transform: scale(var(--press-scale-sm));
+  box-shadow: var(--press-inset);
+  transition-duration: var(--press-dur);
+}
+.rail-sep { width: 26px; height: 1px; margin: 7px 0; flex-shrink: 0; background: linear-gradient(90deg, transparent, var(--border) 32%, var(--border) 68%, transparent); }
+.rail-group-divider { width: 42px; height: 1px; margin: 7px 0; flex-shrink: 0; background: linear-gradient(90deg, transparent, var(--border) 30%, var(--border) 70%, transparent); }
+/* 上组滚动容器：窗口变矮时只有这一组滚，下组（AI/草稿/PDF/转换/字体/主题）钉在底部。
+   为什么不整条轨滚动：.rail 必须保持 overflow:visible，字体飞出菜单才能探出 66px 之外；
+   一旦整条轨变成滚动容器，overflow-x 会被一并算成 auto，飞出菜单会被裁掉。 */
+.rail-scroll {
+  flex: 1; min-height: 0; width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  overflow-y: auto; overflow-x: hidden;
+  /* 滚动条压细，别把 66px 的轨再挤窄 */
+  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+}
+.rail-scroll::-webkit-scrollbar { width: 5px; }
+.rail-scroll::-webkit-scrollbar-track { background: transparent; }
+.rail-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; }
+.rail-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* 超椭圆图标钮：42×42，圆角 12 —— 黄金中控台微按键 */
+.rail-btn {
+  position: relative;
+  width: 42px; height: 42px; border-radius: 12px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: var(--tr-interact);
+  flex-shrink: 0;
+}
+.rail--expanded { width: 208px; align-items: stretch; padding: 12px 10px 10px; }
+/* 展开态顶部只做「收起」这一件事：去掉原来的描边 + 实底，别和下面的品牌行抢成一个按钮块 */
+.rail--expanded .rail-expand {
+  width: 100%; height: 32px; margin-bottom: 8px;
+  justify-content: flex-start; padding: 0 8px;
+  border-color: transparent; background: transparent; color: var(--muted);
+}
+.rail--expanded .rail-expand:hover { background: var(--accent-soft); color: var(--accent); }
+.rail--expanded .rail-expand-label {
+  display: inline; font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.05em;
+}
+.rail--expanded .rail-home, .rail--expanded .rail-btn { width: 100%; justify-content: flex-start; gap: 11px; padding: 0 10px; text-align: left; }
+.rail--expanded .rail-home > svg, .rail--expanded .rail-home > img, .rail--expanded .rail-btn > svg { width: 27px; height: 27px; flex: 0 0 27px; }
+.rail--expanded .rail-label { display: inline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); font-weight: 500; }
+.rail--expanded .rail-home { margin-bottom: 2px; }
+/* 品牌行：展开态的「知识首页」同时是 KnowLattice 字标——它是整条轨唯一的品牌位，
+   字重与字距都比功能条目重一档（Dock 的顶端是品牌，不是第 20 个按钮）。 */
+.rail--expanded .rail-home .rail-label {
+  font-size: var(--fs-control); font-weight: 700; letter-spacing: 0.03em; color: var(--text);
+}
+.rail--expanded .rail-section-label { display: block; width: 100%; padding: 8px 10px 3px; color: var(--muted); font-size: var(--fs-micro); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.rail--expanded .rail-sep, .rail--expanded .rail-group-divider { width: 100%; }
+.rail--expanded .rail-group-divider { position: relative; display: flex; align-items: center; justify-content: center; margin: 9px 0 3px; }
+.rail--expanded .rail-group-divider span { display: inline; position: absolute; padding: 0 8px; background: var(--bg-raised); color: var(--muted); font-size: var(--fs-micro); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.rail--expanded .rail-scroll { align-items: stretch; gap: 3px; }
+/* 展开态入口有 20 个，行高 42 → 34：同一个窗口能多露出 3~4 行，
+   钉住的底部（字体/高亮/主题）也跟着变矮，滚动窗口更大。收起态图标钮保持 42px。 */
+.rail--expanded .rail-home,
+.rail--expanded .rail-btn { height: 34px; }
+/* 展开态把滚动条加粗到 8px：轨宽 208px 放得下，而 5px 的细条在浅色玻璃底上几乎看不见，
+   用户不会知道「工具」组下面还有入口。 */
+.rail--expanded .rail-scroll { scrollbar-width: auto; }
+.rail--expanded .rail-scroll::-webkit-scrollbar { width: 8px; }
+/* 展开态：选中条回到按钮内缘。原来挂在 left:-11px，等于在 208px 轨上又伸出去一根，
+   和按钮自身的浅底形成两个「选中」信号 */
+.rail--expanded .rail-btn.on::before {
+  left: 0; width: 3px; height: 18px; border-radius: 0 3px 3px 0;
+}
+.rail--expanded .rail-font-wrap { width: 100%; align-self: stretch; }
+.rail--expanded .rail-flyout { left: calc(100% + 4px); }
+@media (max-width: 1040px) {
+  /* 两层类名是必需的：16-liquid-glass 后面统一给 `.rail` 写了 position:relative，
+     同特异性下会盖掉这里的 absolute，窄屏抽屉就退回文档流、把内容挤到视口外。
+     这里提高一级特异性，保证抽屉真的浮在内容上。 */
+  .rail.rail--expanded { position: absolute; inset: 0 auto 0 0; z-index: 45; box-shadow: var(--shadow-lg); }
+  .rail--expanded::after {
+    /* right 直接落到 0，不再用 100vw 减轨宽：100vw 含滚动条宽度，窄屏会多出 10px
+       横向滚动。inset 四值让遮罩自动贴合可视区。 */
+    content: ''; position: fixed; inset: 0 0 0 208px;
+    background: rgba(15, 23, 42, 0.22); z-index: -1;
+  }
+}
+.rail-btn svg { width: 20px; height: 20px; transition: transform var(--t-fast) var(--ease); }
+.rail-btn:hover {
+  background: var(--panel-deep); color: var(--text);
+  box-shadow: var(--shadow-xs), var(--lg-inset-highlight);
+}
+.rail-btn:active {
+  transform: translateY(0) scale(var(--press-scale-sm));
+  box-shadow: var(--press-inset);
+  transition-duration: var(--press-dur);
+}
+/* 选中态做减法（用户点名「不要厚重的紫色背景」）：
+   淡 accent 半透明底 + 左侧细指示条 + 图标转 accent 三层足够，
+   去掉描边与外发光——Dock 的按键感来自形状，不来自光晕。 */
+.rail-btn.on {
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  color: var(--accent);
+}
+/* 悬停按键感：底色之外加图标微放大（1.08）——
+   纯换底色在 42px 大按钮上反馈太淡（此前审计结论）。图标动、底不动，Dock 的按键感。 */
+.rail-btn:hover > svg,
+.rail-home:hover > svg,
+.rail-home:hover > img,
+.rail-expand:hover > svg {
+  transform: scale(1.08);
+  transition: transform var(--t-fast) var(--ease);
+}
+/* 3D/图谱入口保留品牌性冷色：这是全站唯一的第二语义色入口（知识图谱的青色
+   是「探索/资料」的视觉锚）。这里去掉旧版的描边+发光重装饰，与全局选中态同一套减法。 */
+.rail-btn--graph:hover,
+.rail-btn--graph.on {
+  color: var(--cyan-text);
+  background: color-mix(in srgb, var(--cyan-text) 10%, transparent);
+}
+.rail-btn.on::before {
+  content: ""; position: absolute; left: -12px; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 18px; border-radius: 0 3px 3px 0;
+  /* 墨韵化：上实下虚渐隐——「一笔划过」而不是一个色块端点（与国风朱批同一细节语言；
+     国风有自己的覆写，深色随 --accent 自动更亮，无需单独写） */
+  background: linear-gradient(180deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 60%, transparent) 100%);
+  /* 出现/消失走透明度过渡：切功能时指示条是「滑进视线」而不是「闪现」 */
+  animation: rail-indicator-in var(--t-med) var(--ease);
+}
+@keyframes rail-indicator-in { from { opacity: 0; transform: translateY(-50%) scaleY(0.4); } to { opacity: 1; transform: translateY(-50%) scaleY(1); } }
+.rail-font-glyph { font-size: var(--fs-body); font-weight: 800; letter-spacing: -0.02em; }
+.rail-font-wrap { position: relative; }
+/* 高亮色控件：与「字体」的「Aa」同族——都是**文字样张**，不是实心色块。
+   原来那枚 16×16 饱和红方块是全轨唯一的实心彩色元素（其余 22 项都是 19px 描边图标），
+   夹在灰阶图标里读起来像状态标记/报错点。现在改成「被荧光笔划过的 A」：
+   只有字的下半部分染当前高亮色，形状上仍是一个字，不是一块色。
+   字色走 inherit —— 与其它图标一样跟随按钮文字色（未打开 --muted、打开 --accent）。 */
+.rail-hl-glyph {
+  width: 16px; height: 19px;
+  display: grid; place-items: center;
+  font-size: var(--fs-body); font-weight: 800; letter-spacing: -0.02em;
+  color: inherit;
+  border-radius: 3px;
+  /* 高亮笔触：只染下 44%（--hl-now 由行内 style 给出当前高亮色） */
+  background-image: linear-gradient(to top, var(--hl-now, var(--accent-soft)) 0 44%, transparent 44%);
+  background-repeat: no-repeat;
+}
+.rail-hl-flyout { min-width: 132px; padding: 8px; }
+.rail-hl-swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.rail-flyout .rail-hl-swatch {
+  width: 100%; height: 26px; padding: 0; border-radius: 7px;
+  /* 描边用主题 token：原来写死 rgba(15,23,42,.12)，在深色浮层上几乎看不见色块边界 */
+  border: 1px solid var(--border-strong); cursor: pointer;
+}
+.rail-flyout .rail-hl-swatch.active {
+  /* 选中环用 outline + offset 造「间隔」，而不是 box-shadow 的实色环。
+     原来那条 2px 间隔写死 --panel(#f1f4f8)，而浮层底色是 --panel-glass-strong
+     （浅色 #f8fafc）—— 两者差一档，选中块外圈因此有一道颜色不对的光环。
+     outline-offset 让间隔自然透出浮层底色，深浅主题都不必再配第二次色。 */
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.rail-hl-custom {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+  font-size: var(--fs-caption); color: var(--text-2);
+}
+.rail-hl-custom input[type='color'] {
+  width: 34px; height: 24px; padding: 0; border: 1px solid var(--border-strong);
+  border-radius: 6px; background: none; cursor: pointer;
+}
+.rail-flyout {
+  position: absolute; left: calc(100% + 12px); bottom: 0; z-index: 80;
+  background: var(--panel-glass-strong);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg), var(--glass-shine);
+  padding: 6px; min-width: 158px;
+  animation: rise-in var(--t-fast) var(--ease);
+}
+.rail-flyout button {
+  width: 100%; padding: 8px 12px; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-control);
+  text-align: left; white-space: nowrap; cursor: pointer;
+}
+.rail-flyout button:hover, .rail-flyout button.active { background: var(--accent-soft); color: var(--accent); }
+.rail-flyout button.active { font-weight: 600; }
+
+/* 窗口不够高时收紧一档：不收紧时整条轨要 963px，常见的 900px 视口就得滚；
+   收紧后约 840px，900 / 860 都不用滚。再矮的窗口由 .rail-scroll 滚动兜底。
+   图标仍保持 38px 可点区，只是比 42px 略紧凑。
+   位置必须放在 .rail-btn / .rail-home 等基础规则**之后**：媒体查询不加权重，
+   同权重下靠后的规则获胜，放前面会被 42px 那几条直接盖掉。 */
+@media (max-height: 980px) {
+  .rail { padding: 10px 0 8px; }
+  .rail-scroll { gap: 3px; }
+  .rail-home { margin-bottom: 6px; }
+  .rail-btn { width: 38px; height: 38px; border-radius: 11px; }
+  .rail-btn svg { width: 18px; height: 18px; }
+  .rail-sep { margin: 5px 0; }
+}
+
+/* ---------- 悬浮工作台 ---------- */
+.deck {
+  flex: 1; min-width: 0; position: relative;
+  padding: 14px; display: flex; gap: 12px;
+  background: transparent;
+}
+.deck > .card { min-height: 0; }
+.c-tree { flex: 0 0 var(--tree-w, 248px); }
+/* 目录卡 = 知识库的文件树：安静实底；导航轨（Dock）保留玻璃——两个高频面板
+   靠材质区分职责（用户本轮要求「明确的视觉区隔」「不要都是厚重卡片」）。
+   特异性 (0,2,0) 压过 16-liquid-glass 对 .card 的玻璃重皮 (0,1,0)。 */
+.card.c-tree {
+  background-color: color-mix(in srgb, var(--panel) 92%, transparent);
+  background-image: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.card.c-tree.is-collapsed { background-color: var(--panel); }
+/* 目录卡片收起态：卡片还在，但只留一条 44px 的窄边（--tree-w 由 Workspace 覆写成 44px）。
+   点窄边展开；拖宽抓手在收起时不渲染——没有可拖的宽度。 */
+.c-tree.is-collapsed { padding: 0; overflow: hidden; }
+.tree-expand {
+  flex: 1; width: 100%; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 12px 0; border: 0; background: transparent;
+  color: var(--muted); cursor: pointer; border-radius: 16px;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.tree-expand:hover { color: var(--accent); background: var(--accent-soft); }
+.tree-expand:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: -2px; }
+.tree-expand__label {
+  writing-mode: vertical-rl; text-orientation: upright;
+  font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.12em;
+}
+.c-tree .tree-collapse { flex: 0 0 auto; margin-right: -6px; }
+.c-edit { flex: 1.12; display: flex; flex-direction: column; }
+.c-insp { flex: 0 0 var(--insp-w, 236px); }
+
+/* 三列之间的拖宽抓手：目录 │ 编辑 │ 关联（宽度存 knowlattice.deck.split）
+   抓手实际 10px（margin 负回去，不吃布局宽度）；中间常驻一根短药丸——
+   原来是全透明、只在悬停时发亮，用户找不到抓手，实际反馈「目录宽度调不了」。
+   touch-action:none：触屏上拖它要调宽度，不能当成滚动。 */
+.deck-split {
+  flex: 0 0 10px; align-self: stretch; margin: 0 -5px; padding: 0;
+  border: 0; background: transparent; cursor: col-resize;
+  position: relative; z-index: 2; touch-action: none;
+}
+.deck-split::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 40px;
+  transform: translate(-50%, -50%); border-radius: 2px;
+  background: var(--border-strong); opacity: .55;
+  transition: background 140ms var(--ease-out, ease-out), opacity 140ms var(--ease-out, ease-out),
+              height 140ms var(--ease-out, ease-out);
+}
+.deck-split:hover::after, .deck-split:focus-visible::after, .deck-split:active::after {
+  background: var(--accent); opacity: 1; height: 72px;
+}
+.deck-split:focus-visible { outline: none; }
+/* 拖动中：指针早就离开了 10px 抓手，光标会闪回箭头，正文还会被拖选。
+   useDeckSplit 在拖动期间给 body 挂 is-col-drag，松手摘掉。 */
+body.is-col-drag, body.is-col-drag * { cursor: col-resize !important; user-select: none !important; }
+/* 窄屏目录是抽屉、关联是浮层，拖宽没有意义 */
+@media (max-width: 1040px) { .deck-split { display: none; } }
+/* 宽屏目录展开时，首页内容从目录右侧居中（旧的 760px hero 不会碰到目录，
+   首页最宽 1040px 会盖住它并挡住点击）。≤1240 / ≤1040 / ≤700 三个压缩断点各有更窄的偏移。 */
+.deck.with-tree .welcome-stage { left: calc(var(--tree-w, 248px) + 26px); }
+
+/* 欢迎舞台：铺满整个视口后居中 */
+.welcome-stage {
+  position: absolute; inset: 14px; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  overflow: auto; pointer-events: none;
+  scrollbar-gutter: stable both-edges;
+}
+.welcome-stage > * { pointer-events: auto; }
+
+/* 卡片：悬浮面板的通用外壳（Bento 级双层流光边框 + 磨砂质感） */
+.card {
+  background: var(--panel-glass-strong);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-sm), var(--glass-shine);
+  display: flex; flex-direction: column;
+  overflow: hidden; min-width: 0;
+  transition: box-shadow var(--t-med) var(--ease), border-color var(--t-med) var(--ease), transform var(--t-med) var(--ease);
+}
+.card:hover {
+  box-shadow: var(--shadow-md), var(--glass-shine);
+  border-color: var(--border-strong);
+}
+.card-head {
+  height: 46px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 14px; border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 100%), var(--bg-raised);
+  font-size: var(--fs-body); font-weight: 650;
+  letter-spacing: -0.015em;
+}
+.card-head .spacer { flex: 1; }
+.card-head-note {
+  font-size: var(--fs-micro); font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums;
+  background: var(--panel-deep); border: 1px solid var(--border);
+  padding: 2px 8px; border-radius: 999px;
+}
+.card-body { flex: 1; overflow-y: auto; min-height: 0; padding: 12px; }
+
+/* 工具栏内的紧凑搜索入口（取代原先悬浮在顶部的命令胶囊） */
+.toolbar-search {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-raised); color: var(--muted);
+  font-size: var(--fs-caption); font-family: inherit; font-weight: 500;
+  cursor: pointer; flex-shrink: 0;
+  box-shadow: var(--shadow-xs), var(--glass-shine);
+  transition: var(--tr-interact);
+}
+.toolbar-search svg { width: 14px; height: 14px; }
+.toolbar-search:hover {
+  border-color: var(--border-accent); color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--glow-accent);
+  transform: translateY(-1px);
+}
+.toolbar-search:active {
+  transform: translateY(0) scale(var(--press-scale));
+  box-shadow: var(--press-inset);
+  transition-duration: var(--press-dur);
+}
+.toolbar-search kbd { margin-left: -1px; }
+
+/* 顶栏（后退/保存/关联/思维导图…）在窗口不够宽时整行折到第二行，
+   而不是让控件横穿出编辑列、压在右侧「关联」卡片上。nowrap 只管单个控件内部
+   不折行（见上面 .editor-toolbar 的注释），控件之间是否换行由这条决定：
+   实测顶栏控件合计 ~573px，1108px 窗口下编辑列只有 428px，不给换行就会压到右栏。
+   flex-wrap 只在放不下时才生效，宽窗口仍然是一行——所以原先 900px 的「降级第三级」
+   折行规则也并进这一条，不再需要单独的断点。 */
+@media (max-width: 1280px) {
+  .editor-toolbar { flex-wrap: wrap; row-gap: 6px; }
+}
+
+/* 窄屏压缩：优先保证编辑区宽度（目录/关联卡片按比例收窄），并收起工具栏搜索文字 */
+@media (max-width: 1240px) {
+  /* 断点里也要认用户拖过的宽度，否则 1041~1240px 区间拖完不生效 */
+  .c-tree { flex-basis: var(--tree-w, 214px); }
+  .c-insp { flex-basis: var(--insp-w, 204px); }
+  .deck.with-tree .welcome-stage { left: calc(var(--tree-w, 214px) + 26px); }
+  .toolbar-search span { display: none; }
+  .toolbar-search { padding: 0 9px; }
+  /* 工具栏降级第一级：只收起快捷键提示（Ctrl K / Ctrl S），动作控件全部保留 */
+  .editor-toolbar { gap: 6px; padding: 8px 12px; }
+  .toolbar-search kbd,
+  .editor-toolbar .btn-small kbd { display: none; }
+  /* 格式工具栏右侧那串快捷键说明与按钮 tooltip 重复，窄屏收掉，让按钮保持单行 */
+  .cm-toolbar-hint { display: none; }
+}
+@media (max-width: 1040px) {
+  .c-tree { flex-basis: 188px; }
+  .c-insp { flex-basis: 180px; }
+  .deck.with-tree .welcome-stage { left: 216px; }
+  /* 降级第二级：收起字数与分组竖线，把宽度让给文件名和动作本身 */
+  .editor-toolbar .toolbar-divider,
+  .editor-toolbar .word-count { display: none; }
+}

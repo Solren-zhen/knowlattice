@@ -33,6 +33,20 @@ const bank: QuizBank = {
 };
 
 describe('qbankSearch · 单题匹配', () => {
+  it('简答题没有 options 也能搜（不再抛 q.options is not iterable）', () => {
+    const recall = q('r', {
+      type: 'recall',
+      stem: '简述心输出量的定义',
+      options: undefined as unknown as string[],
+      answer: -1,
+      answerText: '心率 × 每搏输出量',
+      chapter: '生理学',
+    });
+    const hits = searchBanks([{ name: '简答库', importedAt: 0, questions: [recall] }], '心输出量');
+    expect(hits).toHaveLength(1);
+    expect(hits[0].question.id).toBe('r');
+  });
+
   it('空查询返回空；分词按空白', () => {
     expect(searchBank(bank, '   ')).toEqual([]);
     expect(termAlternatives('氧解离 右移')).toHaveLength(2);

@@ -1,0 +1,228 @@
+/* ============================================================
+   资料生成面板（MatGenView）
+   复用外壳令牌（--sp / --fs / --muted / --accent / .quiz-panel / .convert-drop），
+   这里只写面板内部的布局与状态色，不另起视觉语言（面板与外壳同一套材质）。
+   ============================================================ */
+
+.matgen-panel { max-width: 860px; }
+
+/* 视觉隐藏、朗读可达（label 关联用） */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.matgen-stage-hint { margin-right: auto; padding-left: 10px; font-size: var(--fs-caption); }
+
+.matgen-error {
+  margin: 0 var(--sp-6) var(--sp-3);
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #d33 35%, transparent);
+  background: color-mix(in srgb, #d33 8%, transparent);
+  color: color-mix(in srgb, #d33 75%, var(--text));
+  font-size: var(--fs-caption);
+  white-space: pre-wrap;
+}
+
+.matgen-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-6);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.matgen-row { display: flex; }
+
+/* 形式选择器：分段控件（chip 单选），与外壳控件同材质 */
+.matgen-style-row { gap: 8px; flex-wrap: wrap; }
+.matgen-style-chip {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line, rgba(128, 128, 128, 0.3)) 80%, transparent);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+}
+.matgen-style-chip:hover { color: var(--text); border-color: var(--accent); }
+.matgen-style-chip.on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.matgen-style-hint { margin: -8px 0 0; font-size: var(--fs-caption); }
+
+.matgen-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line, rgba(128, 128, 128, 0.25));
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+.matgen-input:focus { outline: none; border-color: var(--accent); }
+
+.matgen-drop { cursor: pointer; }
+.matgen-drop.busy { cursor: progress; }
+
+/* —— 素材清单 —— */
+.matgen-src-list, .matgen-sec-list, .matgen-result {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.matgen-src {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--line, rgba(128, 128, 128, 0.25)) 80%, transparent);
+  font-size: var(--fs-caption);
+}
+.matgen-src-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.matgen-src select {
+  padding: 2px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--line, rgba(128, 128, 128, 0.25));
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-caption);
+}
+
+/* —— 大纲编辑 —— */
+.matgen-sec { display: flex; align-items: center; gap: 10px; }
+.matgen-sec-no {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+}
+.matgen-sec-title {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px dashed transparent;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+.matgen-sec-title:hover, .matgen-sec-title:focus {
+  border-color: var(--line, rgba(128, 128, 128, 0.3));
+  outline: none;
+}
+
+/* —— 生成进度 —— */
+.matgen-actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.matgen-actions--gen { margin-bottom: var(--sp-2); }
+.matgen-go { flex: none; }
+
+.matgen-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  overflow: hidden;
+}
+.matgen-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+.matgen-restored {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent);
+  font-size: var(--fs-caption);
+}
+
+/* —— 结果卡片：安静实底 + 状态色只落在指示件上（可点卡片才有 hover 抬升） —— */
+.matgen-sec-card {
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--line, rgba(128, 128, 128, 0.25)) 80%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.matgen-sec-card__head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.matgen-sec-card__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+}
+.matgen-sec-card__state { flex: none; font-size: var(--fs-caption); }
+.matgen-sec-card__state.state-done { color: #2e8b57; }
+.matgen-sec-card__state.state-error { color: #d33; }
+.matgen-sec-card__state.state-idle { color: var(--muted); }
+
+.matgen-sec-err {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #d33 8%, transparent);
+  color: color-mix(in srgb, #d33 75%, var(--text));
+  font-size: var(--fs-caption);
+}
+
+.matgen-sec-body {
+  font-size: var(--fs-body);
+  line-height: 1.65;
+  color: var(--text);
+  max-height: 260px;
+  overflow-y: auto;
+  border-top: 1px dashed color-mix(in srgb, var(--line, rgba(128, 128, 128, 0.25)) 70%, transparent);
+  padding-top: 8px;
+}
+/* 生成中的流式预览：纯文本等宽呈现（done 后才渲染 Markdown，避免中途闪烁重排） */
+.matgen-sec-stream {
+  white-space: pre-wrap;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  max-height: 180px;
+}
+.matgen-sec-body h3 { margin: 10px 0 4px; font-size: var(--fs-body); }
+.matgen-sec-body ul, .matgen-sec-body ol { padding-left: 1.4em; margin: 4px 0; }
+.matgen-sec-body table { border-collapse: collapse; margin: 6px 0; }
+.matgen-sec-body th, .matgen-sec-body td {
+  border: 1px solid var(--line, rgba(128, 128, 128, 0.25));
+  padding: 3px 8px;
+  font-size: var(--fs-caption);
+}

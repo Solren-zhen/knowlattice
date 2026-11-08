@@ -4,8 +4,10 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useVault } from '../core/vault';
+import { getBindings, matchesBinding } from '../core/keybindings';
 import { isTauri } from '../storage/tauriEnv';
 import { noteTemplate, parseFrontmatterCached, type NoteType } from '../core/parser';
+import type { CourseOutline, CourseVideoTarget } from '../core/courseNotes';
 import { appendExcerpt } from '../core/noteGen';
 import { loadCards, noteStatus, srsStats } from '../core/srs';
 import { parseOutline, splitHeadingAnchor, headingLineByAnchor } from '../core/outline';
@@ -18,7 +20,7 @@ import ChapterAnnotations from './ChapterAnnotations';
 // 音频条 + 字幕轨：打开笔记就可能用到，依赖很小（core/subtitle + icons），不单独拆 chunk
 import MediaTrack from './MediaTrack';
 import VideoNoteView from './VideoNoteView';
-import { mediaKeyOf, parseVideoSource, withStart } from '../core/videoSource';
+import { mediaKeyOf, parseBilibili, parseVideoSource, withStart } from '../core/videoSource';
 import { buildCards } from '../core/srsCards';
 import { getMistake, loadMistakes, reasonCounts } from '../core/mistakes';
 import { loadBanks } from '../core/qbank';
@@ -67,9 +69,13 @@ import AnatomyNoteCard from './AnatomyNoteCard';
 const AnatomyViewer3D = lazy(() => import('./AnatomyViewer3D'));
 const BrainAtlasView = lazy(() => import('./BrainAtlasView'));
 const MedRefView = lazy(() => import('./MedRefView'));
+const CourseWorkshopView = lazy(() => import('./CourseWorkshopView'));
+// 资料生成：素材 → AI 大纲 → 分节讲义（anydoc/ mammoth / pdfjs 都懒加载在 core 内部）
+const MatGenView = lazy(() => import('./MatGenView'));
+const WordDrillView = lazy(() => import('./WordDrillView'));
 // 思维导图懒加载（mind-elixir 依赖较大，打开时才加载）
 const MindMapView = lazy(() => import('./MindMapView'));
-// 重依赖视图懒加载：force-graph / mammoth+xlsx / react-pdf-viewer+pdfjs 都很大，按需加载
+// 重依赖视图懒加载：force-graph / mammoth+xlsx / PDF.js 都很大，按需加载
 const GraphView = lazy(() => import('./GraphView'));
 const QuizView = lazy(() => import('./QuizView'));
 const ExamCenter = lazy(() => import('./ExamCenter'));
@@ -78,55 +84,60 @@ const PdfSplitView = lazy(() => import('./PdfSplitView'));
 const ConvertView = lazy(() => import('./ConvertView'));
 // 图片库：轻量（只有一个面板），但也保持与其他面板一致的懒加载口径
 const ImageLibrary = lazy(() => import('./ImageLibrary'));
+/** 数据自检是低频维护入口：按需加载，不占首屏主包 */
+const IntegrityView = lazy(() => import('./IntegrityView'));
 // 统一导入面板：懒加载（内部按需引入 mammoth / SheetJS / jszip 等重依赖）
 const ImportView = lazy(() => import('./ImportView'));
 // 历史版本面板：快照读取/恢复
 const HistoryPanel = lazy(() => import('./HistoryPanel'));
 import AiPanel from './AiPanel';
-import AiAgentPanel, { type QuoteSelection } from './AiAgentPanel';
-import DraftGen from './DraftGen';
-import TodoView from './TodoView';
+import type { QuoteSelection } from './agentChat';
+// AI 笔记（pi-agent-core）与智能草稿（pdfjs + OCR，近 1MB）都很大：静态引入会把它们塞进首屏包。
+// 与其余面板同一口径：打开时才下载各自 chunk。
+const AiAgentPanel = lazy(() => import('./AiAgentPanel'));
+const DraftGen = lazy(() => import('./DraftGen'));
+// 待办与学习统计是两块大面板（TodoView 含专注/统计子视图，Dashboard 含雷达图与周报），
+// 静态引入会把它们塞进首屏主包；改成按需加载后主包体积回到预算内。
+const TodoView = lazy(() => import('./TodoView'));
+const Dashboard = lazy(() => import('./Dashboard'));
 import TagBrowser from './TagBrowser';
-import Dashboard from './Dashboard';
 import SafetyNotice from './SafetyNotice';
 // 学习报告面板：小面板（无重依赖），与 Dashboard / SafetyNotice 一样直接静态引入
 import StudyReportPanel from './StudyReportPanel';
-import MedicalPathwayBuilder from './MedicalPathwayBuilder';
 // 命令面板与生词本都是轻量面板（无重依赖），静态引入：Ctrl+Shift+P 要零延迟
 import CommandPalette, { type PaletteCommand } from './CommandPalette';
 import VocabView from './VocabView';
+import ReciteView from './ReciteView';
 import {
   IconSave, IconTrash, IconChevron, IconBack, IconFwd, IconSearch,
   IconFolder, IconLink, IconClose, IconPlay, IconChart, IconImage,
 } from './icons';
 import Rail from './Rail';
+import { prefetchIdle, prefetchPanel } from './panelPrefetch';
 import { RAIL_INDEX, RAIL_PRIMARY_KEYS, type RailKey } from './railCatalog';
+import {
+  RAIL_MODAL,
+  activeRailOf,
+  buildRailOrder,
+  loadRecentFeatures,
+  pushRecentFeature,
+  saveRecentFeatures,
+} from './featureRouting';
 import SettingsPanel from './SettingsPanel';
 import { useDockSplit, type DockSplit } from './useDockSplit';
+import { usePanelState } from './usePanelState';
+import { MODAL_IDS } from './panelRegistry';
 import { usePanelDrag } from './usePanelDrag';
 import { useDeckSplit } from './useDeckSplit';
 import { clickable } from './a11y';
 import { toast, confirmBox } from '../core/feedback';
 import { printMarkdown } from '../core/printDoc';
+import { lastReciteOf, recordRecite, type ReciteSession } from '../core/reciteLog';
 import { morphFrom, MORPH } from '../core/viewMorph';
+import Pet from './Pet';
+import PetCustomizer from './PetCustomizer';
 
 const RECENTS_KEY = 'knowlattice-recents';
-const RECENT_FEATURES_KEY = 'knowlattice-recent-features';
-/** 首页「最近使用」最多露几处：一排 4 列 × 2 行，再多就退回功能地图了 */
-const RECENT_FEATURES_MAX = 8;
-
-/** 读回最近使用的去处。功能改名/下架后残留的键按 RAIL_INDEX 过滤，坏 JSON 当空表 */
-function loadRecentFeatures(): RailKey[] {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(RECENT_FEATURES_KEY) ?? '[]');
-    if (!Array.isArray(raw)) return [];
-    return raw
-      .filter((key): key is RailKey => typeof key === 'string' && key in RAIL_INDEX)
-      .slice(0, RECENT_FEATURES_MAX);
-  } catch {
-    return [];
-  }
-}
 
 /** 命令面板的动作清单：顺序就是面板里的默认顺序（重要的先露脸）。
  *  只放「打开某个面板」这类无需参数的动作——需要选中内容才能执行的动作进编辑器右键菜单。 */
@@ -134,7 +145,7 @@ function PALETTE_COMMANDS(a: Record<
   'search' | 'importOpen' | 'quiz' | 'exam' | 'review' | 'mistakes' | 'dashboard' | 'tags'
   | 'todos' | 'mind' | 'graph' | 'brain' | 'anatomy' | 'medref' | 'pdf' | 'convert' | 'vocab' | 'notice'
   | 'save' | 'backup' | 'video' | 'split' | 'images' | 'print'
-  | 'pathway' | 'history' | 'ai' | 'agent' | 'draft',
+  | 'history' | 'ai' | 'agent' | 'draft' | 'matgen',
   () => void
 >): PaletteCommand[] {
   return [
@@ -156,12 +167,12 @@ function PALETTE_COMMANDS(a: Record<
     { id: 'brain', title: '脑图谱', group: '资料', aliases: ['brain', '神经'], run: a.brain },
     { id: 'anatomy', title: '3D 解剖', group: '资料', aliases: ['anatomy', '解剖'], run: a.anatomy },
     { id: 'medref', title: '医学速查', group: '资料', aliases: ['medref', '速查', '术语', '症状', '口诀'], run: a.medref },
+    { id: 'matgen', title: '资料生成（素材 → 复习讲义）', group: '资料', aliases: ['matgen', '讲义', '资料生成', '复习资料'], run: a.matgen },
     { id: 'images', title: '图片库（附件里的图片）', group: '资料', aliases: ['image', '图片', '插图', '附件'], run: a.images },
     { id: 'video', title: '视频笔记（时间点 / 复读 / 收藏）', group: '工具', aliases: ['video', '视频', '时间点', '锚点', '复读'], run: a.video },
     { id: 'split', title: '右侧分屏：编辑与预览并排', group: '面板', aliases: ['split', '分屏', '对照', '预览'], run: a.split },
-    { id: 'pdf', title: 'PDF 拆分', group: '工具', aliases: ['pdf', '拆分'], run: a.pdf },
+    { id: 'pdf', title: 'PDF 对照', group: '工具', aliases: ['pdf', '拆分', '对照'], run: a.pdf },
     { id: 'convert', title: '格式转换', group: '工具', aliases: ['convert', 'docx', 'xlsx'], run: a.convert },
-    { id: 'pathway', title: '医学通路', group: '资料', aliases: ['pathway', '通路', '机制'], run: a.pathway },
     { id: 'history', title: '历史版本', group: '笔记', aliases: ['history', '版本', '回溯'], run: a.history },
     { id: 'ai', title: 'AI 问答', group: '工具', aliases: ['ai', '问答'], run: a.ai },
     { id: 'agent', title: 'AI 笔记', group: '工具', aliases: ['agent', '笔记助手'], run: a.agent },
@@ -212,47 +223,50 @@ function DockSplitHandle({ dockSplit }: { dockSplit: DockSplit }) {
 
 export default function Workspace() {
   const vault = useVault();
+  /** 面板开关的唯一状态容器（28 个开关收在一处，见 usePanelState） */
+  const panels = usePanelState();
+  /**
+   * 写操作的稳定引用。`panels` 对象本身每帧都是新的（`is` 依赖当前集合），
+   * 直接把它放进 `useCallback` / `useEffect` 的依赖数组会让回调每次失效；
+   * 这两个函数引用永久稳定，可以安全入依赖。
+   */
+  const openPanel = panels.open;
+  const closePanel = panels.close;
   const [draft, setDraft] = useState<string | null>(null); // 编辑中内容（未保存）
   const [dirty, setDirty] = useState(false);
   const [showBacklinks, setShowBacklinks] = useState(() => window.matchMedia?.('(max-width: 980px)').matches !== true);
-  const [mindOpen, setMindOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  // 命令面板（Ctrl+Shift+P）与生词本面板
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [vocabOpen, setVocabOpen] = useState(false);
-  const [medRefOpen, setMedRefOpen] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [mistakeOpen, setMistakeOpen] = useState(false);
-  const [anatomyOpen, setAnatomyOpen] = useState(false);
-  const [brainOpen, setBrainOpen] = useState(false);
-  const [graphOpen, setGraphOpen] = useState(false);
-  const [quizOpen, setQuizOpen] = useState(false);
   /** 统一导入面板关闭后自增：题库练习面板据此重读题库列表。
    *  统一入口可以从「题库练习」里打开，导入的题库必须在那块面板上立刻出现。 */
   const [qbankRefresh, setQbankRefresh] = useState(0);
-  const [examOpen, setExamOpen] = useState(false);
   /** 从题库列表点「模拟考试」进来时的预选题库 */
   const [examBank, setExamBank] = useState<string | undefined>(undefined);
-  const [todoOpen, setTodoOpen] = useState(false);
-  const [tagOpen, setTagOpen] = useState(false);
-  const [dashOpen, setDashOpen] = useState(false);
-  const [aiOpen, setAiOpen] = useState(false);
-  const [agentOpen, setAgentOpen] = useState(false);
+  /** 从错题本「重做本组」进来时要重做的笔记路径集合；非空 = 考试中心直接开一场错题重练 */
+  const [examSeed, setExamSeed] = useState<string[] | undefined>(undefined);
+  /** 全局搜索 → 题库的联动参数：带入关键词，题库打开即显示搜题结果 */
+  const [quizSeed, setQuizSeed] = useState('');
+  /** 从视频笔记「返回课程工坊」时带入的 BV；导轨直接打开时清空 */
+  const [courseInitialBvid, setCourseInitialBvid] = useState<string | undefined>(undefined);
+  /** 已读取过的课程大纲（按 bvid）：关掉工坊后视频笔记仍能显示课程名/分P名 */
+  const [courseMetas, setCourseMetas] = useState<Record<string, CourseOutline>>({});
+  const rememberCourse = useCallback((meta: CourseOutline) => {
+    setCourseMetas((prev) => {
+      const cur = prev[meta.bvid];
+      if (
+        cur &&
+        cur.title === meta.title &&
+        cur.parts.length === meta.parts.length &&
+        cur.parts.every((p, i) => p.page === meta.parts[i]?.page && p.part === meta.parts[i]?.part)
+      ) {
+        return prev;
+      }
+      return { ...prev, [meta.bvid]: meta };
+    });
+  }, []);
   /** 编辑器「问 AI」桥接：选段暂存，面板打开后由 quote prop 交给 AiAgentPanel 消费 */
   const [agentQuote, setAgentQuote] = useState<QuoteSelection | null>(null);
-  const [draftOpen, setDraftOpen] = useState(false);
+  /** 一键导师：首页「导师陪练」把开场白交给面板，面板消费后清空（与 agentQuote 同一套桥接） */
+  const [agentSeed, setAgentSeed] = useState<{ text?: string; tutor: boolean } | null>(null);
   const [draftText, setDraftText] = useState('');
-  const [pdfOpen, setPdfOpen] = useState(false);
-  const [convertOpen, setConvertOpen] = useState(false);
-  /** 统一导入面板：自动识别格式 + 批量 */
-  const [importOpen, setImportOpen] = useState(false);
-  /** 图片库（附件图片的统一入口，笔记目录里那一行点开就是它） */
-  const [imageLibOpen, setImageLibOpen] = useState(false);
-  /** 设置：字体 / 主题 / 高亮 / 备份 / 导入 / 工具 / 关于（原来这些占着导航轨） */
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pathwayOpen, setPathwayOpen] = useState(false);
-  /** 视频笔记：src 是 blob:/http(s) 地址，media 是片段归属标识（附件路径或直链） */
-  const [videoOpen, setVideoOpen] = useState(false);
   /**
    * 「视频是被 AI 问答面板临时挤掉的」标记：AI 问答（.ai-panel）与这一栏都贴右边缘，
    * 同时开会完全重叠，所以打开它就先把视频收起；但它一关（含切到 AI 笔记）要原样还回来——
@@ -271,19 +285,65 @@ export default function Workspace() {
    * 存下来的位移可能来自更宽的窗口、或更早一次拖动：首帧若整栏几乎跑出视口就复位。
    * 否则会出现「面板贴在编辑区中间、又找不到抓手」的状态（用户实测反馈过）。
    */
+  /** 右侧那一栏（视频 / AI 笔记）当前是否可见：effect 的依赖必须是可静态检查的值 */
+  const dockVisible = panels.is('video') || panels.is('agent');
   useEffect(() => {
-    if (!videoOpen && !agentOpen) return;
+    if (!dockVisible) return;
     const el = document.querySelector<HTMLElement>('.dock-col');
     if (!el) return;
     const r = el.getBoundingClientRect();
     const outside = r.right < 80 || r.left > window.innerWidth - 80
       || r.bottom < 80 || r.top > window.innerHeight - 80;
     if (outside) resetDockPos();
-  }, [videoOpen, agentOpen, resetDockPos]);
+  }, [dockVisible, resetDockPos]);
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [videoMedia, setVideoMedia] = useState('');
   const [videoTitle, setVideoTitle] = useState('');
   const [videoSeek, setVideoSeek] = useState<number | null>(null);
+  /** 视频栏打开着且是 B 站：解析出 bvid + 分P，供课程联动用 */
+  const videoOpen = panels.is('video');
+  const videoBiliRef = useMemo(
+    () => (videoOpen && videoSrc ? parseBilibili(videoSrc) : null),
+    [videoOpen, videoSrc],
+  );
+  /**
+   * 当前视频对应的课程笔记。课程笔记的 frontmatter 里 `source` 就是
+   * `https://www.bilibili.com/video/BV...`（buildCourseFrontmatter 写的），
+   * 用 source 反解 bvid，不要求笔记里另存一个 bvid 字段。
+   */
+  const courseNoteByBvid = useMemo(() => {
+    const bvid = videoBiliRef?.bvid;
+    if (!bvid) return null;
+    for (const [path, content] of vault.docs) {
+      if (!path.endsWith('.md')) continue;
+      const parsed = parseFrontmatterCached(path, content);
+      if (!parsed.meta.source) continue;
+      if (parseBilibili(parsed.meta.source)?.bvid === bvid) {
+        return {
+          path,
+          title: parsed.title || path.replace(/\.md$/, '').split('/').pop() || path,
+        };
+      }
+    }
+    return null;
+  }, [videoBiliRef, vault.docs]);
+  /** 传给视频笔记的课程上下文：有名册（本次会话读过）或已保存的课程笔记才显示 */
+  const videoCourse = useMemo(() => {
+    const bvid = videoBiliRef?.bvid;
+    if (!bvid) return null;
+    const note = courseNoteByBvid;
+    const outline = courseMetas[bvid];
+    if (!note && !outline) return null;
+    const page = videoBiliRef.page;
+    return {
+      bvid,
+      page,
+      courseTitle: outline?.title || note?.title || '',
+      part: outline?.parts.find((p) => p.page === page)?.part,
+      notePath: note?.path,
+      noteTitle: note?.title,
+    };
+  }, [videoBiliRef, courseNoteByBvid, courseMetas]);
   const videoInputRef = useRef<HTMLInputElement>(null);
   /** 外部来源（B站/抖音/网盘）的原始页地址，锚点靠它在浏览器里定位 */
   const videoPageRef = useRef<string | null>(null);
@@ -319,23 +379,41 @@ export default function Workspace() {
       setVideoTitle(file.name);
       setVideoSeek(null);
     }
-    setVideoOpen(true);
+    panels.open('video');
   };
 
   /**
    * 打开一个视频链接（B站 / 抖音 / 网盘 / 直链）。识别结果决定面板怎么放它：
    * 能内嵌的给播放器，不能的把原页地址记下来（锚点靠它开浏览器定位）。
    */
-  const openVideoUrl = (url: string) => {
+  const openVideoUrl = (url: string, opts: { title?: string; seekTo?: number | null } = {}) => {
     const source = parseVideoSource(url);
     videoPageRef.current = source.pageUrl;
     releaseVideoBlob();
     setVideoSrc(source.playUrl ?? source.pageUrl ?? url);
     setVideoMedia(mediaKeyOf(source, url));
-    setVideoTitle(source.title);
-    setVideoSeek(null);
-    setVideoOpen(true);
+    setVideoTitle(opts.title || source.title);
+    setVideoSeek(opts.seekTo ?? null);
+    panels.open('video');
     if (source.note) toast(source.note, 'info', 6000);
+  };
+
+  /** 课程工坊的分P「▶」/ 课程笔记里的 `#cw=`：关掉工坊，在视频栏打开对应分P */
+  const openCourseVideo = (target: CourseVideoTarget): boolean => {
+    const url = `https://www.bilibili.com/video/${encodeURIComponent(target.bvid)}?p=${target.page}`;
+    const title = [target.courseTitle, `P${target.page}${target.part ? ` ${target.part}` : ''}`]
+      .filter(Boolean)
+      .join(' · ');
+    panels.close('course');
+    openVideoUrl(url, { title: title || undefined, seekTo: target.seconds ?? null });
+    return true;
+  };
+
+  /** 视频笔记「返回课程工坊」：带 bvid，工坊优先用内存会话恢复；没有会话再重新读取 */
+  const openCourseFromVideo = (bvid: string) => {
+    panels.close('video');
+    setCourseInitialBvid(bvid);
+    panels.open('course');
   };
 
   /**
@@ -346,7 +424,7 @@ export default function Workspace() {
     const source = parseVideoSource(videoSrc ?? '');
     if (videoSrc && (source.seekable || source.kind === 'bilibili')) {
       setVideoSeek(seconds);
-      setVideoOpen(true);
+      panels.open('video');
       return true;
     }
     const page = videoPageRef.current ?? source.pageUrl;
@@ -358,13 +436,11 @@ export default function Workspace() {
     toast('已打开视频面板（锚点 ' + seconds + ' 秒）：先选视频或粘贴链接', 'info', 5200);
     return true;
   };
-  /** 编辑器注册的「在光标处插入 Markdown」句柄（医学通路插入与「插入图片」共用；
+  /** 编辑器注册的「在光标处插入 Markdown」句柄（PDF 摘录与「插入图片」共用；
    *  插入时会自动补前后空行，见 Editor 里注册的那段） */
   const editorInsertRef = useRef<((markdown: string) => void) | null>(null);
   /** 从磁盘插入图片用的文件选择框 */
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [noticeOpen, setNoticeOpen] = useState(false);
   /** 目录卡片显隐（导航轨「目录」按钮切换，窄屏可收起给正文让位） */
   const [treeOpen, setTreeOpen] = useState(() => window.matchMedia?.('(max-width: 700px)').matches !== true);
   /**
@@ -469,31 +545,31 @@ export default function Workspace() {
     }
   }, []);
 
-  // Ctrl+K 全局唤起快速搜索
+  // 全局快捷键：键位来自 core/keybindings（设置页可改），事件发生时现读一次，改完立即生效
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // 编辑器里的 Mod-<键> 绑定会先 preventDefault：全局快捷键只认「正好是 Ctrl+K」，
+      // 编辑器里的 Mod-<键> 绑定会先 preventDefault：全局快捷键只认「正好命中」，
       // 不抢已被处理的按键，避免编辑器里的快捷键被这里顺手当成搜索。
       if (e.defaultPrevented) return;
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+      const keys = getBindings();
+      if (matchesBinding(e, keys.search)) {
         e.preventDefault();
-        setSearchOpen(true);
+        openPanel('search');
+        return;
       }
-      // Ctrl+Shift+P 命令面板：功能越堆越多以后，靠记按钮位置找功能比记一个名字更难
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+      if (matchesBinding(e, keys.palette)) {
         e.preventDefault();
-        setPaletteOpen(true);
+        openPanel('palette');
+        return;
       }
-      // Ctrl+P 打印：不接管的话浏览器会去打整个应用界面（深色面板 + 侧栏按钮），
-      // 那不是用户想印的东西。这里改成打当前这篇笔记。
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+      if (matchesBinding(e, keys.print)) {
         e.preventDefault();
         printCurrentNote();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [printCurrentNote]);
+  }, [openPanel, printCurrentNote]);
 
   // 废弃的旧行内格式键位（Ctrl/⌘+B 加粗、+I 斜体、+H 高亮）在应用层统一消费，不产生任何副作用。
   // 键位本身已搬到 Alt 系（见 core/mdFormat.ts）；这里兜的是「没人管」的后果：Chrome 会拿
@@ -645,11 +721,12 @@ export default function Workspace() {
     setNav((n) => ({ ...n, idx: n.idx + 1 }));
   }, [canFwd, nav, openNoteCore]);
 
-  // Alt+← / Alt+→ 后退前进（与 Esc 无关，留在 window 上）
+  // Alt+← / Alt+→ 后退前进（键位可在设置里改；仍在 window 上）
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); goBack(); }
-      if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); goForward(); }
+      const keys = getBindings();
+      if (matchesBinding(e, keys.back)) { e.preventDefault(); goBack(); }
+      if (matchesBinding(e, keys.forward)) { e.preventDefault(); goForward(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -658,11 +735,11 @@ export default function Workspace() {
   // 解剖图谱 / 脑图谱的 Esc 分层退出。走全局 Esc 栈：本层在应用启动时就入栈（栈底），
   // 所以任何面板打开时 Esc 先归那个面板——不会再出现「一次 Esc 同时关掉搜索框和整个图谱」。
   useEsc(() => {
-    if (brainOpen) { setBrainOpen(false); return; }
-    if (anatomyOpen) {
+    if (panels.is('brain')) { panels.close('brain'); return; }
+    if (panels.is('anatomy')) {
       // 先关笔记卡片，再关整个图谱面板：一次 Esc 只退一层，不会把 3D 一起带走
       if (anatomySelected && !anatomyCardClosed) { setAnatomyCardClosed(true); return; }
-      setAnatomyOpen(false);
+      panels.close('anatomy');
     }
   });
 
@@ -695,7 +772,7 @@ export default function Workspace() {
 
   /** 打开 3D 解剖图谱（首次打开时才加载 manifest，避免启动就拉大文件） */
   const openAnatomy = useCallback(async () => {
-    setAnatomyOpen(true);
+    openPanel('anatomy');
     // 重开时卡片先收起：上次的选中结构仍在（3D 高亮保留），但不该一进来就弹卡片
     setAnatomyCardClosed(true);
     if (!anatomyManifest) {
@@ -703,16 +780,16 @@ export default function Workspace() {
         setAnatomyManifest(await loadAnatomyManifest());
       } catch (e) {
         toast(`解剖图谱加载失败：${(e as Error).message}`, 'err');
-        setAnatomyOpen(false);
+        closePanel('anatomy');
       }
     }
-  }, [anatomyManifest]);
+  }, [anatomyManifest, closePanel, openPanel]);
 
   /** 打开「智能草稿」（每次进入都清空上次残留文本） */
   const openDraft = useCallback(() => {
     setDraftText('');
-    setDraftOpen(true);
-  }, []);
+    openPanel('draft');
+  }, [openPanel]);
 
   /**
    * 从磁盘插入图片：先落进 `_attachments/`（保留原文件名，与挂音频/字幕同一口径），
@@ -759,13 +836,11 @@ export default function Workspace() {
     if (ok > 1) toast(`已插入 ${ok} 张图片`, 'ok');
   }, [vault]);
 
-  /** 回到主界面（欢迎页）：先把未保存改动落盘，再清空当前笔记。
-   *  医学通路工作区会整屏替换三栏布局，必须一并退出，否则点了按钮界面纹丝不动。 */
+  /** 回到主界面（欢迎页）：先把未保存改动落盘，再清空当前笔记。 */
   const goHome = useCallback(() => {
     flushDraft();
     setDraft(null);
     setDirty(false);
-    setPathwayOpen(false);
     vault.setCurrentPath(null);
   }, [flushDraft, vault]);
 
@@ -774,9 +849,9 @@ export default function Workspace() {
     setDirty(true);
   }, []);
 
-  // Ctrl+S / Cmd+S 保存
+  // 保存键（默认 Ctrl+S / Cmd+S，可在设置里改）
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    if (matchesBinding(e.nativeEvent, getBindings().save)) {
       e.preventDefault();
       void saveCurrent();
     }
@@ -788,7 +863,7 @@ export default function Workspace() {
       const existing = vault.resolveLink(organ.name_en) ?? vault.resolveLink(organ.organ_id);
       if (existing) {
         openNote(existing);
-        setAnatomyOpen(false);
+        panels.close('anatomy');
         return;
       }
       const zh = systemZhName(organ.system);
@@ -854,7 +929,7 @@ export default function Workspace() {
       setDirty(false);
       vault.setCurrentPath(path);
       pushRecent(path);
-      setAnatomyOpen(false);
+      panels.close('anatomy');
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [vault, openNote, flushDraft]
@@ -962,9 +1037,18 @@ export default function Workspace() {
    *  复习、练习到一半不被打断；引用一发出面板就落回原层级。 */
   const askAgent = useCallback((quote: { text: string; path: string | null; ask?: string }) => {
     setAgentQuote(quote);
-    setAiOpen(false); // 与 AI 助手面板互斥（共用同一块让位空间）
-    setAgentOpen(true);
-  }, []);
+    closePanel('ai'); // 与 AI 助手面板互斥（共用同一块让位空间）
+    openPanel('agent');
+  }, [closePanel, openPanel]);
+
+  /** 一键导师：首页点一下就开面板并直接开始（不用先开面板、再点芯片、再打字）。
+   *  开场白由面板自己拼（reviewPlanPrompt 在 AI 那条懒加载链里），
+   *  若在这里 import 会把 qbank/srs/mistakes 整条学习聚合拖进主包。 */
+  const startTutor = useCallback(() => {
+    setAgentSeed({ tutor: true });
+    closePanel('ai');
+    openPanel('agent');
+  }, [closePanel, openPanel]);
 
   const handleCreate = useCallback(
     async (dir: string, title: string, type: NoteType = 'concept') => {
@@ -991,9 +1075,10 @@ export default function Workspace() {
   const notePaths = vault.notePaths;
   /** PDF 对照的笔记目标列表。**只在面板真的打开时才算**：它对全库逐篇解析 frontmatter
    *  并新建等量对象，而面板关着的时候这个列表没有任何消费者。 */
+  const pdfPanelOpen = panels.is('pdf');
   const noteTargets = useMemo(
     () =>
-      pdfOpen
+      pdfPanelOpen
         ? notePaths.map((path) => {
             const parsed = parseFrontmatterCached(path, vault.structureDocs.get(path) ?? '');
             return {
@@ -1003,7 +1088,7 @@ export default function Workspace() {
             };
           })
         : [],
-    [pdfOpen, notePaths, vault.structureDocs]
+    [pdfPanelOpen, notePaths, vault.structureDocs]
   );
   const noteCount = notePaths.length;
 
@@ -1030,6 +1115,10 @@ export default function Workspace() {
   const homeMistakeCount = vault.currentPath ? 0 : Object.keys(loadMistakes()).length;
   /** 首页「最近使用」：读回即初值；写入在 touchFeature */
   const [recentFeatures, setRecentFeatures] = useState<RailKey[]>(loadRecentFeatures);
+  // 空闲预取三块最常用的重面板：只排一次、失败静默（见 panelPrefetch.ts）
+  useEffect(() => {
+    prefetchIdle();
+  }, []);
   /** 首页「继续刷题」刚点的标记：传给 QuizView 让它挂载后自动接上一轮，处理完自己清掉 */
   const [quizAutoResume, setQuizAutoResume] = useState(false);
 
@@ -1037,107 +1126,83 @@ export default function Workspace() {
    *  导航轨与首页「最近使用」共用这一张表——同一个开关只写一遍，也只有这一个记录点。 */
   const openFeature: Record<RailKey, () => void> = {
     // 从「收起成窄条」状态重新打开时顺手展开整张卡片：否则点了「目录」只看到一条边
-    tree: () => { setPathwayOpen(false); if (!treeOpen) setTreeCollapsedPersist(false); setTreeOpen((v) => !v); },
-    search: () => setSearchOpen(true),
-    quiz: () => setQuizOpen(true),
-    review: () => setReviewOpen(true),
-    mistakes: () => setMistakeOpen(true),
-    report: () => setDashOpen(true),
-    todos: () => setTodoOpen(true),
+    tree: () => { if (!treeOpen) setTreeCollapsedPersist(false); setTreeOpen((v) => !v); },
+    search: () => panels.open('search'),
+    quiz: () => panels.open('quiz'),
+    review: () => panels.open('review'),
+    mistakes: () => panels.open('mistakes'),
+    report: () => panels.open('dash'),
+    todos: () => panels.open('todos'),
     // 视频笔记是浮层而非全屏面板：轨上当开关用，再点一次收起。
     // 关掉 AI 问答面板：两者都锚在右侧（.ai-panel 与 .dock-col），同时打开会完全重叠。
     // 用户自己开关视频时清掉「被 AI 临时收起」的标记：之后关掉 AI 面板不该再替他打开。
-    video: () => { videoHiddenByAi.current = false; setVideoOpen((v) => !v); setAiOpen(false); },
-    graph: () => setGraphOpen(true),
+    video: () => { videoHiddenByAi.current = false; panels.toggle('video'); panels.close('ai'); },
+    graph: () => panels.open('graph'),
     anatomy: () => void openAnatomy(),
-    brain: () => setBrainOpen(true),
-    mind: () => setMindOpen(true),
-    // 轨上是开关：再点一次收起。从首页点开时它本来就收着，效果等于打开
-    pathway: () => setPathwayOpen((v) => !v),
-    tags: () => setTagOpen(true),
-    medref: () => setMedRefOpen(true),
-    import: () => setImportOpen(true),
-    pdf: () => setPdfOpen(true),
-    convert: () => setConvertOpen(true),
-    history: () => setHistoryOpen(true),
-    notice: () => setNoticeOpen(true),
+    brain: () => panels.open('brain'),
+    mind: () => panels.open('mind'),
+    tags: () => panels.open('tags'),
+    medref: () => panels.open('medref'),
+    import: () => panels.open('import'),
+    pdf: () => panels.open('pdf'),
+    convert: () => panels.open('convert'),
+    course: () => { setCourseInitialBvid(undefined); panels.open('course'); },
+    matgen: () => panels.open('matgen'),
+    words: () => panels.open('words'),
+    history: () => panels.open('history'),
+    notice: () => panels.open('notice'),
     ai: () => {
-      if (aiOpen || agentOpen || draftOpen) { setAiOpen(false); setAgentOpen(false); setDraftOpen(false); return; }
-      setAiOpen(true);
+      if (panels.is('ai') || panels.is('agent') || panels.is('draft')) { panels.close('ai'); panels.close('agent'); panels.close('draft'); return; }
+      panels.open('ai');
       // AI 问答与「视频 + AI 笔记」栏都锚在右侧，同时打开会互相遮挡。
       // 只临时收起视频并记下，面板关闭/切到 AI 笔记时由下面的 effect 原样还回来。
-      if (videoOpen) { videoHiddenByAi.current = true; setVideoOpen(false); }
+      if (panels.is('video')) { videoHiddenByAi.current = true; panels.close('video'); }
     },
-    settings: () => setSettingsOpen(true),
+    settings: () => panels.open('settings'),
   };
 
   /** AI 问答面板关掉（包括切到「AI 笔记」）后，把被它临时收起的视频窗口原样还回来 */
+  const aiPanelOpen = panels.is('ai');
   useEffect(() => {
-    if (aiOpen || !videoHiddenByAi.current) return;
+    if (aiPanelOpen || !videoHiddenByAi.current) return;
     videoHiddenByAi.current = false;
-    setVideoOpen(true);
-  }, [aiOpen]);
+    panels.open('video');
+  }, [aiPanelOpen, panels]);
 
-  /** 记一次使用（LRU，最多 8 条）。第一项就是它时不写盘——避免每次点同一个按钮都落一次 localStorage */
+  /** 记一次使用（LRU，最多 8 条）。第一项就是它时不写盘——避免每次点同一个按钮都落一次 localStorage。
+   *  先在事件里算好 next 再 setState：副作用不放进 updater（jsdom 会执行 updater，真浏览器对
+   *  「返回同一引用」直接跳过，写盘会随环境漂移）。 */
   const touchFeature = useCallback((key: RailKey) => {
-    setRecentFeatures((prev) => {
-      if (prev[0] === key) return prev;
-      const next = [key, ...prev.filter((k) => k !== key)].slice(0, RECENT_FEATURES_MAX);
-      try { localStorage.setItem(RECENT_FEATURES_KEY, JSON.stringify(next)); } catch { /* 配额满：本次会话内仍然可用 */ }
-      return next;
-    });
-  }, []);
+    const next = pushRecentFeature(recentFeatures, key);
+    if (next === recentFeatures) return;
+    saveRecentFeatures(next);
+    setRecentFeatures(next);
+  }, [recentFeatures]);
 
   /**
-   * 全屏面板的关闭器。
+   * 关掉除 keep 以外的全部整屏面板。
    *
-   * 每个面板自己渲染一层 position:fixed inset:0 的遮罩（.panel-backdrop、解剖/脑图谱、通路构建器），
-   * 同一时刻只该存在一个。两个同时打开时后渲染的盖住先渲染的，关掉上面那个才会露出下面那个——
+   * 每个整屏面板都盖一层 position:fixed inset:0 的遮罩（走 `PanelOverlay`，
+   * 少数几块自带容器：解剖/脑图谱、SafetyNotice），同一时刻只该存在一个。
+   * 两个同时打开时后渲染的盖住先渲染的，关掉上面那个才会露出下面那个——
    * 用户看到的是「点了新功能没反应」，或者「关掉题库，冒出个错题本」。
-   * 所以进入一个面板前先把其余的关掉：这条规则只写在这里，不在二十来个入口里各记一遍。
    *
-   * 不在表里的是能与内容共存的：目录侧栏（tree）、右侧 AI 浮层（ai/agent/draft）、视频小窗。
+   * 遍历范围来自注册表（`MODAL_IDS`），不再是手写的 24 行 `modalClosers` 表：
+   * 那张表每加一个面板就要记得登记一次。`modal: false` 的（目录侧栏 / AI 浮层 / 视频小窗）
+   * 不在遍历范围里，它们本来就该与内容共存。
+   * 关闭本来关着的面板是空操作（`withValue` 返回同一引用 → React 跳过渲染）。
    */
-  const modalClosers: Record<string, () => void> = {
-    search: () => setSearchOpen(false),
-    quiz: () => setQuizOpen(false),
-    exam: () => { setExamOpen(false); setExamBank(undefined); },
-    review: () => setReviewOpen(false),
-    mistakes: () => setMistakeOpen(false),
-    todos: () => setTodoOpen(false),
-    graph: () => setGraphOpen(false),
-    mind: () => setMindOpen(false),
-    tags: () => setTagOpen(false),
-    medref: () => setMedRefOpen(false),
-    import: () => setImportOpen(false),
-    pdf: () => setPdfOpen(false),
-    convert: () => setConvertOpen(false),
-    history: () => setHistoryOpen(false),
-    notice: () => setNoticeOpen(false),
-    settings: () => setSettingsOpen(false),
-    dash: () => setDashOpen(false),
-    report: () => setReportOpen(false),
-    vocab: () => setVocabOpen(false),
-    imageLib: () => setImageLibOpen(false),
-    brain: () => setBrainOpen(false),
-    anatomy: () => setAnatomyOpen(false),
-    pathway: () => setPathwayOpen(false),
-    palette: () => setPaletteOpen(false),
-  };
-
-  /** 关掉除 keep 以外的全部全屏面板（值本来就是 false 时 setState 自己跳过，不会有额外渲染） */
   const closeModals = (keep: string) => {
-    for (const [key, close] of Object.entries(modalClosers)) if (key !== keep) close();
+    for (const id of MODAL_IDS) {
+      if (id === keep) continue;
+      panels.close(id);
+      // 考试面板带参数（预选题库 / 错题重练范围）：关掉时一并清空，否则下次从别处进考试会带着旧参数
+      if (id === 'exam') { setExamBank(undefined); setExamSeed(undefined); }
+    }
   };
 
-  /** 导轨入口 → 它打开的全屏面板。tree / ai 不在表里：目录侧栏与右侧浮层要能跟内容共存 */
-  const RAIL_MODAL: Partial<Record<RailKey, string>> = {
-    search: 'search', quiz: 'quiz', review: 'review', mistakes: 'mistakes', report: 'dash',
-    todos: 'todos', graph: 'graph', anatomy: 'anatomy', brain: 'brain', mind: 'mind',
-    tags: 'tags', medref: 'medref', import: 'import', pdf: 'pdf', convert: 'convert',
-    history: 'history', notice: 'notice', settings: 'settings', pathway: 'pathway',
-  };
-
+  /** 导轨入口 → 它打开的全屏面板（表在 featureRouting：tree / ai 不在表里，
+   *  目录侧栏与右侧浮层要能跟内容共存） */
   const railActions = {} as Record<RailKey, () => void>;
   for (const key of Object.keys(openFeature) as RailKey[]) {
     railActions[key] = () => {
@@ -1149,7 +1214,7 @@ export default function Workspace() {
   }
 
   /** 首页那一排：最近用过的去处；一条记录都没有时退回轨上的 8 个常驻项。
-   *  已下架的轨道项（思维导图、PDF 拆分）在 RAIL_INDEX 里没有条目，这里直接跳过，
+   *  已下架的轨道项（思维导图）在 RAIL_INDEX 里没有条目，这里直接跳过，
    *  而不是让首页为一条历史记录崩掉。 */
   const homeFeatures = (recentFeatures.length > 0 ? recentFeatures : RAIL_PRIMARY_KEYS)
     .flatMap((key) => {
@@ -1201,6 +1266,19 @@ export default function Workspace() {
   const [pendingBlock, setPendingBlock] = useState<{ path: string; block: string } | null>(null);
   /** 右侧分屏：同一篇笔记的编辑与预览并排（Obsidian 的「源码 + 预览」对照） */
   const [splitPreview, setSplitPreview] = useState(false);
+  /** 背诵模式：预览里把 `{{挖空}}` 盖住，点一下揭开 */
+  const [recite, setRecite] = useState(false);
+  /** 分屏背诵里已揭开的挖空序号（React 状态是唯一事实，DOM 属性只是渲染结果） */
+  const [reciteRevealed, setReciteRevealed] = useState<number[]>([]);
+  /** 本轮挖空进度（Preview 上报），退出背诵时用来留痕 */
+  const [reciteProgress, setReciteProgress] = useState({ revealed: 0, total: 0 });
+  /** 本轮开始时刻；null = 当前没在背 */
+  const reciteStartedAt = useRef<number | null>(null);
+  /** 当前笔记上一次背诵结果 */
+  const [lastRecite, setLastRecite] = useState<ReciteSession | null>(null);
+  useEffect(() => {
+    setLastRecite(lastReciteOf(vault.currentPath ?? ''));
+  }, [vault.currentPath]);
   useEffect(() => {
     if (!pendingBlock) return;
     if (pendingBlock.path !== activePath || !draft) return;
@@ -1209,6 +1287,91 @@ export default function Workspace() {
     else toast(`这段内容里没找到块 ^${pendingBlock.block}（可能已被改写）`, 'info');
     setPendingBlock(null);
   }, [pendingBlock, activePath, draft]);
+
+  /**
+   * 结束一轮背诵并留痕。
+   * 只记事实（条数 / 揭开数 / 时长），**不写 FSRS 评分**：用「点了几次揭晓」去改调度，
+   * 等于拿猜测覆盖用户的复习节奏，评分该由复习面板里的显式操作产生。
+   */
+  const commitRecite = useCallback(() => {
+    const start = reciteStartedAt.current;
+    reciteStartedAt.current = null;
+    if (!start) return;
+    const path = vault.currentPath;
+    if (!path) return;
+    const { revealed, total } = reciteProgress;
+    if (!total) return;
+    const session: ReciteSession = {
+      path,
+      total,
+      revealed,
+      ms: Math.min(Date.now() - start, 6 * 3600_000),
+      at: Date.now(),
+    };
+    recordRecite(session);
+    setLastRecite(session);
+    toast(`本轮背诵：${revealed}/${total} 条揭开`, 'info');
+  }, [reciteProgress, vault.currentPath]);
+
+  /** 分屏里的「背诵」开关：开时计时，关时结算 */
+  const toggleRecite = useCallback(() => {
+    if (recite) {
+      commitRecite();
+      setRecite(false);
+      return;
+    }
+    if (!splitPreview) setSplitPreview(true);
+    reciteStartedAt.current = Date.now();
+    recitePathRef.current = vault.currentPath; // 钉住这轮属于哪篇：切笔记时按它结算
+    setReciteProgress({ revealed: 0, total: 0 });
+    setReciteRevealed([]);
+    setRecite(true);
+  }, [recite, splitPreview, commitRecite, vault.currentPath]);
+
+  /** 工具栏「背」：直接进全屏背诵——不开分屏（用户反馈「存在两个页面」），整屏只有这篇笔记与遮罩 */
+  const openToolbarRecite = useCallback(() => {
+    reciteStartedAt.current = null;
+    openPanel('recite');
+  }, [openPanel]);
+
+  /** 全屏背诵：它自己记一轮，避免和分屏那轮重复计数 */
+  const openFullRecite = useCallback(() => {
+    setRecite(false);
+    reciteStartedAt.current = null;
+    openPanel('recite');
+  }, [openPanel]);
+
+  /**
+   * 切笔记时结束当前背诵轮：背诵绑定的是「这一篇」，跨笔记把时间与进度记到另一篇头上
+   * 是错账。留痕按**背诵开始那篇**记账（此刻 vault.currentPath 已经是新笔记，所以开始时
+   * 先把路径钉进 ref，结算用它）；然后把背诵整个退掉——新笔记想背就重新开一轮。
+   */
+  const recitePathRef = useRef<string | null>(null);
+  const toggleReciteRef = useRef(toggleRecite);
+  toggleReciteRef.current = toggleRecite;
+  useEffect(() => {
+    if (!recite) return;
+    if (activePath === recitePathRef.current) return;
+    // 新笔记上的错账不能记：把 total 清零让 commitRecite 直接空转，单独按旧路径补一条留痕
+    setReciteProgress({ revealed: 0, total: 0 });
+    const start = reciteStartedAt.current;
+    reciteStartedAt.current = null;
+    const pathOfRound = recitePathRef.current;
+    recitePathRef.current = null;
+    if (start && pathOfRound && reciteProgress.total) {
+      const session: ReciteSession = {
+        path: pathOfRound,
+        total: reciteProgress.total,
+        revealed: reciteProgress.revealed,
+        ms: Math.min(Date.now() - start, 6 * 3600_000),
+        at: Date.now(),
+      };
+      recordRecite(session);
+      if (pathOfRound === activePath) setLastRecite(session);
+      toast(`本轮背诵：${reciteProgress.revealed}/${reciteProgress.total} 条揭开`, 'info');
+    }
+    toggleReciteRef.current(); // recite 为 true 的分支：结算（已被上面清零）+ setRecite(false)
+  }, [activePath, recite, reciteProgress]);
 
   /* ── 笔记级音频 + 字幕（I1）────────────────────────────────────────────
    * 放在这里而不是文件顶部：要用到 activePath（上面）与 readFile（上面的 `const readFile = vault.readFile`），又必须在下两处
@@ -1408,8 +1571,7 @@ export default function Workspace() {
    *   面板也就不能再被导出/备份路径复用。默认档 'all' 由 rangeOfPreset 返回 undefined（= 完全不传 range），
    *   于是报告输出与加时间范围之前**逐字一致** —— 这是本项目的硬要求。
    */
-  const [reportOpen, setReportOpen] = useState(false);
-  /** 报告数据；null = 还没生成成功过（面板只在 reportOpen && report 时渲染） */
+  /** 报告数据；null = 还没生成成功过（面板只在 panels.is('report') && report 时渲染） */
   const [report, setReport] = useState<StudyReport | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   /**
@@ -1445,13 +1607,13 @@ export default function Workspace() {
     setReportBusy(true);
     try {
       setReport(await buildReportFor(reportRange));
-      setReportOpen(true);
+      openPanel('report');
     } catch (e) {
       toast(`学习报告生成失败：${(e as Error).message}`, 'err');
     } finally {
       setReportBusy(false);
     }
-  }, [reportBusy, reportRange, buildReportFor]);
+  }, [openPanel, reportBusy, reportRange, buildReportFor]);
 
   /**
    * 面板里切换时间范围：重算同样在**事件里**跑（与 openStudyReport 同一理由，
@@ -1517,21 +1679,23 @@ export default function Workspace() {
         ? '到期待复习'
         : `${activeCard.reps} 次 · 下次 ${new Date(activeCard.due).toLocaleDateString('zh-CN')}`) + activeSections
     : null;
-  /** 轨上高亮哪一处：按「谁盖在上面」排优先级，前一个开着就标前一个。
-   *  写成表而不是 19 层三元链——再加一个去处只是加一行。 */
-  const railOrder: Array<[RailKey, boolean]> = [
-    ['pathway', pathwayOpen], ['search', searchOpen], ['pdf', pdfOpen], ['anatomy', anatomyOpen],
-    ['brain', brainOpen], ['graph', graphOpen], ['review', reviewOpen], ['mistakes', mistakeOpen],
-    ['quiz', quizOpen], ['todos', todoOpen], ['tags', tagOpen], ['report', dashOpen],
-    ['ai', aiOpen || agentOpen || draftOpen], ['history', historyOpen], ['convert', convertOpen],
-    ['video', videoOpen],
-    ['import', importOpen], ['mind', mindOpen], ['medref', medRefOpen], ['notice', noticeOpen],
-  ];
-  const activeRailItem = railOrder.find(([, open]) => open)?.[0] ?? null;
+  /** 轨上高亮哪一处：按「谁盖在上面」排优先级（优先级表在 featureRouting） */
+  const railOrder = buildRailOrder({
+    search: panels.is('search'), pdf: panels.is('pdf'), anatomy: panels.is('anatomy'),
+    brain: panels.is('brain'), graph: panels.is('graph'), review: panels.is('review'), mistakes: panels.is('mistakes'),
+    quiz: panels.is('quiz'), todos: panels.is('todos'), tags: panels.is('tags'), report: panels.is('dash'),
+    ai: panels.is('ai') || panels.is('agent') || panels.is('draft'), history: panels.is('history'), convert: panels.is('convert'),
+    course: panels.is('course'),
+    matgen: panels.is('matgen'),
+    words: panels.is('words'),
+    video: panels.is('video'),
+    import: panels.is('import'), mind: panels.is('mind'), medref: panels.is('medref'), notice: panels.is('notice'),
+  });
+  const activeRailItem = activeRailOf(railOrder);
 
   // 右侧 AI 面板打开时把主区挤窄，避免面板压住笔记（见 index.css 的 .app.ai-open / .agent-open）。
   // 面板自身是 position: fixed，不受这里的 padding 影响，只是把左侧内容让出等宽空间。
-  const sidePanelClass = agentOpen ? ' agent-open' : aiOpen ? ' ai-open' : '';
+  const sidePanelClass = panels.is('agent') ? ' agent-open' : panels.is('ai') ? ' ai-open' : '';
 
   // 命令面板只是快捷键层：每个功能都有自己的常驻入口（导航轨 / 笔记工具条 / 设置），
   // 面板不承担「唯一入口」的职责，否则不知道快捷键的人永远找不到功能。
@@ -1549,44 +1713,44 @@ export default function Workspace() {
   };
   const openOnly = (keep: string, open: () => void) => { closeModals(keep); open(); };
   const paletteCommands = PALETTE_COMMANDS({
-              search: () => openOnly('search', () => setSearchOpen(true)),
+              search: () => openOnly('search', () => panels.open('search')),
               save: () => void saveCurrent(),
               print: printCurrentNote,
               backup: () => exportBackup(),
-              importOpen: () => openOnly('import', () => setImportOpen(true)),
-              quiz: () => openOnly('quiz', () => setQuizOpen(true)),
-              exam: () => openOnly('exam', () => setExamOpen(true)),
-              review: () => openOnly('review', () => setReviewOpen(true)),
-              mistakes: () => openOnly('mistakes', () => setMistakeOpen(true)),
-              dashboard: () => openOnly('dash', () => setDashOpen(true)),
-              tags: () => openOnly('tags', () => setTagOpen(true)),
-              todos: () => openOnly('todos', () => setTodoOpen(true)),
-              mind: () => openOnly('mind', () => setMindOpen(true)),
-              graph: () => openOnly('graph', () => setGraphOpen(true)),
-              brain: () => openOnly('brain', () => setBrainOpen(true)),
+              importOpen: () => openOnly('import', () => panels.open('import')),
+              quiz: () => openOnly('quiz', () => panels.open('quiz')),
+              exam: () => openOnly('exam', () => panels.open('exam')),
+              review: () => openOnly('review', () => panels.open('review')),
+              mistakes: () => openOnly('mistakes', () => panels.open('mistakes')),
+              dashboard: () => openOnly('dash', () => panels.open('dash')),
+              tags: () => openOnly('tags', () => panels.open('tags')),
+              todos: () => openOnly('todos', () => panels.open('todos')),
+              mind: () => openOnly('mind', () => panels.open('mind')),
+              graph: () => openOnly('graph', () => panels.open('graph')),
+              brain: () => openOnly('brain', () => panels.open('brain')),
               anatomy: () => openOnly('anatomy', () => void openAnatomy()),
-              medref: () => openOnly('medref', () => setMedRefOpen(true)),
-              pdf: () => openOnly('pdf', () => setPdfOpen(true)),
+              medref: () => openOnly('medref', () => panels.open('medref')),
+              matgen: () => openOnly('matgen', () => panels.open('matgen')),
+              pdf: () => openOnly('pdf', () => panels.open('pdf')),
               // 与导航轨一致：再执行一次就是收起（命令面板只开不收的话，收起只有鼠标一条路）
-              video: () => { videoHiddenByAi.current = false; setVideoOpen((v) => !v); setAiOpen(false); },
-              images: () => openOnly('imageLib', () => setImageLibOpen(true)),
+              video: () => { videoHiddenByAi.current = false; panels.toggle('video'); panels.close('ai'); },
+              images: () => openOnly('imageLib', () => panels.open('imageLib')),
               split: () => setSplitPreview((v) => !v),
-              convert: () => openOnly('convert', () => setConvertOpen(true)),
-              vocab: () => openOnly('vocab', () => setVocabOpen(true)),
-              notice: () => openOnly('notice', () => setNoticeOpen(true)),
-              pathway: () => openOnly('pathway', () => setPathwayOpen((v) => !v)),
-              history: () => openOnly('history', () => setHistoryOpen(true)),
+              convert: () => openOnly('convert', () => panels.open('convert')),
+              vocab: () => openOnly('vocab', () => panels.open('vocab')),
+              notice: () => openOnly('notice', () => panels.open('notice')),
+              history: () => openOnly('history', () => panels.open('history')),
               ai: () => {
-                setAgentOpen(false);
-                if (!aiOpen && videoOpen) { videoHiddenByAi.current = true; setVideoOpen(false); }
-                setAiOpen((v) => !v);
+                panels.close('agent');
+                if (!panels.is('ai') && panels.is('video')) { videoHiddenByAi.current = true; panels.close('video'); }
+                panels.toggle('ai');
               },
-              agent: () => { setAgentOpen((v) => !v); setAiOpen(false); },
+              agent: () => { panels.toggle('agent'); panels.close('ai'); },
               draft: openDraft,
             });
   return (
     <div
-      className={`app${sidePanelClass}`}
+      className={`app${sidePanelClass}${!vault.currentPath ? ' app--home' : ''}`}
       ref={appRef}
       onKeyDown={onKeyDown}
       tabIndex={-1}
@@ -1595,20 +1759,8 @@ export default function Workspace() {
       style={dockSplit.width != null ? { ['--dock-w' as string]: `${dockSplit.width}px` } : undefined}
     >
       {/* 左侧导航轨：功能入口 + 字体/主题切换（见 Rail.tsx） */}
-      <Rail activeItem={activeRailItem} treeOpen={treeOpen} onHome={goHome} actions={railActions} />
+      <Rail activeItem={activeRailItem} treeOpen={treeOpen} onHome={goHome} actions={railActions} onPrefetch={prefetchPanel} />
 
-      {pathwayOpen ? (
-        <div className="pathway-workspace-host">
-          <MedicalPathwayBuilder
-            onClose={() => setPathwayOpen(false)}
-            onInsert={(markdown) => {
-              if (!vault.currentPath) { toast('请先打开一篇笔记，再插入通路图', 'info'); return false; }
-              if (editorInsertRef.current) { editorInsertRef.current(markdown); return true; }
-              toast('编辑器还在加载，请稍后再插入', 'info'); return false;
-            }}
-          />
-        </div>
-      ) : (
       <div
         className={`deck${treeOpen ? ' with-tree' : ''}${treeOpen && treeCollapsed ? ' tree-collapsed' : ''}`}
         style={treeOpen && treeCollapsed
@@ -1664,7 +1816,7 @@ export default function Workspace() {
               onImportMd={(files) => vault.importMdFiles(files)}
               autoRepairReport={vault.autoRepair}
               onImportPack={handleImportPack}
-              onUnifiedImport={() => setImportOpen(true)}
+              onUnifiedImport={() => panels.open('import')}
               onDownloadExamplePack={handleDownloadExamplePack}
               onMigrateFromBrowser={isTauri() ? () => vault.migrateFromBrowser() : undefined}
               onChangeVaultFolder={isTauri() ? () => vault.changeVaultFolder() : undefined}
@@ -1724,10 +1876,10 @@ export default function Workspace() {
                     // 窄屏下搜索是底部抽屉（第 5 项），它自带「从底部滑上来」的入场；
                     // 再叠一层「从工具栏胶囊形变过去」就是两套运动打架，这里直接走抽屉。
                     if (window.matchMedia?.('(max-width: 700px)').matches) {
-                      setSearchOpen(true);
+                      panels.open('search');
                       return;
                     }
-                    morphFrom(e.currentTarget, MORPH.search, '.qs-modal', () => flushSync(() => setSearchOpen(true)));
+                    morphFrom(e.currentTarget, MORPH.search, '.qs-modal', () => flushSync(() => panels.open('search')));
                   }}
                   data-tip="快速搜索笔记 / 全文（Ctrl+K）"
                 >
@@ -1751,7 +1903,7 @@ export default function Workspace() {
                 </button>
                 <button
                   className="btn-small"
-                  onClick={() => setMindOpen(true)}
+                  onClick={() => panels.open('mind')}
                   title="把当前笔记自动生成思维导图"
                 >
                   思维导图
@@ -1890,23 +2042,25 @@ export default function Workspace() {
                   linkNames={vault.allLinkNames}
                   onOpenLink={handleOpenLink}
                   onAttach={(name, blob) => vault.saveAttachment(name, blob)}
-                  onDraft={(text) => { setDraftText(text); setDraftOpen(true); }}
+                  onDraft={(text) => { setDraftText(text); panels.open('draft'); }}
                   onAskAi={(text) => {
                     // 选段带上当前笔记路径：模型能知道这段话出自哪篇笔记
                     setAgentQuote({ text, path: vault.currentPath });
-                    setAiOpen(false); // 与 AI 助手面板互斥（共用同一块让位空间）
-                    setAgentOpen(true);
+                    panels.close('ai'); // 与 AI 助手面板互斥（共用同一块让位空间）
+                    panels.open('agent');
                   }}
-                  onPathwayReady={(insert) => { editorInsertRef.current = insert; }}
+                  onInsertReady={(insert) => { editorInsertRef.current = insert; }}
                   headingLines={outline.map((o) => o.line)}
                   onActiveHeading={setActiveHeading}
                   onJumpReady={(jump) => { outlineJumpRef.current = jump; }}
                   readFile={readFile}
                   highlight={highlight}
                   onJumpAnchor={jumpVideoAnchor}
+                  onJumpCourse={openCourseVideo}
                   onPrint={printCurrentNote}
-                  onHistory={() => setHistoryOpen(true)}
-                  onVideo={() => setVideoOpen(true)}
+                  onHistory={() => panels.open('history')}
+                  onVideo={() => panels.open('video')}
+                  onRecite={openToolbarRecite}
                 />
               </Suspense>
               {splitPreview && (
@@ -1914,15 +2068,66 @@ export default function Workspace() {
                   <div className="note-split__head">
                     <span>预览</span>
                     <span className="spacer" />
+                    <button
+                      type="button"
+                      className={`btn-icon note-split__recite${recite ? ' on' : ''}`}
+                      aria-pressed={recite}
+                      aria-label={recite ? '退出背诵模式' : '进入背诵模式：遮住所有挖空'}
+                      title={recite ? '退出背诵（挖空全部显示）' : '背诵：遮住 {{挖空}}，点一下揭开'}
+                      onClick={toggleRecite}
+                    >
+                      背诵
+                    </button>
+                    {recite && (
+                      <button
+                        type="button"
+                        className="btn-icon"
+                        aria-label="重新盖住全部已揭开的挖空"
+                        title="全部重新盖住（再做一遍）"
+                        onClick={() => setReciteRevealed([])}
+                      >
+                        全盖
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      aria-label="全屏背诵"
+                      title="全屏背诵（空格逐条揭，Esc 结束）"
+                      onClick={openFullRecite}
+                    >
+                      全屏
+                    </button>
                     <button className="btn-icon" onClick={() => setSplitPreview(false)} aria-label="关闭分屏">✕</button>
                   </div>
+                  {recite && (
+                    <div className="note-split__recite-bar" aria-live="polite">
+                      本轮 {reciteProgress.revealed}/{reciteProgress.total} 条
+                      {lastRecite && (
+                        <>
+                          <span className="note-split__dot">·</span>
+                          上次 {lastRecite.revealed}/{lastRecite.total}
+                        </>
+                      )}
+                    </div>
+                  )}
                   <div className="note-split__body">
                     <Preview
                       content={draft ?? ''}
                       resolve={vault.resolveLink}
                       onOpenLink={handleOpenLink}
+                      onJumpAnchor={jumpVideoAnchor}
+                      onJumpCourse={openCourseVideo}
                       readFile={readFile}
                       focusBlock={pendingBlock?.block ?? null}
+                      recite={recite}
+                      revealed={reciteRevealed}
+                      onToggleCloze={(index) =>
+                        setReciteRevealed((prev) =>
+                          prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index],
+                        )
+                      }
+                      onReciteChange={(revealedCount, total) => setReciteProgress({ revealed: revealedCount, total })}
                     />
                   </div>
                 </aside>
@@ -1972,17 +2177,26 @@ export default function Workspace() {
                       {Array.isArray(activeExam) && activeExam.length > 0 && <div className="lp-status-row"><b>真题</b><span className="badge-exam">{activeExam.join('、')}</span></div>}
                     </div>
                   </div>
-                  {vault.currentBacklinks.length === 0 && (
+                  {vault.backlinkHits.length === 0 && (
                     <p className="muted">暂无笔记引用当前笔记。在其他笔记里输入 [[笔记名]] 即可建立链接。</p>
                   )}
-                  {vault.currentBacklinks.map((p) => {
-                    const c = vault.docs.get(p) ?? '';
-                    const { title } = parseFrontmatterCached(p, c);
-                    const label = title || p.replace(/\.md$/, '').split('/').pop() || p;
+                  {vault.backlinkHits.map((hit) => {
+                    const label = hit.label || hit.fromPath.replace(/\.md$/, '').split('/').pop() || hit.fromPath;
                     return (
-                      <div key={p} className="backlink-item" onClick={(e) => openNote(p, undefined, e.currentTarget)} {...clickable(`打开反向链接笔记：${label}`)}>
+                      <div
+                        key={hit.fromPath + '#' + hit.index}
+                        className="backlink-item"
+                        onClick={(e) => openNote(hit.fromPath, undefined, e.currentTarget)}
+                        {...clickable(`打开反向链接笔记：${label}（第 ${hit.line} 行）`)}
+                      >
+                        {hit.kind === 'unresolved' && <span className="backlink-flag">可能失效</span>}
                         {label}
-                        <span className="muted"> · {p}</span>
+                        <span className="muted"> · {hit.fromPath} · 第 {hit.line} 行</span>
+                        <span className="backlink-excerpt">
+                          {hit.excerpt.before}
+                          <b>{hit.excerpt.match}</b>
+                          {hit.excerpt.after}
+                        </span>
                       </div>
                     );
                   })}
@@ -2004,8 +2218,9 @@ export default function Workspace() {
               onFeature={(key) => railActions[key as RailKey]()}
               onOpenRecent={openNote}
               onReview={railActions.review}
+              onStartTutor={startTutor}
               onMistake={railActions.mistakes}
-              onResumeQuiz={() => { touchFeature('quiz'); closeModals('quiz'); setQuizAutoResume(true); setQuizOpen(true); }}
+              onResumeQuiz={() => { touchFeature('quiz'); closeModals('quiz'); setQuizAutoResume(true); panels.open('quiz'); }}
               onSearch={railActions.search}
               // 工作台快捷操作：新建要先把目录卡片展开，再给 ChapterTree 一个自增信号打开表单
               onNewNote={() => {
@@ -2021,66 +2236,90 @@ export default function Workspace() {
           </div>
         )}
       </div>
-      )}
-      {searchOpen && (
+      {panels.is('search') && (
         <Suspense fallback={null}>
           <QuickSearch
-            open={searchOpen}
+            open={panels.is('search')}
             docs={vault.docs}
             recents={recents}
-            onClose={() => setSearchOpen(false)}
+            onClose={() => panels.close('search')}
             onOpenPath={openNote}
+            onOpenQuiz={(q) => {
+              panels.close('search');
+              setQuizSeed(q);
+              panels.open('quiz');
+            }}
+            onOpenMistakes={() => {
+              panels.close('search');
+              panels.open('mistakes');
+            }}
           />
         </Suspense>
       )}
-      {reviewOpen && (
+      {panels.is('review') && (
         <ReviewView
           paths={notePaths}
           docs={vault.docs}
           resolve={vault.resolveLink}
           onOpenLink={handleOpenLink}
           readFile={readFile}
-          onClose={() => setReviewOpen(false)}
+          onClose={() => panels.close('review')}
           onAskAi={askAgent}
+          onOpenQuiz={() => {
+            panels.close('review');
+            panels.open('quiz');
+          }}
           onOpenPath={(p) => {
-            setReviewOpen(false);
+            panels.close('review');
             openNote(p);
           }}
+          imageEntries={attachmentImages}
+          resolveAsset={readFile}
         />
       )}
-      {mistakeOpen && (
+      {panels.is('mistakes') && (
         <MistakeBook
           onOpenPath={(p) => {
-            setMistakeOpen(false);
+            panels.close('mistakes');
             openNote(p);
           }}
-          onClose={() => setMistakeOpen(false)}
+          onClose={() => panels.close('mistakes')}
           onAskAi={askAgent}
+          docs={vault.docs}
+          onRedoChapters={(paths) => {
+            // 错题本 → 考试中心：直接开一场只考本组笔记的错题重练
+            panels.close('mistakes');
+            setExamBank(undefined);
+            setExamSeed(paths);
+            panels.open('exam');
+          }}
         />
       )}
-      {graphOpen && (
+      {panels.is('graph') && (
         <Suspense fallback={<div className="loading">图谱加载中…</div>}>
           <GraphView
             docs={vault.docs}
             linkIndex={vault.linkIndex}
             resolveLink={vault.resolveLink}
             onOpenPath={(p) => {
-              setGraphOpen(false);
+              panels.close('graph');
               openNote(p);
             }}
-            onClose={() => setGraphOpen(false)}
+            onClose={() => panels.close('graph')}
           />
         </Suspense>
       )}
-      {mindOpen && vault.currentPath && (
+      {panels.is('mind') && vault.currentPath && (
         <Suspense fallback={<div className="loading">思维导图加载中…</div>}>
           <MindMapView
             content={draft ?? ''}
             title={vault.currentPath.replace(/\.md$/, '').split('/').pop()!}
             noteKey={vault.currentPath}
             onAskAi={askAgent}
-            onClose={() => setMindOpen(false)}
+            onClose={() => panels.close('mind')}
             onOpenWiki={handleOpenLink}
+            onImageEntries={attachmentImages}
+            resolveAsset={readFile}
             onSaveNote={(md) => {
               const path = vault.currentPath;
               if (!path) return;
@@ -2093,86 +2332,158 @@ export default function Workspace() {
           />
         </Suspense>
       )}
-      {quizOpen && (
+      {panels.is('quiz') && (
         <Suspense fallback={<div className="loading">题库加载中…</div>}>
           <QuizView
             docs={vault.docs}
             resolveLink={vault.resolveLink}          onOpenPath={(p) => openNote(p)}
-            onClose={() => setQuizOpen(false)}
+            onClose={() => { panels.close('quiz'); setQuizSeed(''); }}
             onAskAi={askAgent}
-            onOpenExam={(name) => { setExamBank(name); setExamOpen(true); }}
+            onOpenExam={(name) => { setExamBank(name); panels.open('exam'); }}
             resolveAsset={readFile}
-            onUnifiedImport={() => setImportOpen(true)}
+            onUnifiedImport={() => panels.open('import')}
             onSaveNote={(path: string, markdown: string) => void saveQuestionNote(path, markdown)}
+            onUpdateNote={(path, content) => vault.save(path, content)}
+            onImageEntries={attachmentImages}
             refreshToken={qbankRefresh}
             autoResume={quizAutoResume}
             onAutoResumeDone={() => setQuizAutoResume(false)}
+            initialSearch={quizSeed}
           />
         </Suspense>
       )}
-      {examOpen && (
+      {panels.is('exam') && (
         <Suspense fallback={<div className="loading">考试中心加载中…</div>}>
           <ExamCenter
             initialBank={examBank}
-            onClose={() => { setExamOpen(false); setExamBank(undefined); }}
+            docs={vault.docs}
+            initialMode={examSeed !== undefined ? 'wrong' : undefined}
+            seedPaths={examSeed}
+            onClose={() => { panels.close('exam'); setExamBank(undefined); setExamSeed(undefined); }}
           />
         </Suspense>
       )}
-      {todoOpen && (
-        <TodoView
-          onClose={() => setTodoOpen(false)}
-          docs={vault.docs}
-          onOpenPath={(p) => { setTodoOpen(false); openNote(p); }}
-          onSaveNote={(path, content) => vault.save(path, content)}
-        />
+      {panels.is('todos') && (
+        <Suspense fallback={<div className="loading">待办加载中…</div>}>
+          <TodoView
+            onClose={() => panels.close('todos')}
+            docs={vault.docs}
+            onOpenPath={(p) => { panels.close('todos'); openNote(p); }}
+            onSaveNote={(path, content) => vault.save(path, content)}
+          />
+        </Suspense>
       )}
-      {tagOpen && <TagBrowser docs={vault.docs} onOpenPath={(p) => { setTagOpen(false); openNote(p); }} onClose={() => setTagOpen(false)} />}
-      {dashOpen && (
-        <Dashboard
-          docs={vault.docs}
-          onClose={() => setDashOpen(false)}
-          onOpenReview={() => { setDashOpen(false); setReviewOpen(true); }}
-          onOpenQuiz={() => { setDashOpen(false); setQuizOpen(true); }}
-          onOpenMistakes={() => { setDashOpen(false); setMistakeOpen(true); }}
-          onOpenExam={() => { setDashOpen(false); setExamBank(undefined); setExamOpen(true); }}
-        />
+      {panels.is('tags') && <TagBrowser docs={vault.docs} onOpenPath={(p) => { panels.close('tags'); openNote(p); }} onClose={() => panels.close('tags')} />}
+      {panels.is('dash') && (
+        <Suspense fallback={<div className="loading">学习统计加载中…</div>}>
+          <Dashboard
+            docs={vault.docs}
+            onClose={() => panels.close('dash')}
+            onOpenReview={() => { panels.close('dash'); panels.open('review'); }}
+            onOpenQuiz={() => { panels.close('dash'); panels.open('quiz'); }}
+            onOpenMistakes={() => { panels.close('dash'); panels.open('mistakes'); }}
+            onOpenExam={() => { panels.close('dash'); setExamBank(undefined); panels.open('exam'); }}
+          />
+        </Suspense>
       )}
       {/* 学习报告：模态面板，遮罩与 Dashboard / 错题本同一套（面板自己渲染 .panel-backdrop）。
           report 为空时不渲染——还没点过入口或上次聚合失败都不该弹空壳。
           范围切换走 changeReportRange（事件里重算），busy 时按钮 disabled。 */}
-      {reportOpen && report && (
+      {panels.is('report') && report && (
         <StudyReportPanel
           report={report}
           range={reportRange}
           busy={reportBusy}
           onRangeChange={changeReportRange}
-          onClose={() => setReportOpen(false)}
+          onClose={() => panels.close('report')}
           onCopy={handleCopyReport}
         />
       )}
-      {aiOpen && (
+      {panels.is('ai') && (
         <AiPanel
-          onClose={() => setAiOpen(false)}
-          onSwitchToAgent={() => { setAiOpen(false); setAgentOpen(true); }}
+          onClose={() => panels.close('ai')}
+          onSwitchToAgent={() => { panels.close('ai'); panels.open('agent'); }}
         />
       )}
-      {paletteOpen && <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />}
-      {settingsOpen && (
+      {panels.is('palette') && <CommandPalette commands={paletteCommands} onClose={() => panels.close('palette')} />}
+      {panels.is('settings') && (
         <SettingsPanel
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => panels.close('settings')}
           onBackup={exportBackup}
-          onImport={() => { setSettingsOpen(false); setImportOpen(true); }}
-          onNotice={() => { setSettingsOpen(false); setNoticeOpen(true); }}
+          onImport={() => { panels.close('settings'); panels.open('import'); }}
+          onNotice={() => { panels.close('settings'); panels.open('notice'); }}
+          onIntegrity={() => { panels.close('settings'); panels.open('integrity'); }}
+          onCustomizePet={() => { panels.close('settings'); panels.open('pet'); }}
         />
       )}
-      {medRefOpen && <MedRefView onClose={() => setMedRefOpen(false)} onToast={toast} />}
-      {vocabOpen && <VocabView onClose={() => setVocabOpen(false)} />}
-      {imageLibOpen && (
+      {panels.is('pet') && <PetCustomizer onClose={() => panels.close('pet')} />}
+      {panels.is('integrity') && (
+        <Suspense fallback={<div className="loading">数据自检加载中…</div>}>
+          <IntegrityView
+            docs={vault.docs}
+            attachmentPaths={vault.attachmentPaths}
+            linkIndex={vault.linkIndex}
+            onClose={() => panels.close('integrity')}
+          />
+        </Suspense>
+      )}
+      {panels.is('medref') && <MedRefView onClose={() => panels.close('medref')} onToast={toast} />}
+      {panels.is('course') && (
+        <CourseWorkshopView
+          key={courseInitialBvid ?? 'course'}
+          onClose={() => panels.close('course')}
+          onToast={toast}
+          docs={vault.docs}
+          onSave={vault.save}
+          createNote={vault.createNote}
+          onOpenNote={(path) => vault.setCurrentPath(path)}
+          onOpenVideo={openCourseVideo}
+          onCourseMeta={rememberCourse}
+          initialBvid={courseInitialBvid}
+        />
+      )}
+      {panels.is('words') && (
+        <WordDrillView
+          onClose={() => panels.close('words')}
+          onSaveNote={async (dir, title, content) => {
+            const path = dir ? `${dir}/${title}.md` : `${title}.md`;
+            await vault.save(path, content);
+            openNote(path);
+            return path;
+          }}
+        />
+      )}
+      {panels.is('matgen') && (
+        <Suspense fallback={<div className="loading">资料生成加载中…</div>}>
+          {/* onSave：写入「复习讲义/」目录并打开（与 ConvertView 同一转发口径） */}
+          <MatGenView
+            onSave={async (dir, t, content) => {
+              const path = dir ? `${dir}/${t}.md` : `${t}.md`;
+              await vault.save(path, content);
+              openNote(path);
+              return path;
+            }}
+            onClose={() => panels.close('matgen')}
+          />
+        </Suspense>
+      )}
+      {panels.is('vocab') && <VocabView onClose={() => panels.close('vocab')} />}
+      {panels.is('recite') && (
+        <ReciteView
+          path={vault.currentPath ?? ''}
+          content={draft ?? ''}
+          resolve={vault.resolveLink}
+          onOpenLink={handleOpenLink}
+          readFile={readFile}
+          onClose={() => panels.close('recite')}
+        />
+      )}
+      {panels.is('imageLib') && (
         <ImageLibrary
           entries={attachmentImages}
           resolveAsset={readFile}
           onInsert={vault.currentPath ? (md) => { editorInsertRef.current?.(md); } : undefined}
-          onClose={() => setImageLibOpen(false)}
+          onClose={() => panels.close('imageLib')}
         />
       )}
       {/* 视频笔记：顶层渲染，不依赖「已打开笔记」——挂进编辑区时没开笔记点它等于无反应 */}
@@ -2198,7 +2509,7 @@ export default function Workspace() {
         所以打开 AI 笔记时视频的底边不动——只往上多长出一块，不再被顶到屏幕顶部。
         （旧顺序视频在上，AI 一开就把视频整体推上去，用户实测反馈为「视频被 AI 笔记顶掉」。）
       */}
-      {(videoOpen || agentOpen) && (
+      {(panels.is('video') || panels.is('agent')) && (
         <div
           className="dock-col"
           data-dock-root
@@ -2238,9 +2549,9 @@ export default function Workspace() {
             onDoubleClick={dockSplit.reset}
           />
           {/* 只开视频：分隔条贴在视频块上沿，往上拖整块变高 */}
-          {videoOpen && !agentOpen && <DockSplitHandle dockSplit={dockSplit} />}
+          {panels.is('video') && !panels.is('agent') && <DockSplitHandle dockSplit={dockSplit} />}
           {/* 视频在上、AI 笔记在下（顺序即视觉顺序，别被后续 patch 调换） */}
-          {videoOpen && (
+          {panels.is('video') && (
             /*
              * 这一块不带自己的 data-panel-drag-root / 缩放入参：
              * 栏内尺寸只有一套来源——宽度归整栏抓手、高度归分隔条。
@@ -2257,58 +2568,85 @@ export default function Workspace() {
                 onSeekConsumed={() => setVideoSeek(null)}
                 onPick={() => videoInputRef.current?.click()}
                 onUrl={openVideoUrl}
+                course={videoCourse}
+                onOpenCourseNote={(path) => openNote(path)}
+                onOpenCourse={openCourseFromVideo}
                 onInsert={(md) => { const ins = editorInsertRef.current; if (!ins) return false; ins(md); return true; }}
                 onAttach={(name, blob) => vault.saveAttachment(name, blob)}
                 hasAttachment={(path) => vault.hasAttachment(path)}
                 // 标题栏拖动 = 移动整栏（transform 写在 .dock-col 上）；双击标题栏复位
                 onDragStart={dockDrag.onHandlePointerDown}
                 onDragReset={dockDrag.reset}
-                onClose={() => setVideoOpen(false)}
+                onClose={() => panels.close('video')}
               />
             </div>
           )}
           {/* AI 笔记在上沿挂分隔条：与视频同开时它就落在两块之间（互换高度），单开时就是它自己的上沿 */}
-          {agentOpen && <DockSplitHandle dockSplit={dockSplit} />}
-          {agentOpen && (
-            <AiAgentPanel
-              onClose={() => setAgentOpen(false)}
-              docs={vault.docs}
-              onSave={async (path, content) => {
-                await vault.save(path, content);
-                // AI 改的就是当前打开的这篇：编辑器缓冲必须跟着换。
-                // 不换的后果实测过（浏览器里可复现）：编辑器仍显示旧正文，用户随后随便敲一个字，
-                // 0.8s 的自动保存就把 AI 刚写进去的整段改动顶回旧内容——AI 的版本只能去「历史版本」里找。
-                // 缓冲是脏的（用户正在手打）就不动它：那是用户正在写的东西，改成提示一句，
-                // 让他自己决定是丢掉手改还是先另存（AI 的版本已经在历史版本里）。
-                const cur = editRef.current;
-                if (cur.vault.currentPath !== path) return;
-                if (!cur.dirty) setDraft(content);
-                else toast('这篇笔记刚被 AI 改写；编辑器里还有未保存的手改，保存后会覆盖 AI 的版本（可在「历史版本」找回）', 'info');
-              }}
-              onOpenPath={(p) => openNote(p)}
-              currentPath={vault.currentPath}
-              resolveLink={vault.resolveLink}
-              quote={agentQuote}
-              onQuoteConsumed={() => setAgentQuote(null)}
-              onSwitchToAi={() => { setAgentOpen(false); setAiOpen(true); }}
-            />
+          {panels.is('agent') && <DockSplitHandle dockSplit={dockSplit} />}
+          {panels.is('agent') && (
+            <Suspense fallback={<div className="loading">AI 笔记加载中…</div>}>
+              <AiAgentPanel
+                onClose={() => panels.close('agent')}
+                docs={vault.docs}
+                onSave={async (path, content) => {
+                  await vault.save(path, content);
+                  // AI 改的就是当前打开的这篇：编辑器缓冲必须跟着换。
+                  // 不换的后果实测过（浏览器里可复现）：编辑器仍显示旧正文，用户随后随便敲一个字，
+                  // 0.8s 的自动保存就把 AI 刚写进去的整段改动顶回旧内容——AI 的版本只能去「历史版本」里找。
+                  // 缓冲是脏的（用户正在手打）就不动它：那是用户正在写的东西，改成提示一句，
+                  // 让他自己决定是丢掉手改还是先另存（AI 的版本已经在历史版本里）。
+                  const cur = editRef.current;
+                  if (cur.vault.currentPath !== path) return;
+                  if (!cur.dirty) setDraft(content);
+                  else toast('这篇笔记刚被 AI 改写；编辑器里还有未保存的手改，保存后会覆盖 AI 的版本（可在「历史版本」找回）', 'info');
+                }}
+                onOpenPath={(p) => openNote(p)}
+                currentPath={vault.currentPath}
+                resolveLink={vault.resolveLink}
+                quote={agentQuote}
+                onQuoteConsumed={() => setAgentQuote(null)}
+                seed={agentSeed}
+                onSeedConsumed={() => setAgentSeed(null)}
+                onSwitchToAi={() => { panels.close('agent'); panels.open('ai'); }}
+              />
+            </Suspense>
           )}
+          {/*
+            下方拖动条：与上方那条同一套手势（整栏移动、双击复位）。
+            为什么要有它——整栏贴底，上方那根 12px 的细条在长对话里要往上滚才看得见；
+            抓窗口底边是更直觉的动作，尤其是只想把栏往上挪一点、让出底部内容的时候。
+            必须 div 而不是 button：usePanelDrag 的 NO_DRAG 会忽略 button（见上方拖动条的注释）。
+          */}
+          <div
+            className="dock-col__drag dock-col__drag--bottom"
+            role="separator"
+            aria-orientation="horizontal"
+            tabIndex={0}
+            aria-label="拖动移动这一栏（下方抓手，双击复位位置）"
+            title="拖动移动；双击复位位置"
+            onPointerDown={dockDrag.onHandlePointerDown}
+            onDoubleClick={dockDrag.reset}
+          />
         </div>
       )}
-      {noticeOpen && <SafetyNotice onClose={() => setNoticeOpen(false)} />}
-      {draftOpen && (
-        <DraftGen
-          initialText={draftText}
-          onSave={async (dir, title, content) => {
-            const path = dir ? `${dir}/${title}.md` : `${title}.md`;
-            await vault.save(path, content);
-            openNote(path);
-            return path;
-          }}
-          onClose={() => { setDraftOpen(false); setDraftText(''); }}
-        />
+      {panels.is('notice') && <SafetyNotice onClose={() => panels.close('notice')} />}
+      {panels.is('draft') && (
+        <Suspense fallback={<div className="loading">草稿生成器加载中…</div>}>
+          <DraftGen
+            initialText={draftText}
+            imageEntries={attachmentImages}
+            resolveAsset={readFile}
+            onSave={async (dir, title, content) => {
+              const path = dir ? `${dir}/${title}.md` : `${title}.md`;
+              await vault.save(path, content);
+              openNote(path);
+              return path;
+            }}
+            onClose={() => { panels.close('draft'); setDraftText(''); }}
+          />
+        </Suspense>
       )}
-      {pdfOpen && (
+      {panels.is('pdf') && (
         <Suspense fallback={<div className="loading">PDF 加载中…</div>}>
           <PdfSplitView
             noteTargets={noteTargets}
@@ -2325,11 +2663,11 @@ export default function Workspace() {
               openNote(path);
               return path;
             }}
-            onClose={() => setPdfOpen(false)}
+            onClose={() => panels.close('pdf')}
           />
         </Suspense>
       )}
-      {historyOpen && (
+      {panels.is('history') && (
         <Suspense fallback={<div className="loading">快照加载中…</div>}>
           <HistoryPanel
             currentPath={vault.currentPath}
@@ -2338,11 +2676,11 @@ export default function Workspace() {
               await vault.save(path, content);
               openNote(path);
             }}
-            onClose={() => setHistoryOpen(false)}
+            onClose={() => panels.close('history')}
           />
         </Suspense>
       )}
-      {convertOpen && (
+      {panels.is('convert') && (
         <Suspense fallback={<div className="loading">转换器加载中…</div>}>
           {/* onAttach：内嵌图片落库走与编辑器贴图同一个入口（vault.saveAttachment → _attachments/），
               笔记正文里的 ![](_attachments/…) 才能被 readFile 解析成可渲染的图。 */}
@@ -2354,11 +2692,11 @@ export default function Workspace() {
               openNote(path);
               return path;
             }}
-            onClose={() => setConvertOpen(false)}
+            onClose={() => panels.close('convert')}
           />
         </Suspense>
       )}
-      {importOpen && (
+      {panels.is('import') && (
         <Suspense fallback={<div className="loading">导入面板加载中…</div>}>
           {/* 统一导入：一个入口吃掉笔记备份 / 知识包 / 题库 / 数据集 / Anki / Word·PDF / Excel。
               四条回调全部转发到**既有**通道（vault.importBackup / importMdFiles / handleImportPack /
@@ -2368,19 +2706,19 @@ export default function Workspace() {
             onImportMd={(files) => vault.importMdFiles(files)}
             onImportPack={handleImportPack}
             onAttach={vault.saveAttachment}
-            onClose={() => { setImportOpen(false); setQbankRefresh((n) => n + 1); }}
+            onClose={() => { panels.close('import'); setQbankRefresh((n) => n + 1); }}
           />
         </Suspense>
       )}
-      {brainOpen && (
+      {panels.is('brain') && (
         <Suspense fallback={<div className="loading">脑图谱加载中…</div>}>
-          <BrainAtlasView onClose={() => setBrainOpen(false)} />
+          <BrainAtlasView onClose={() => panels.close('brain')} />
         </Suspense>
       )}
-      {anatomyOpen && (
+      {panels.is('anatomy') && (
         <div className="panel panel--full anatomy-overlay">
           <div className="panel__head anatomy-topbar">
-            <button className="btn-small" onClick={() => setAnatomyOpen(false)}>← 返回</button>
+            <button className="btn-small" onClick={() => panels.close('anatomy')}>← 返回</button>
             <span className="panel__title">3D 解剖图谱</span>
             <span className="panel__actions muted">{anatomyManifest ? anatomyManifest.organs.length : 0} 结构</span>
           </div>
@@ -2420,6 +2758,9 @@ export default function Workspace() {
           </Suspense>
         </div>
       )}
+
+      {/* 桌宠：fixed 定位，不参与 .app 的 flex 布局，也不挡面板遮罩 */}
+      <Pet />
     </div>
   );
 }

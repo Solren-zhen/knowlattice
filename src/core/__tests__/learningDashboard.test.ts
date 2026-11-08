@@ -131,7 +131,7 @@ describe('learningDashboard', () => {
         stats: mockStats,
         allQuestions: mockQuestions,
         dueCards: mockDueCards,
-        completedTasks: 0,
+        incompleteTasks: 0,
         focusSessions: mockFocusSessions,
       });
 
@@ -216,7 +216,7 @@ describe('learningDashboard', () => {
     it('生成任务提醒', () => {
       const report = generateWeeklyReport({
         endDate: baseDate,
-        completedTasks: 3, // 未完成
+        incompleteTasks: 3, // 未完成
       });
 
       const taskSuggestion = report.suggestions.find((s) => s.type === 'task');

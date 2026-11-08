@@ -28,6 +28,8 @@
  * 纯函数：不碰 DOM / localStorage / 文件，输入输出都是普通 JS 值（可单测、可在 Worker 里跑）。
  */
 
+import { asRecord } from './record';
+
 /** 探测到的形状：本项目格式 / 短键题库（万川医考风格）/ 富文本题库（窦起心搏风格）/ 未识别 */
 export type SchemaKind = 'native' | 'short-keys' | 'rich-blocks' | 'unknown';
 
@@ -57,11 +59,6 @@ function filled(v: unknown): boolean {
   if (Array.isArray(v)) return v.length > 0;
   if (typeof v === 'object') return Object.keys(v as object).length > 0;
   return true;
-}
-
-/** 只收「普通对象」（排除 null 与数组）；所有逐条解析都先过这一关 */
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
 
 /** 字符串化：非字符串/数字一律回空串（避免把对象/数组拼成垃圾文本进题干） */

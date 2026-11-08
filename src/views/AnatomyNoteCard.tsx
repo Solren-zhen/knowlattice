@@ -1,9 +1,10 @@
 /**
- * M5+ · 结构笔记卡片：点 3D 结构（或右侧结构列表）后浮现在点击点旁，
+ * M5+ · 结构笔记卡片：点 3D 结构（或右侧结构列表）后贴舞台左边缘浮现，
  * 直接把该结构对应笔记的正文摊开给你看；没有笔记时给一键创建入口。
  *
- * 定位：卡片挂在 3D 舞台内，位置按点击点算并夹紧在舞台边界内（见 core/anatomyCard）。
- * 首次绘制前用 useLayoutEffect 量尺寸，所以不会出现「先闪在角落再跳到光标旁」。
+ * 定位：卡片挂在 3D 舞台内，横向固定贴左边缘（避开居中的模型），纵向跟随点击点
+ * 并夹紧在舞台边界内；topInset 按顶部系统 chip 行的实际高度动态计算（见 core/anatomyCard）。
+ * 首次绘制前用 useLayoutEffect 量尺寸，所以不会出现「先闪在角落再跳到目标位置」。
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { loadZhDict, zhOrganName, type ManifestOrgan } from '../core/anatomy';
@@ -13,7 +14,7 @@ import { IconClose } from './icons';
 
 interface Props {
   organ: ManifestOrgan;
-  /** 点击点（视口坐标）；null = 从结构列表选中 → 停靠在舞台左上角 */
+  /** 点击点（视口坐标）；null = 从结构列表选中 → 纵向停靠到 chip 行下方 */
   anchor: { x: number; y: number } | null;
   /** 3D 舞台元素：卡片位置相对它计算 */
   stage: HTMLElement | null;
@@ -60,7 +61,18 @@ export default function AnatomyNoteCard({
     const size: CardSize = el.offsetWidth && el.offsetHeight
       ? { width: el.offsetWidth, height: el.offsetHeight }
       : CARD_ESTIMATE;
-    const next = placeCard(anchor, { left: s.left, top: s.top, width: s.width, height: s.height }, size);
+    // 顶部 chip 行会随宽度换行（一轮 12 个系统，窄屏变两排），高度必须实测：
+    // 写死 56px 时窄屏卡片会压在第二排 chip 上
+    const chips = stage.querySelector('.viewer3d-systems');
+    const topInset = chips
+      ? Math.max(56, chips.getBoundingClientRect().bottom - s.top + 8)
+      : 56;
+    const next = placeCard(
+      anchor,
+      { left: s.left, top: s.top, width: s.width, height: s.height },
+      size,
+      topInset
+    );
     const prev = lastPosRef.current;
     if (prev && prev.left === next.left && prev.top === next.top) return;
     lastPosRef.current = next;

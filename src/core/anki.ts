@@ -6,6 +6,7 @@
 import { parseFrontmatter } from './parser';
 import { hasCloze, toAnkiCloze } from './cloze';
 import { correctIndices, explanationsOf, type QuizBank } from './qbank';
+import { downloadTextFile } from './download';
 import initSqlJs from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 
@@ -111,15 +112,9 @@ export function bankToAnki(bank: QuizBank): string {
   return toTsv(rows);
 }
 
-/** 触发浏览器下载 */
+/** 触发浏览器下载（保留原导出名，内部走 core/download 的共用实现） */
 export function downloadFile(name: string, content: string) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadTextFile(name, content);
 }
 
 // ---------- 真 .apkg 导出（sql.js + JSZip） ----------

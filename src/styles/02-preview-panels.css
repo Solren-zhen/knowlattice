@@ -1,0 +1,988 @@
+/* ============================================================ 预览排版 */
+.preview { padding: 36px 44px 20vh; max-width: 760px; }
+.preview.placeholder {
+  color: var(--muted); text-align: center;
+}
+.preview.placeholder p:first-child {
+  font-size: 16px; color: var(--text-2); margin-bottom: 8px;
+  font-weight: 500;
+}
+
+/* 空状态三步教学 */
+.teach-steps {
+  margin: 26px auto 0;
+  display: flex; flex-direction: column; gap: 10px;
+  width: fit-content;
+  text-align: left;
+}
+.teach-step {
+  display: flex; align-items: center; gap: 12px;
+  font-size: 13.5px; color: var(--text-2);
+  /* 落在装饰背景上：用接近实底的面色保证卡片本体与文字清晰 */
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 18px;
+  box-shadow: var(--shadow-sm);
+}
+.teach-step kbd {
+  font-size: var(--fs-caption); padding: 3px 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.markdown-body { font-size: var(--fs-title); color: var(--text); }
+.markdown-body h1 {
+  font-size: 23px; font-weight: 650; letter-spacing: -0.015em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px; margin: 8px 0 var(--sp-4);
+}
+.markdown-body h2 {
+  font-size: 17.5px; font-weight: 620; letter-spacing: -0.01em;
+  margin: 1.35em 0 0.45em;
+}
+.markdown-body h3, .markdown-body h4 {
+  font-size: var(--fs-lead); font-weight: 600;
+  margin: 1.2em 0 0.4em;
+}
+/* 正文节奏：段距 8px、行高 1.72。行高 1.9 + 段距 10px 在长回答里会撑成「一屏三行」，
+   读起来像幻灯片；1.72 对中文正文仍是舒适区间（推荐 1.6–1.8），段距靠缩进与段间
+   留白的比例区分层级，不靠放大空隙。 */
+.markdown-body p { margin: 8px 0; line-height: 1.72; }
+.markdown-body ul, .markdown-body ol { padding-left: 22px; margin: 6px 0; }
+.markdown-body li { margin: 3px 0; line-height: 1.7; }
+.markdown-body li > ul, .markdown-body li > ol { margin: 2px 0; }
+.markdown-body li::marker { color: var(--accent); font-size: 10px; }
+.markdown-body ol li::marker { font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.markdown-body blockquote {
+  margin: 10px 0; padding: 10px 16px;
+  /* 细线 + 淡底，不再用 3px 实心彩条（厚侧边条是 AI 生成界面的最强指纹；
+     引用语义由淡底与左侧细线承担，视觉重量让给正文） */
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: linear-gradient(90deg, var(--accent-soft), rgba(79, 70, 229, 0.02));
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  color: var(--text-2);
+}
+.markdown-body blockquote p { margin: 4px 0; }
+.markdown-body table {
+  border-collapse: collapse; margin: 10px 0;
+  font-size: 13.5px; line-height: 1.7;
+}
+.markdown-body mark {
+  /* 实底醒目色 + 反白字。旧值（48% 透明琥珀）与纸面几乎同亮度，高亮后看不出边界；
+     换色后白字压 #dc2626 = 4.83:1，达 AA。颜色走 --hl-bg / --hl-ink，
+     用户可在导航轨「高亮色」里换（core/highlight.ts）。 */
+  background: var(--hl-bg);
+  color: var(--hl-ink);
+  padding: 0 2px;
+  border-radius: 3px;
+}
+.markdown-repair-report {
+  margin: 8px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.markdown-repair-report summary { cursor: pointer; color: var(--text-2); }
+.markdown-repair-report ul { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; }
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--border);
+  padding: 6px 12px; text-align: left;
+}
+.markdown-body th {
+  background: var(--panel); font-weight: 600;
+}
+/* 表格斑马纹：编辑区可编辑表格与预览区表格共用同一条规则，
+   用随主题翻转的 text 淡色（硬编码浅灰会在深色主题下盖一层白雾，
+   正文只剩 2.7:1）。 */
+.editor-host .lp-table tbody tr:nth-child(even) td,
+.markdown-body tr:nth-child(even) td { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.markdown-body hr {
+  border: none; border-top: 1px dashed var(--border-strong);
+  margin: 18px 0;
+}
+.markdown-body pre {
+  background: var(--panel); padding: 12px 16px;
+  border-radius: var(--r-md); overflow-x: auto;
+  border: 1px solid var(--border);
+  margin: 10px 0;
+}
+.markdown-body pre code { background: none; padding: 0; font-size: var(--fs-body); }
+.markdown-body code {
+  background: var(--panel); padding: 2px 6px;
+  border-radius: var(--r-xs); font-size: var(--fs-body);
+  font-family: var(--font-mono);
+}
+.markdown-body a:not(.wikilink) {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(79, 70, 229, 0.35);
+}
+.markdown-body a:not(.wikilink):hover { border-bottom-color: var(--accent); }
+.markdown-body img {
+  max-width: 100%; border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  margin: 8px 0;
+}
+.markdown-body strong.prop-key {
+  color: var(--accent); font-weight: 650;
+  background: var(--accent-soft);
+  border: 1px solid var(--border-accent);
+  padding: 1px 8px; border-radius: 6px;
+  font-size: 0.92em;
+  letter-spacing: 0.01em;
+}
+
+/* 双链 */
+a.wikilink {
+  color: var(--accent);
+  text-decoration: none;
+  background: var(--accent-soft);
+  cursor: pointer;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-weight: 550;
+  transition: var(--tr-interact);
+}
+a.wikilink:hover {
+  background: rgba(79, 70, 229, 0.16);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+a.wikilink.missing {
+  color: var(--muted);
+  border-bottom-color: var(--border-strong);
+}
+a.wikilink.missing::after {
+  content: '';
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  margin-left: 4px;
+  vertical-align: super;
+}
+
+/* ============================================================ 数学公式（KaTeX）
+   katex.min.css 在文档首次出现公式时才由 core/markdown.ts 动态注入，
+   这里只补两件它自己不管的事：跟随主题色、长公式不撑破版心。 */
+.katex { color: inherit; }
+.katex-display {
+  margin: 0.7em 0;
+  padding: 2px 0;
+  /* 长公式横向滚动而不是溢出到正文外面 */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* 深色下公式字号略降，视觉重量才和正文协调 */
+[data-theme='dark'] .katex { font-size: 1.05em; }
+.katex-error {
+  color: var(--danger, #dc2626);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+}
+
+/* ============================================================ Ctrl+K 快速搜索 (Raycast 风格) */
+.qs-overlay {
+  position: fixed; inset: 0;
+  background: rgba(8, 9, 13, 0.65);
+  backdrop-filter: blur(16px) saturate(180%);
+  z-index: 100;
+  display: flex; justify-content: center;
+  padding-top: 12vh;
+  animation: fade-in var(--t-fast) var(--ease);
+}
+.qs-modal {
+  width: min(640px, 92vw);
+  height: fit-content;
+  max-height: 65vh;
+  background: var(--bg-raised);
+  border-radius: 20px;
+  box-shadow: var(--shadow-modal), var(--glass-shine), 0 0 0 1px var(--border-strong);
+  border: 1px solid var(--border-strong);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(-12px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.qs-input {
+  width: 100%;
+  border: none; outline: none;
+  padding: 18px 24px;
+  font-size: 16.5px;
+  font-weight: 550;
+  font-family: inherit;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  letter-spacing: -0.015em;
+}
+/* 基类 outline:none 与全局 :focus-visible 同权重且声明在后，会吃掉焦点环；这里显式补回 */
+.qs-input:focus-visible { outline: none; border-bottom-color: var(--accent); }
+.qs-input::placeholder { color: var(--muted); }
+.qs-results { overflow-y: auto; padding: 10px; }
+.qs-empty { padding: 32px; text-align: center; color: var(--muted); font-size: var(--fs-caption); }
+.qs-item {
+  padding: 11px 16px; border-radius: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: var(--tr-interact);
+}
+.qs-item:hover { background: var(--panel); }
+.qs-item.active {
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+  box-shadow: 0 2px 10px var(--accent-soft);
+}
+.qs-title {
+  font-size: var(--fs-title); font-weight: var(--fw-title);
+  display: flex; align-items: center; gap: 8px;
+  letter-spacing: -0.01em;
+}
+.qs-recent {
+  font-size: var(--fs-micro); font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--border-accent);
+  padding: 2px 8px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.qs-snippet {
+  font-size: var(--fs-caption); color: var(--muted); margin-top: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 一键搜索的命中高亮：结果列表里的命中词（与编辑器内 ==高亮== 同一套色） */
+.qs-mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 3px; padding: 0 2px;
+  font-weight: 600;
+}
+/* 打开笔记后编辑器内的命中高亮。
+   实际渲染的是 .cm-selectionMatch：CodeMirror 的命中高亮走的是
+   highlightSelectionMatches（以**当前选区**为查询），findNext 选中第一处之后，
+   其余同款命中都带上这个 class。.cm-searchMatch 在 @codemirror/search 里
+   只出现在一条 CSS 规则中、没有任何装饰使用它，写在这里也不会生效。
+   默认主题给的是 #99ff7780（半透明绿），在深色主题里又脏又看不清。 */
+.editor-host .cm-selectionMatch {
+  background: var(--accent-soft);
+  border-radius: 3px;
+  /* 描边必须用实色 --accent，不能用 --border-accent。
+     原先用 --border-accent（32% / 45% 透明）压在底色上只有 1.65:1（浅）/ 2.18:1（深），
+     而 --accent-soft 本身与页面底色只差 1.12:1 / 1.19:1 —— 都远低于「非文字状态指示」
+     要求的 3:1（WCAG 1.4.11）。两者叠加的结果是：除当前命中
+     （.cm-selectionMatch-main，实底 5.97:1）之外，其余命中实际上看不见，
+     也就是「打开笔记后高亮全部命中」里的「全部」并不成立。
+     靠背景色补不回来：浅色主题要达到 3:1 需要约 70% 不透明度，那已经等于实底了。
+     所以让描边承担这个信号（实色 --accent 对底色 5.97:1 / 6.67:1），
+     层次仍然清楚——当前命中是实底，其余命中是描边。 */
+  outline: 1.5px solid var(--accent);
+}
+.editor-host .cm-selectionMatch-main {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* ============================================================ M6 复习模式 (Linear Bento 卡片) */
+.review-overlay {
+  position: fixed; inset: 0;
+  background: rgba(8, 9, 13, 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  z-index: 90;
+  display: flex; flex-direction: column;
+  animation: fade-in var(--t-med) var(--ease);
+}
+.review-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--fs-title); font-weight: var(--fw-title);
+  background: var(--bg-raised); border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--shadow-xs);
+}
+.review-header .muted { font-weight: 400; }
+.review-scope {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-5);
+  background: var(--bg-raised); border-bottom: 1px solid var(--border);
+  font-size: var(--fs-caption); color: var(--text-2);
+}
+.review-scope label { white-space: nowrap; }
+.review-scope select {
+  min-width: 220px; max-width: min(46vw, 420px);
+  padding: 5px 10px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 9px;
+  font: inherit;
+}
+.review-scope select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.review-scope .muted { font-weight: 400; }
+@media (max-width: 640px) {
+  .review-scope { flex-wrap: wrap; padding: var(--sp-2) var(--sp-3); }
+  .review-scope select { min-width: 0; flex: 1 1 100%; max-width: none; }
+}
+.review-card {
+  width: min(720px, 92vw);
+  margin: 4vh auto 24px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  padding: var(--sp-6) var(--sp-8);
+  box-shadow: var(--shadow-modal), var(--glass-shine), 0 0 0 1px var(--border);
+  overflow-y: auto;
+  max-height: 80vh;
+}
+.review-card.done {
+  text-align: center;
+  animation: pop-in var(--t-slow) var(--ease-back);
+}
+.review-front h2 {
+  margin: 0 0 8px; font-size: 26px;
+  letter-spacing: -0.03em; font-weight: 750;
+  color: var(--text);
+}
+[data-theme='dark'] .review-front h2 {
+  color: var(--text);
+}
+.blurred-title {
+  filter: blur(8px); user-select: none;
+  transition: filter 300ms var(--ease);
+}
+.prop-keys {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin: 18px 0; align-items: center;
+  font-size: var(--fs-body); color: var(--muted);
+}
+.mnemonic-hint {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+  margin: 12px 0 18px;
+  font-size: var(--fs-micro);
+  box-shadow: var(--shadow-xs);
+  animation: rise-in var(--t-slow) var(--ease);
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.review-back {
+  max-height: 42vh; overflow-y: auto;
+  animation: rise-in var(--t-slow) var(--ease);
+  border-top: 1px dashed var(--border);
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+}
+.review-back .preview { padding: 0; max-width: none; }
+.review-meta {
+  margin: 10px 0 16px;
+  display: flex; align-items: center; gap: 12px;
+}
+.rating-row { display: flex; gap: 10px; margin-top: var(--sp-2); }
+.rate {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-raised);
+  padding: 11px 0 9px;
+  font-size: var(--fs-control);
+  cursor: pointer;
+  line-height: 1.35;
+  box-shadow: var(--shadow-xs), var(--glass-shine);
+  transition: var(--tr-interact);
+}
+.rate small { color: var(--muted); font-size: var(--fs-micro); display: block; margin-top: 2px; }
+.rate:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+.rate:active { transform: translateY(0) scale(var(--press-scale)); box-shadow: var(--press-inset); }
+.rate.again:hover { border-color: var(--danger); color: var(--danger-text); background: color-mix(in srgb, var(--danger) 8%, transparent); box-shadow: 0 4px 14px color-mix(in srgb, var(--danger) 25%, transparent); }
+.rate.hard:hover  { border-color: var(--amber); color: var(--amber-text); background: color-mix(in srgb, var(--amber) 8%, transparent); box-shadow: 0 4px 14px color-mix(in srgb, var(--amber) 25%, transparent); }
+.rate.good:hover  { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3); }
+.rate.easy:hover  { border-color: var(--cyan); color: var(--cyan-text); background: color-mix(in srgb, var(--cyan) 8%, transparent); box-shadow: 0 4px 14px color-mix(in srgb, var(--cyan) 25%, transparent); }
+
+/* ============================================================ M5 解剖图谱（3D 分屏） */
+.anatomy-overlay {
+  position: fixed; inset: 0; z-index: 80;
+  background: var(--bg);
+  display: flex;
+  animation: fade-in var(--t-med) var(--ease);
+}
+.anatomy-stage {
+  flex: 1; min-width: 0;
+  position: relative;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(79, 70, 229, 0.05), transparent 60%),
+    linear-gradient(180deg, #f6f8fb 0%, #e8edf5 100%);
+}
+.viewer3d { position: absolute; inset: 0; }
+/* 3D 舞台：深色影棚。骨骼等浅色结构在近白背景上几乎不可辨，深底上轮廓最清晰；
+   中灰蓝会和米白骨骼抢亮度，所以背景压到近黑，只留顶部一道柔光作为「顶灯」，
+   和主光（右前上方）方向一致，避免背景光斑与物体照明明暗矛盾。浅深主题共用这套。 */
+.viewer3d-canvas {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(80% 45% at 50% -8%, rgba(120, 145, 190, 0.16), transparent 70%),
+    linear-gradient(180deg, #0b0e14 0%, #07090d 58%, #020304 100%);
+}
+[data-theme='dark'] .viewer3d-canvas {
+  background:
+    radial-gradient(80% 45% at 50% -8%, rgba(126, 150, 198, 0.15), transparent 70%),
+    linear-gradient(180deg, #0a0d13 0%, #06080c 58%, #020304 100%);
+}
+/* 极轻噪点：压掉大面积深色渐变的「塑料感」，同时避免 8-bit 渐变的潜在色带。
+   放在 canvas 下方（z-index 0）：模型像素不透明会盖住它，只有背景透出来。 */
+.viewer3d-canvas::after {
+  content: '';
+  position: absolute; inset: 0; z-index: 0;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/><feColorMatrix type='saturate' values='0'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+}
+.viewer3d-canvas canvas { display: block; position: relative; z-index: 1; }
+/* 画布内悬浮控件（系统芯片 / 视角工具 / 图例 / 提示）：舞台已是深色，
+   沿用页面的白色玻璃胶囊会过于抢眼，统一换深色玻璃，让模型保持视觉主角 */
+.viewer3d .sys-chip,
+.viewer3d .tool-chip,
+.viewer3d .viewer3d-legend .lg,
+.viewer3d .viewer3d-layer-picker {
+  background: rgba(13, 17, 27, 0.66);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #dbe2ee;
+}
+.viewer3d .sys-chip:hover,
+.viewer3d .tool-chip:hover:not(:disabled) {
+  background: rgba(129, 140, 248, 0.16);
+  border-color: rgba(165, 180, 252, 0.55);
+  color: #c7d2fe;
+}
+.viewer3d .sys-chip.on,
+.viewer3d .tool-chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.viewer3d .viewer3d-hint { color: #9aa6ba; }
+.viewer3d-systems {
+  position: absolute; top: 14px; left: 14px; right: 14px;
+  display: flex; flex-wrap: wrap; gap: 6px;
+  z-index: 5;
+}
+.sys-chip {
+  border: 1px solid var(--border);
+  background: var(--panel-glass-strong);
+  backdrop-filter: blur(6px);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: var(--fs-control); font-family: inherit;
+  cursor: pointer;
+  transition: var(--tr-interact);
+}
+.sys-chip:hover { border-color: var(--accent); color: var(--accent); }
+.sys-chip.on {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+}
+.sys-chip.loading { opacity: 0.55; cursor: wait; }
+/* 右侧工具条：视角预设 / 自动旋转 / 聚焦 / 复位（与系统 chip 同款视觉） */
+.viewer3d-tools {
+  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 6px; z-index: 6;
+}
+.viewer3d-tools-group {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.tool-chip {
+  border: 1px solid var(--border);
+  background: var(--panel-glass-strong);
+  backdrop-filter: blur(6px);
+  color: var(--text-2);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: var(--fs-control); font-family: inherit;
+  cursor: pointer;
+  transition: var(--tr-interact);
+  white-space: nowrap;
+}
+.tool-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.tool-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tool-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+/* 右下角：当前结构名称（悬停优先，否则显示选中的） */
+.viewer3d-status {
+  position: absolute; right: 14px; bottom: 52px;
+  display: flex; align-items: center; gap: 8px;
+  max-width: min(52%, 460px);
+  background: rgba(15, 23, 42, 0.85);
+  color: #f1f5f9;
+  font-size: var(--fs-body); font-weight: 500;
+  padding: 7px 14px; border-radius: 999px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+  z-index: 5;
+}
+.viewer3d-status-tag {
+  flex: none;
+  font-size: var(--fs-micro); font-weight: 500; opacity: 0.7;
+  border: 1px solid rgba(245, 243, 238, 0.32);
+  border-radius: 999px; padding: 1px 7px;
+}
+.viewer3d-status-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer3d-status-en {
+  flex: none; max-width: 46%;
+  font-size: var(--fs-micro); font-weight: 400; opacity: 0.6;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 选中之后又悬停到别的结构（穿透时外层）：次要信息，弱化显示 */
+.viewer3d-status-hover {
+  flex: none; max-width: 42%;
+  font-size: var(--fs-micro); font-weight: 400; opacity: 0.72;
+  border-left: 1px solid rgba(245, 243, 238, 0.28); padding-left: 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.viewer3d-hint {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  pointer-events: none;
+  background: var(--panel-glass-strong);
+  backdrop-filter: blur(4px);
+  padding: 4px 14px; border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.viewer3d-error {
+  position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+  background: var(--danger); color: var(--danger-ink);
+  padding: 8px 18px; border-radius: var(--r-md); font-size: var(--fs-body);
+}
+/* 结构笔记卡片：点 3D 结构后贴着光标浮现，位置由 core/anatomyCard 计算后写进 left/top */
+.anatomy-note-card {
+  position: absolute; z-index: 20;
+  width: min(360px, 48%);
+  max-height: min(62%, 520px);
+  display: flex; flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  animation: rise-in var(--t-med) var(--ease);
+}
+.anatomy-note-card__head {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) var(--sp-1);
+}
+.anatomy-note-card__title {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.anatomy-note-card__name {
+  font-size: var(--fs-title); font-weight: 600; color: var(--accent);
+  overflow-wrap: anywhere;
+}
+.anatomy-note-card__en {
+  font-size: var(--fs-micro); color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.anatomy-note-card__meta {
+  padding: 0 var(--sp-3) var(--sp-2);
+  font-size: var(--fs-micro); line-height: 1.5;
+}
+.anatomy-note-card__body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+/* 正文复用预览渲染器：卡片里不要它的大留白与 760px 版心，也不要再叠一层入场动画 */
+.anatomy-note-card__body .preview { padding: 0; max-width: none; animation: none; }
+/* 正文渲染失败时的兜底文案（Preview 的 catch 分支），避免看起来像一张空白卡片 */
+.anatomy-note-card__body .preview-error { margin: 6px 0; color: var(--muted); }
+.anatomy-note-card__body .markdown-body { font-size: var(--fs-body); }
+.anatomy-note-card__body .markdown-body h1 {
+  font-size: 16px; border-bottom: none; padding-bottom: 0; margin: 0 0 var(--sp-2);
+}
+.anatomy-note-card__body .markdown-body h2 { font-size: var(--fs-lead); margin: 1.1em 0 0.4em; }
+.anatomy-note-card__body .markdown-body h3,
+.anatomy-note-card__body .markdown-body h4 { font-size: var(--fs-body); margin: 1em 0 0.3em; }
+.anatomy-note-card__body .markdown-body p { margin: 6px 0; line-height: 1.75; }
+.anatomy-note-card__body .markdown-body li { margin: 3px 0; line-height: 1.7; }
+.anatomy-note-card__empty { padding: var(--sp-3) 0; text-align: center; }
+.anatomy-note-card__empty p { margin: 4px 0; }
+.anatomy-note-card__empty p:first-child { font-weight: 600; color: var(--text-2); }
+.anatomy-note-card__foot {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+.anatomy-note-card__cta {
+  width: auto; flex: none;
+  padding: 6px 14px; font-size: var(--fs-control);
+}
+.anatomy-note-card__path {
+  flex: 1; min-width: 0;
+  font-size: var(--fs-micro); text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.anatomy-panel {
+  width: min(400px, 90vw);
+  height: 100%;
+  background: var(--bg-raised);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 48px rgba(15, 23, 42, 0.1);
+  display: flex; flex-direction: column;
+  animation: slide-left var(--t-slow) var(--ease);
+}
+@keyframes slide-left {
+  from { transform: translateX(24px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+.anatomy-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.anatomy-title { font-size: var(--fs-title); flex: 1; }
+.anatomy-search {
+  border: none; outline: none;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-control); font-family: inherit;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  transition: border-color var(--t-fast) var(--ease);
+}
+.anatomy-search::placeholder { color: var(--muted); }
+.anatomy-search:focus { border-bottom-color: var(--accent); }
+.anatomy-search:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.anatomy-attribution {
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-micro); line-height: 1.6;
+}
+.anatomy-tree { flex: 1; overflow-y: auto; padding: var(--sp-1) 0; }
+.anatomy-system-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px var(--sp-4);
+  cursor: pointer; user-select: none;
+  font-size: var(--fs-body); font-weight: 550;
+  color: var(--text-2);
+  transition: var(--tr-interact);
+}
+.anatomy-system-header:hover { background: var(--panel); }
+.system-chevron {
+  font-size: var(--fs-micro); color: var(--muted);
+  width: 14px; text-align: center;
+  transition: transform var(--t-fast) var(--ease);
+}
+.system-name { color: var(--accent); font-weight: 600; }
+.system-name-en { color: var(--muted); font-weight: 400; font-size: var(--fs-micro); }
+.system-count {
+  margin-left: auto; font-size: var(--fs-micro);
+  color: var(--muted); font-variant-numeric: tabular-nums;
+  background: var(--panel); padding: 1px 7px; border-radius: 999px;
+}
+.anatomy-organ-list { padding-left: 32px; }
+.anatomy-organ {
+  padding: 5px 12px; cursor: pointer;
+  font-size: var(--fs-body); color: var(--text-2);
+  border-left: 2px solid transparent;
+  transition: var(--tr-interact);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.anatomy-organ:hover {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+.anatomy-organ.selected {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+.anatomy-organ.selected .organ-name { color: var(--accent); font-weight: 600; }
+.organ-name { font-weight: 500; }
+.organ-parent { font-size: var(--fs-micro); line-height: 1.4; color: var(--muted); }
+.anatomy-empty { padding: 36px; text-align: center; color: var(--muted); }
+.anatomy-footer {
+  border-top: 1px solid var(--border);
+  padding: var(--sp-3) var(--sp-4);
+  display: flex; align-items: center; gap: var(--sp-3);
+  background: var(--panel);
+  animation: rise-in var(--t-med) var(--ease);
+}
+.footer-info { flex: 1; min-width: 0; }
+.footer-name {
+  font-size: var(--fs-body); font-weight: 600; color: var(--accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.footer-info .muted {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.footer-btn {
+  width: auto; padding: 9px 18px; font-size: var(--fs-control);
+  flex-shrink: 0;
+}
+
+/* 3D 图例（纯展示，不吃指针事件，否则会挡住画布并让悬停名残留） */
+.viewer3d-legend {
+  position: absolute; left: 14px; bottom: 16px;
+  display: flex; gap: 8px; z-index: 5;
+  pointer-events: none;
+}
+.viewer3d-legend .lg {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-micro); color: var(--text-2);
+  background: var(--panel-glass-strong);
+  backdrop-filter: blur(6px);
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.viewer3d-legend .lg::before {
+  content: ''; width: 8px; height: 8px; border-radius: 50%;
+}
+.lg-artery::before { background: #d24634; }
+.lg-vein::before { background: #4e86c4; }
+.lg-nerve::before { background: #e3b83e; }
+.lg-lymph::before { background: #5aa86c; }
+
+/* 肌肉分层：6 个离散层用「带刻度的分步滑条」表达，比一排 chip 更符合「往深处剥」的心智 */
+.viewer3d-layer-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  background: var(--panel-glass-strong);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  width: fit-content;
+}
+.layer-label { white-space: nowrap; }
+.layer-slider { position: relative; width: 128px; display: flex; align-items: center; }
+.layer-range {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 18px; margin: 0;
+  background: transparent; cursor: pointer;
+}
+.layer-range::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 999px;
+  background: linear-gradient(90deg, #a5b4fc 0 var(--pct, 0%), rgba(255, 255, 255, 0.2) var(--pct, 0%) 100%);
+}
+.layer-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; margin-top: -4px; border-radius: 50%;
+  background: #eef2ff; border: 2px solid #818cf8;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.layer-range::-moz-range-track { height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.2); }
+.layer-range::-moz-range-progress { height: 4px; border-radius: 999px; background: #a5b4fc; }
+.layer-range::-moz-range-thumb {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #eef2ff; border: 2px solid #818cf8;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.layer-range:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 999px; }
+/* 4 个刻度点：left/right 各让出半个滑块宽度，和滑块的行程对齐 */
+.layer-ticks {
+  position: absolute; left: 6px; right: 6px; top: 50%;
+  transform: translateY(-50%);
+  display: flex; justify-content: space-between;
+  pointer-events: none;
+}
+.layer-ticks i { width: 3px; height: 3px; border-radius: 50%; background: rgba(255, 255, 255, 0.4); }
+.layer-ticks i.on { background: #c7d2fe; }
+.layer-readout { white-space: nowrap; color: #dbe2ee; }
+.layer-count { margin-left: 4px; font-size: var(--fs-micro); opacity: 0.65; }
+
+/* ---- 笔记挖空（{{答案}}）----
+   渲染出来的是真 <button>（可聚焦、Enter 可揭晓），所以这里要把它还原成行内文字，
+   不继承全局按钮的 padding/底色/字重。阅读态是淡底提示；背诵态盖成一块液态玻璃。 */
+.preview .cloze-blank {
+  display: inline;
+  margin: 0;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  transition: var(--tr-interact);
+}
+.preview .cloze-blank:hover {
+  text-decoration: underline dotted var(--border-accent);
+  text-underline-offset: 2px;
+}
+.preview .cloze-blank:focus-visible {
+  outline: 2px solid var(--border-accent);
+  outline-offset: 2px;
+}
+
+/* 背诵：液态玻璃。
+   文字保持透明，所以只剩「玻璃罩住一块内容」的观感，答案读不出来。
+   底色用带饱和度的石板灰蓝而不是近白：浅底上近白玻璃会褪成一块灰渍，
+   深一档的底色让「这里有个洞」一眼可辨，高光与阴影负责玻璃质感。 */
+.preview.md-recite .cloze-blank {
+  background-color: rgba(83, 96, 124, 0.82);
+  background-image:
+    linear-gradient(115deg,
+      rgba(255, 255, 255, 0.34) 0 14%,
+      rgba(255, 255, 255, 0.06) 30% 48%,
+      rgba(255, 255, 255, 0.22) 62% 74%,
+      rgba(255, 255, 255, 0.04) 90%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(15, 23, 42, 0.12));
+  color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 1px 3px rgba(15, 23, 42, 0.22),
+    0 4px 10px -4px rgba(15, 23, 42, 0.35);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  user-select: none;
+}
+/* 悬停：高光走亮一档、阴影抬起来，点下去之前就知道它能揭 */
+.preview.md-recite .cloze-blank:hover {
+  text-decoration: none;
+  background-color: rgba(72, 84, 114, 0.86);
+  background-image:
+    linear-gradient(115deg,
+      rgba(255, 255, 255, 0.46) 0 14%,
+      rgba(255, 255, 255, 0.10) 30% 48%,
+      rgba(255, 255, 255, 0.30) 62% 74%,
+      rgba(255, 255, 255, 0.07) 90%),
+    linear-gradient(180deg, rgba(129, 140, 248, 0.20), rgba(15, 23, 42, 0.14));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.20),
+    0 2px 6px rgba(15, 23, 42, 0.26),
+    0 6px 14px -4px rgba(15, 23, 42, 0.38);
+}
+/* 已揭开：玻璃化开露出答案，再点一下重新盖回去 */
+.preview.md-recite .cloze-blank[data-revealed] {
+  background-color: var(--accent-soft);
+  background-image: none;
+  color: inherit;
+  box-shadow: inset 0 0 0 1px var(--border-accent);
+}
+/* 深色主题：同一套层次换成低明度玻璃，避免白底发灰 */
+[data-theme='dark'] .preview.md-recite .cloze-blank {
+  background-color: rgba(30, 41, 59, 0.55);
+  background-image:
+    linear-gradient(115deg,
+      rgba(255, 255, 255, 0.20) 0 16%,
+      rgba(255, 255, 255, 0.04) 32% 50%,
+      rgba(255, 255, 255, 0.14) 64% 76%,
+      rgba(255, 255, 255, 0.03) 90%),
+    linear-gradient(180deg, rgba(148, 163, 184, 0.10), rgba(15, 23, 42, 0.24));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.40);
+}
+[data-theme='dark'] .preview.md-recite .cloze-blank:hover {
+  background-image:
+    linear-gradient(115deg,
+      rgba(255, 255, 255, 0.30) 0 16%,
+      rgba(255, 255, 255, 0.08) 32% 50%,
+      rgba(255, 255, 255, 0.22) 64% 76%,
+      rgba(255, 255, 255, 0.06) 90%),
+    linear-gradient(180deg, rgba(129, 140, 248, 0.18), rgba(30, 41, 59, 0.55));
+}
+[data-theme='dark'] .preview.md-recite .cloze-blank[data-revealed] {
+  background-color: rgba(129, 140, 248, 0.16);
+  background-image: none;
+}
+
+/* 分屏头部：背诵开关的按下态 */
+.note-split__head .note-split__recite.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ---- 全屏背诵 ----
+   整屏只留正文：分屏宽度下长句折行多，读到一半就要滚；全屏后空格逐条往下揭。 */
+.recite-panel {
+  position: relative;
+  width: min(920px, calc(100vw - 48px));
+  height: calc(100vh - 48px);
+  margin: 24px auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg), var(--glass-shine);
+  overflow: hidden;
+}
+.recite-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-glass);
+}
+.recite-title { font-weight: 600; }
+.recite-meta {
+  color: var(--text-2);
+  font-size: var(--fs-control);
+  font-variant-numeric: tabular-nums;
+}
+.recite-dot { margin: 0 4px; opacity: 0.5; }
+.recite-bar {
+  flex: 1;
+  max-width: 220px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--panel-deep);
+  overflow: hidden;
+}
+.recite-bar__fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+.recite-keys { color: var(--text-2); font-size: var(--fs-micro); }
+.recite-keys kbd { margin: 0 2px; }
+.recite-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 28px 8px 72px;
+}
+.recite-page { max-width: 720px; margin: 0 auto; }
+
+/* 分屏头部下面那条轮次进度 */
+.note-split__recite-bar {
+  padding: 4px 12px 6px;
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+}
+.note-split__dot { margin: 0 6px; opacity: 0.5; }
+
+@media (max-width: 720px) {
+  .recite-panel {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+    margin: 8px auto;
+    border-radius: 12px;
+  }
+  .recite-keys { display: none; }
+}
+
+/* 全局搜索的「其他位置」：题库 / 错题（QuickSearch） */
+.qs-extra { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.qs-extra-head { padding: 2px 16px 6px; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+.qs-item--extra {
+  display: flex; flex-direction: column; gap: 2px;
+  width: 100%; text-align: left;
+  background: transparent; font: inherit; color: inherit;
+}
+.qs-extra-kind { color: var(--accent); font-size: 11px; }

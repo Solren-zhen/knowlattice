@@ -17,6 +17,7 @@
 
 import { MEDBOOK_TOOLS, NOTE_AGENT_TOOLS } from './aiAgent';
 import { LEARNING_TOOLS } from './aiLearning';
+import { createLoopGuard, repeatHint, repeatKey, type LoopGuard } from './loopGuard';
 import {
   defineTool, createToolRegistry,
   type ActionRecord, type ApprovalStatus, type ExecutionStatus, type GovernedToolDef,
@@ -46,6 +47,8 @@ const TOOL_GOVERNANCE: Record<string, Partial<ToolGovernance>> = {
   get_study_summary: { executionDomain: 'learning', cacheable: false },
   get_weak_chapters: { executionDomain: 'learning', cacheable: false },
   get_quiz_progress: { executionDomain: 'learning', cacheable: false },
+  get_mastery: { executionDomain: 'learning', cacheable: false },
+  set_mastery: { toolType: 'write', riskLevel: 'low', executionDomain: 'learning' },
   load_skill: { executionDomain: 'skill', cacheable: false },
 };
 
@@ -125,6 +128,8 @@ export interface RuntimeDeps {
   now?: () => number;
   /** 默认 user_request；规划型调用由调用方显式传 agent_plan */
   triggeredBy?: TriggeredBy;
+  /** 原地打转防护：默认为本运行时私有的一份；测试或面板想共享时再传 */
+  loopGuard?: LoopGuard;
 }
 
 export interface RuntimeStats {
@@ -140,6 +145,7 @@ export interface RuntimeStats {
 export function createAgentRuntime(deps: RuntimeDeps) {
   const now = deps.now ?? (() => Date.now());
   const records: ActionRecord[] = [];
+  const guard = deps.loopGuard ?? createLoopGuard(2);
   let seq = 0;
   let audited = 0;
 
@@ -177,8 +183,15 @@ export function createAgentRuntime(deps: RuntimeDeps) {
       // 参数不是合法 JSON：原执行器会返回同一句错误，这里不留记录（没有可审计的参数）
       return deps.execute(name, argsJson, signal);
     }
+    // 模型可能给 `null` / 数组 / 标量：解析成功不等于形状可用。审计只认普通对象，
+    // 其余按「没有参数」记账——但**原样把 argsJson 交给执行器**，不替它改写模型输入。
+    if (!args || typeof args !== 'object' || Array.isArray(args)) args = {};
     const def = deps.registry.get(name);
     if (!def) return deps.execute(name, argsJson, signal); // 未注册工具：原样透传，不猜语义
+    // 连续同名同参：第 3 次起不再执行，直接把「换了也没用」这句话回填给模型。
+    // 不记审计、不算失败——一次都没发生；记成失败会把「绕圈」误标成工具故障。
+    const repeats = guard.hit(repeatKey(name, args));
+    if (repeats > 2) return repeatHint(name, repeats);
     const rec = push(name, args, def);
     let out: string;
     try {
@@ -251,6 +264,8 @@ export function createAgentRuntime(deps: RuntimeDeps) {
     executeTool,
     stats,
     takeAuditSummary,
+    /** 新的一轮用户提问开始时调用：清空绕圈计数（跨轮重复是正常行为） */
+    resetLoopGuard: () => guard.reset(),
     records: () => [...records],
     registry: deps.registry,
     /** 交模型的 function calling 数组（与 ALL_AGENT_TOOLS 等价，这里从注册表取以保证同源） */

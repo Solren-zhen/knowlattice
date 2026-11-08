@@ -1,0 +1,490 @@
+/* ============================================================ 主区 */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.editor-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px;
+  background: var(--panel-glass-strong);
+  backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--border);
+  min-height: 42px; flex-shrink: 0;
+  box-shadow: var(--glass-shine);
+}
+/* 工具栏控件统一高度。
+   工具栏控件一律定高 28px：不定高的话实际身高由内联内容决定，
+   纯文字 24px / 内联 svg 26px / 内联 <kbd> 31px，同一行会参差。 */
+.editor-toolbar .btn-small,
+.editor-toolbar .toolbar-search { height: 28px; }
+/* 面板头部同理：同一位置在不同界面用的是 .btn-small(24px) 或 .btn-icon(28px)，统一到 28px */
+.panel__head .btn-small { height: 28px; padding-top: 0; padding-bottom: 0; }
+/* 去掉纵向内距，给 19px 高的内联 kbd 留出行盒空间 */
+.editor-toolbar .btn-small { padding-top: 0; padding-bottom: 0; }
+/* 工具栏是单行控件带：不允许内部换行，也不允许被压到内容宽度以下。
+   窄屏要靠「收起次要信息」降级（见下面的 1240 / 1040 媒体查询），
+   而不是让 flex 把控件挤到文字竖排。.note-path 是唯一的弹性项，负责吃剩余宽度。 */
+.editor-toolbar { flex-wrap: nowrap; }
+.editor-toolbar > * { flex-shrink: 0; }
+.editor-toolbar > .note-path { flex-shrink: 1; }
+.editor-toolbar .btn-small,
+.editor-toolbar .btn-icon,
+.editor-toolbar .toolbar-search { white-space: nowrap; }
+.note-path {
+  font-size: var(--fs-body); font-weight: 600; flex: 1;
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+.dirty-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  margin-left: 6px;
+  animation: pulse 2s var(--ease-in-out) infinite;
+}
+@keyframes pulse { 50% { opacity: 0.35; transform: scale(0.85); } }
+.word-count {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-micro); color: var(--muted);
+  user-select: none;
+  padding: 0 var(--sp-1);
+}
+.toolbar-divider {
+  width: 1px; height: 16px;
+  background: var(--border);
+  margin: 0 var(--sp-1);
+}
+
+/* 格式工具栏：给新手的可视化语法按钮 */
+.cm-toolbar {
+  display: flex; align-items: center; gap: 3px;
+  /* 与编辑器工具栏同一策略：控件不压缩，宽度不够时整条折行 */
+  flex-wrap: wrap; row-gap: 3px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-glass);
+  flex-shrink: 0;
+}
+.cm-tool-btn {
+  /* 与全站控件统一：28px 高 + 控件字阶/字重 */
+  min-width: 28px; height: 28px;
+  flex-shrink: 0; white-space: nowrap;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-control); font-weight: var(--fw-control); font-family: inherit;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: var(--tr-interact);
+}
+.cm-tool-btn:hover { border-color: var(--border-accent); color: var(--accent); background: var(--accent-soft); }
+.cm-tool-btn:active { transform: scale(0.92); }
+.cm-tool-btn.on { border-color: var(--border-accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.cm-toolbar-hint { margin-left: auto; font-size: var(--fs-micro); white-space: nowrap; }
+
+/* 简易表格：点格子选行列；选中多行文字可一键转表格 */
+/* 菜单锚在触发按钮上（.cm-table-anchor 是按钮的定位容器），不再按工具栏硬编码 40px——
+   工具栏折行或控件高度变化时都不会错位；z-index 沿用站内下拉层级的 60 */
+.cm-table-anchor { position: relative; display: inline-flex; }
+.cm-table-menu {
+  position: absolute; left: 0; top: calc(100% + 6px); z-index: 60;
+  padding: 8px 10px 7px;
+  background: var(--panel-glass-strong);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg), var(--glass-shine);
+  animation: fade-in var(--t-fast) var(--ease);
+}
+.cm-table-head { min-height: 15px; margin-bottom: 6px; font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums; }
+.cm-table-grid { display: flex; flex-direction: column; gap: 5px; }
+.cm-table-row { display: flex; gap: 5px; }
+.cm-table-cell {
+  /* 20px 格子 + 5px 间距 = 24px 节距：命中 WCAG 2.2 SC 2.5.8 的 24px 目标/间距下限
+     （旧 16px + 3px = 19px 节距，鼠标/触控都偏难点） */
+  width: 20px; height: 20px; padding: 0;
+  border: 1px solid var(--border-strong); border-radius: 4px;
+  background: var(--bg-raised);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.cm-table-cell:hover { background: var(--accent-soft); border-color: var(--border-accent); }
+.cm-table-convert {
+  width: 100%; margin-top: 8px; padding: 6px 8px;
+  border: 1px solid var(--border-accent); border-radius: var(--r-sm);
+  background: none; color: var(--accent);
+  font-size: var(--fs-caption); font-family: inherit; cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.cm-table-convert:hover { background: var(--accent-soft); }
+.cm-table-hint { margin-top: 6px; font-size: var(--fs-micro); white-space: nowrap; }
+
+/* ============================================================ 实时预览（所见即所得） */
+.editor-host .cm-line { position: relative; }
+/* 标题 */
+.editor-host .lp-h1 { font-size: 21px; font-weight: 700; letter-spacing: -0.025em; }
+.editor-host .lp-h2 { font-size: 17px; font-weight: 650; letter-spacing: -0.02em; }
+.editor-host .lp-h3 { font-size: var(--fs-lead); font-weight: 600; letter-spacing: -0.015em; }
+.editor-host .lp-h4 { font-size: 14px; font-weight: 600; }
+/* 项目符号 / 引用 */
+.editor-host .lp-bullet { color: var(--accent); font-weight: 700; }
+.editor-host .lp-quote-mark { color: var(--accent); font-weight: 700; }
+.editor-host .lp-quote-line { border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); padding-left: 10px; }
+.editor-host .lp-quote-text { color: var(--text-2); }
+
+/* ---------- Callout（Obsidian 的 > [!type] 提示块）----------
+   两边共用同一套类型 → 色相映射：每个类型只声明一次 --callout-hue，
+   胶囊/左边条/底色都读它，加类型只需补一个色相分组。
+
+   **类型色相必须写在所有基础规则之后，且带容器前缀。** 基础规则是
+   `.editor-host .lp-callout-chip`（特异性 0,2,0），类型色相若写成单类
+   `.lp-callout-warning`（0,1,0）就会被基础规则的 `--callout-hue: var(--accent)`
+   压掉——warning / danger / tip 一律显示成强调色，类型只剩文字标签。
+   现在两边同为 0,2,0，靠源码顺序取胜（见下面「类型 → 色相」段）。 */
+
+/* 编辑器实时预览：标记行换成胶囊 + 标题，正文行跟着类型上色 */
+.editor-host .lp-callout-chip {
+  --callout-hue: var(--accent);
+  display: inline-block; margin-right: 4px; padding: 1px 8px; border-radius: 999px;
+  font-size: var(--fs-micro); font-weight: 700; letter-spacing: 0.02em;
+  color: var(--callout-hue);
+  background: color-mix(in srgb, var(--callout-hue) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--callout-hue) 35%, transparent);
+}
+.editor-host .lp-callout-head, .editor-host .lp-callout-body {
+  --callout-hue: var(--accent);
+  border-left: 3px solid var(--callout-hue);
+  background: color-mix(in srgb, var(--callout-hue) 7%, transparent);
+}
+.editor-host .lp-callout-head { border-radius: 8px 8px 0 0; }
+.editor-host .lp-callout-head .lp-callout-title { font-weight: 650; padding-left: 8px; }
+
+/* 右侧预览 / 复习卡里的提示块 */
+.markdown-body .mv-callout {
+  --callout-hue: var(--accent);
+  margin: 10px 0; padding: 10px 14px; border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--callout-hue) 30%, transparent);
+  border-left: 3px solid var(--callout-hue);
+  background: color-mix(in srgb, var(--callout-hue) 7%, transparent);
+}
+.markdown-body .mv-callout-title {
+  margin: 0 0 4px; font-weight: 700; color: var(--callout-hue);
+  font-size: var(--fs-control); letter-spacing: 0.01em;
+}
+.markdown-body .mv-callout-body { margin: 0; }
+.markdown-body .mv-callout-body > p:first-child { margin-top: 0; }
+.markdown-body .mv-callout-body > p:last-child { margin-bottom: 0; }
+
+/* 折叠（Obsidian 的 `> [!type]- 标题` / `+`）：标题可点，收起时只留标题行。
+   用 class 切换而不是 <details>：markdown-it 自己收的 </blockquote> 才是
+   这段 HTML 的闭合标签，换成 <details> 会开合不配对。 */
+.markdown-body .mv-callout--fold > .mv-callout-title { cursor: pointer; user-select: none; }
+.markdown-body .mv-callout-chevron {
+  display: inline-block; margin-left: 6px; font-size: 0.85em;
+  transition: transform var(--t-fast) var(--ease);
+}
+.markdown-body .mv-callout--collapsed > .mv-callout-title .mv-callout-chevron { transform: rotate(-90deg); }
+/* 标题是 role=button（可 Tab 到），必须有可见焦点环，否则键盘用户不知道自己停在哪 */
+.markdown-body .mv-callout--fold > .mv-callout-title:focus-visible {
+  outline: 2px solid var(--callout-hue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* 收起时隐藏标题之外的所有子节点：正文可能不止一个段落（空行分隔的 callout
+   会渲染成多个 <p>/<ul>），只藏 .mv-callout-body 会漏出后面几段。 */
+.markdown-body .mv-callout--collapsed > :not(.mv-callout-title) { display: none; }
+
+/* 类型 → 色相。**必须留在上面所有基础规则之后**：两边特异性同为 0,2,0，
+   靠源码顺序压过默认值。漏掉这条顺序，所有类型都会退回强调色。 */
+.editor-host .lp-callout-note, .editor-host .lp-callout-info,
+.editor-host .lp-callout-abstract, .editor-host .lp-callout-summary,
+.editor-host .lp-callout-default, .editor-host .lp-callout-quote,
+.markdown-body .mv-callout-note, .markdown-body .mv-callout-info,
+.markdown-body .mv-callout-abstract, .markdown-body .mv-callout-summary,
+.markdown-body .mv-callout-default, .markdown-body .mv-callout-quote {
+  --callout-hue: var(--accent);
+}
+.editor-host .lp-callout-question, .editor-host .lp-callout-example, .editor-host .lp-callout-todo,
+.markdown-body .mv-callout-question, .markdown-body .mv-callout-example, .markdown-body .mv-callout-todo {
+  --callout-hue: var(--cyan-text, var(--accent));
+}
+.editor-host .lp-callout-tip, .editor-host .lp-callout-success,
+.editor-host .lp-callout-goal, .editor-host .lp-callout-check,
+.markdown-body .mv-callout-tip, .markdown-body .mv-callout-success,
+.markdown-body .mv-callout-goal, .markdown-body .mv-callout-check {
+  --callout-hue: #2f9e6f;
+}
+.editor-host .lp-callout-warning, .editor-host .lp-callout-caution,
+.editor-host .lp-callout-attention, .editor-host .lp-callout-important,
+.markdown-body .mv-callout-warning, .markdown-body .mv-callout-caution,
+.markdown-body .mv-callout-attention, .markdown-body .mv-callout-important {
+  --callout-hue: #c98a11;
+}
+.editor-host .lp-callout-danger, .editor-host .lp-callout-error,
+.editor-host .lp-callout-failure, .editor-host .lp-callout-bug, .editor-host .lp-callout-missing,
+.markdown-body .mv-callout-danger, .markdown-body .mv-callout-error,
+.markdown-body .mv-callout-failure, .markdown-body .mv-callout-bug, .markdown-body .mv-callout-missing {
+  --callout-hue: var(--danger, #d14343);
+}
+/* 行内样式 */
+.editor-host .lp-bold { font-weight: 700; }
+.editor-host .lp-italic { font-style: italic; }
+/* 行内标记的首尾标记符：只占 0 宽，正文里永远看不到 ** / == / ` */
+.editor-host .lp-mark-hidden { display: inline-block; width: 0; height: 0; overflow: hidden; }
+.editor-host .lp-code {
+  background: var(--panel); border-radius: 3px; padding: 0 4px;
+  font-family: var(--font-mono); font-size: 0.92em;
+}
+.editor-host .lp-wiki {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  padding: 1px 7px;
+  cursor: pointer;
+  font-weight: 550;
+  transition: var(--tr-interact);
+}
+.editor-host .lp-wiki:hover {
+  background: rgba(79, 70, 229, 0.16);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.editor-host .lp-key {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-soft);
+  border: 1px solid var(--border-accent);
+  border-radius: 5px;
+  padding: 0 6px;
+  margin-right: 4px;
+}
+/* 标准链接 */
+.editor-host .lp-link {
+  color: var(--accent);
+  border-bottom: 1px solid rgba(79, 70, 229, 0.4);
+  border-radius: 2px; padding: 0 2px;
+  cursor: pointer;
+}
+/* 高亮 ==文字== */
+/* 高亮 ==文字==：与预览里的 <mark> 同一组变量，
+   编辑器里看到的高亮就是渲染后的高亮（旧值 --accent-soft 与底色几乎同色，等于没高亮） */
+.editor-host .lp-highlight {
+  background: var(--hl-bg);
+  color: var(--hl-ink);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+/* 附件缺失的图片嵌入占位 */
+.editor-host .lp-embed-missing {
+  display: inline-block;
+  color: var(--text-2);
+  background: var(--panel);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  margin: 4px 0;
+  font-size: 0.92em;
+}
+/* 围栏代码块 */
+.editor-host .lp-codeblock {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-xs);
+  padding: 12px 16px;
+  margin: 8px 0;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: var(--text);
+}
+/* 图片（实时预览） */
+.editor-host .lp-img {
+  max-width: 100%;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  margin: 6px 0;
+}
+/* 图片缺失（右侧预览）：与实时预览里的 .lp-embed-missing 同一副样子，别让它变成破图图标 */
+.markdown-body .mv-img-missing {
+  display: inline-block;
+  color: var(--text-2);
+  background: var(--panel);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  font-size: 0.9em;
+}
+/* 分割线 */
+.editor-host .lp-hr {
+  height: 1px; margin: 10px 0;
+  background: repeating-linear-gradient(90deg, var(--border-strong) 0 6px, transparent 6px 12px);
+}
+/* 表格（实时预览） */
+.editor-host .lp-table {
+  width: 100%; border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 0.95em;
+}
+.editor-host .lp-table th,
+.editor-host .lp-table td {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+}
+.editor-host .lp-table th {
+  background: var(--panel);
+  font-weight: 600;
+  text-align: left;
+}
+.editor-wrap { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.editor-wrap .editor-host { flex: 1; min-height: 0; }
+/* 正文铺满整栏，只留一条呼吸边距。
+   早先这里按 --read-width(900px) 居中：行长的确恒定，但代价是宽屏下大片留白
+   （1856px 窗口实测正文只占 900px，两侧各空 400px），用户反馈「笔记不能铺满整个界面」。
+   参考：行号随正文一起走，滚动条仍在卡片右边缘，不会被正文压住。 */
+.editor-host {
+  height: 100%; overflow-y: auto;
+  padding-left: var(--read-gutter, 24px);
+  padding-right: var(--read-gutter, 24px);
+}
+.editor-host .cm-editor { height: 100%; font-size: 14px; }
+.editor-host .cm-editor.cm-focused { outline: none; }
+.editor-host .cm-scroller { font-family: var(--font-reading); line-height: 1.85; }
+.editor-host .cm-content { padding: 14px 0 40vh; }
+.editor-host .cm-cursor { border-left-color: var(--accent); border-left-width: 2px; }
+.editor-host ::selection { background: rgba(79, 70, 229, 0.15); }
+.editor-host .cm-gutters {
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+
+/* 选中文字后的右键格式菜单：与功能面板同一套玻璃外壳，位置由视口坐标给定 */
+.cm-ctx-menu {
+  position: fixed;
+  z-index: 88;
+  min-width: 168px;
+  padding: 6px;
+  background: var(--panel-glass-strong);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg), var(--glass-shine);
+  animation: fade-in var(--t-fast) var(--ease);
+}
+.cm-ctx-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  width: 100%; padding: 8px 10px;
+  background: none; border: 1px solid transparent; border-radius: var(--r-sm);
+  color: var(--text); font-size: var(--fs-control); font-family: inherit;
+  text-align: left; cursor: pointer;
+  transition: var(--tr-interact);
+}
+.cm-ctx-item:hover { background: var(--accent-soft); border-color: var(--border-accent); }
+.cm-ctx-item.danger { color: var(--danger-text); }
+.cm-ctx-item.danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+.cm-ctx-item.danger > span { display: inline-flex; align-items: center; gap: 6px; }
+.cm-ctx-item:focus-visible { background: var(--accent-soft); border-color: var(--border-accent); outline: 2px solid var(--border-accent); outline-offset: -2px; }
+.cm-ctx-sep { height: 1px; margin: 5px 4px; background: var(--border); }
+.cm-ctx-item kbd {
+  font-size: var(--fs-micro); color: var(--muted);
+  font-family: var(--font-mono);
+}
+/* 「问 AI」入口：主题色强调，与普通格式项区分开 */
+.cm-ctx-item.cm-ctx-askai {
+  color: var(--accent); font-weight: var(--fw-title);
+}
+.cm-ctx-item.cm-ctx-askai kbd { color: var(--accent); opacity: 0.75; }
+.cm-ctx-item.cm-ctx-askai:hover { background: var(--accent-soft); border-color: var(--border-accent); }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.backlink-item {
+  font-size: var(--fs-body); padding: 8px 10px;
+  border-radius: var(--r-md); cursor: pointer;
+  border: 1px solid transparent;
+  transition: var(--tr-interact);
+}
+.backlink-item:hover {
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+  transform: translateX(2px);
+}
+/* 反链明细：第一行来源名（可带状态徽记），第二行原文摘录。
+   摘录限两行——关联面板本来就窄，长段落会把整张卡撑走。 */
+.backlink-item .backlink-excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--muted);
+}
+.backlink-item .backlink-flag {
+  margin-right: 4px;
+  font-size: var(--fs-micro);
+  color: var(--danger-text);
+}
+.backlink-item span { word-break: break-all; font-size: var(--fs-micro); }
+/* 关联面板：本篇学习状态（复习 / 错题 / 真题） */
+.learning-panel { margin-bottom: var(--sp-2); }
+.lp-status {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  box-shadow: var(--shadow-xs), var(--glass-shine);
+  border-radius: var(--r-md); padding: 10px 12px;
+  margin-bottom: var(--sp-2);
+}
+.lp-status-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: var(--fs-caption);
+}
+.lp-status-row b { font-weight: 600; color: var(--muted); font-size: var(--fs-micro); min-width: 28px; }
+.lp-status-row span { word-break: break-all; }
+.badge-bad { color: var(--danger); }
+.badge-exam { color: var(--accent); }
+
+/* 关联面板首区：本页目录（大纲）。层级靠缩进 + 字重表达，不做卡片套卡片 */
+.outline-panel {
+  margin-bottom: var(--sp-3);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.outline-head {
+  margin-bottom: 6px;
+  color: var(--muted); font-size: var(--fs-micro);
+  font-weight: 650; letter-spacing: 0.05em;
+}
+.outline-list {
+  display: grid; gap: 1px;
+  max-height: 220px; overflow-y: auto;
+  padding: 2px;
+  margin: -2px;
+}
+.outline-item {
+  display: block; width: 100%;
+  padding: 3px 8px;
+  border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-2);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
+  text-align: left; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: var(--tr-interact);
+}
+.outline-item.lv1 { padding-left: 8px; font-weight: 650; color: var(--text); }
+.outline-item.lv2 { padding-left: 20px; }
+.outline-item.lv3 { padding-left: 32px; }
+.outline-item.lv4 { padding-left: 44px; }
+.outline-item:hover { background: var(--accent-soft); color: var(--accent); }
+.outline-item.on {
+  background: var(--accent-soft);
+  color: var(--accent); font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+}

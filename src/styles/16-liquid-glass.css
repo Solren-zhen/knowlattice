@@ -1,0 +1,583 @@
+/* ============================================================
+   Liquid Glass · 液态玻璃材质层（2026-11 视觉升级）
+
+   只做「材质」这一件事：给已有的导航轨、卡片、面板、浮层换成
+   半透明 + 折射边缘 + 镜面高光，不改布局、不改信息层级。
+
+   三条纪律：
+   1. 内容面（编辑正文、表格、表单、PDF 画布）保持实底，
+      玻璃只用于「容器」——浮层、卡片、导航、侧栏。正文背后
+      有纹理在动会直接影响阅读。
+   2. 一块玻璃最多两层模糊：本体 + 边缘环。第三层不会更「玻璃」，
+      只会更慢。
+   3. 降级必须成套：不支持 backdrop-filter、降低透明度、高对比度、
+      打印、触屏/窄屏，五种环境都要有明确退路。
+
+   本文件排在最后，只覆盖材质相关属性；布局与尺寸仍归各自的
+   partial。不要在这里写强制覆盖（有测试守着）。
+   ============================================================ */
+
+:root {
+  /* ---- 材质令牌（亮色：冷白玻璃，压在浅灰蓝纸上） ---- */
+  --lg-tint: rgba(252, 253, 255, 0.38);
+  --lg-tint-strong: rgba(252, 253, 255, 0.52);
+  --lg-frost: rgba(252, 253, 255, 0.62);
+  --lg-frost-hover: rgba(252, 253, 255, 0.52);
+  --lg-edge: rgba(255, 255, 255, 0.72);
+  --lg-edge-cool: rgba(129, 140, 248, 0.26);
+  --lg-rim: rgba(15, 23, 42, 0.08);
+  --lg-blur: blur(22px) saturate(165%) contrast(104%);
+  --lg-blur-soft: blur(12px) saturate(135%) contrast(102%);
+  --lg-sheen: linear-gradient(
+    118deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.12) 28%,
+    rgba(255, 255, 255, 0) 48%,
+    rgba(160, 190, 255, 0.16) 78%,
+    rgba(255, 255, 255, 0.3) 100%
+  );
+  --lg-shadow: 0 24px 60px -18px rgba(15, 23, 42, 0.22), 0 6px 18px -8px rgba(15, 23, 42, 0.1);
+  --lg-shadow-soft: 0 12px 32px -14px rgba(15, 23, 42, 0.16), 0 3px 10px -6px rgba(15, 23, 42, 0.08);
+  --lg-scrim: rgba(15, 23, 42, 0.26);
+  /* 玻璃内顶边的镜面高光：独立成令牌，深色/国风下要么调暗要么撤掉（19-panel-skin 消费） */
+  --lg-inset-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.55);
+  /* 玻璃内部的冷光：不靠降低不透明度，也能读出「这块面是玻璃」 */
+  --lg-tint-image:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.30) 0%, rgba(255, 255, 255, 0) 42%),
+    radial-gradient(120% 90% at 100% 0%, rgba(129, 140, 248, 0.20) 0%, rgba(129, 140, 248, 0) 66%),
+    radial-gradient(100% 80% at 0% 100%, rgba(34, 211, 238, 0.10) 0%, rgba(34, 211, 238, 0) 62%);
+}
+
+[data-theme='dark'] {
+  /* 深色：蓝黑玻璃，保留边缘的冷光；tint 更低，让极光透出来 */
+  --lg-tint: rgba(160, 178, 230, 0.10);
+  --lg-tint-strong: rgba(160, 178, 230, 0.14);
+  --lg-frost: rgba(160, 178, 230, 0.14);
+  --lg-frost-hover: rgba(160, 178, 230, 0.10);
+  --lg-edge: rgba(255, 255, 255, 0.16);
+  --lg-edge-cool: rgba(129, 140, 248, 0.34);
+  --lg-rim: rgba(255, 255, 255, 0.1);
+  --lg-blur: blur(24px) saturate(150%) contrast(106%);
+  --lg-blur-soft: blur(12px) saturate(130%) contrast(103%);
+  --lg-sheen: linear-gradient(
+    118deg,
+    rgba(255, 255, 255, 0.16) 0%,
+    rgba(255, 255, 255, 0.04) 30%,
+    rgba(255, 255, 255, 0) 50%,
+    rgba(129, 140, 248, 0.12) 80%,
+    rgba(255, 255, 255, 0.08) 100%
+  );
+  --lg-shadow: 0 28px 70px -20px rgba(0, 0, 0, 0.8), 0 8px 22px -10px rgba(0, 0, 0, 0.55);
+  --lg-shadow-soft: 0 14px 38px -16px rgba(0, 0, 0, 0.7), 0 4px 12px -6px rgba(0, 0, 0, 0.45);
+  --lg-scrim: rgba(2, 4, 10, 0.58);
+  /* 深色下顶边高光调暗：亮色那道白线在蓝黑玻璃上非常突兀 */
+  --lg-inset-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+  --lg-tint-image:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 42%),
+    radial-gradient(120% 90% at 100% 0%, rgba(129, 140, 248, 0.5) 0%, rgba(129, 140, 248, 0) 68%),
+    radial-gradient(110% 90% at 0% 100%, rgba(34, 211, 238, 0.24) 0%, rgba(34, 211, 238, 0) 64%),
+    radial-gradient(80% 60% at 50% 50%, rgba(99, 102, 241, 0.18) 0%, rgba(99, 102, 241, 0) 70%);
+}
+
+/* ---- 真实折射（高性能模式，html.lg-refract）----
+   backdrop-filter 里引用 SVG 的 feDisplacementMap：玻璃背后的画面被低频起伏
+   推歪几像素，边缘和内部分别出现厚度差异。这是「半透明卡片」和「玻璃」之间
+   最难替代的一层，纯渐变做不到。
+   做法是直接换 --lg-blur 令牌而不是逐个选择器追加 url()：所有玻璃面都从
+   这两个令牌取值，改一处就能全覆盖，也不会漏掉新加的表面。
+   同时把模糊从 22px 降到 14px：模糊太重时，位移 20px 会被抹平（实测看不出）。
+   开关口径：core/liquidGlass.ts 先做 CSS.supports 检测，再跑 2s 帧率哨兵；
+   低帧率、纯触摸或系统要求减少动效时不会加上这个类，CSS 自动退回普通玻璃。 */
+html.lg-refract {
+  --lg-blur: blur(14px) saturate(165%) contrast(104%) url(#lg-refract);
+  --lg-blur-soft: blur(9px) saturate(135%) contrast(102%) url(#lg-refract);
+}
+
+/* ---- 雾面颗粒：玻璃的「触感」 ----
+   纯渐变在数学上太完美，看起来像塑料；真实玻璃表面有一层极细的颗粒。
+   feTurbulence 生成 160×160 无缝噪声，压到 5.5% 铺在 #root 的背景层：
+   #root 的 background 在它所有子元素之下绘制，所以颗粒只影响底子、不碰文字。
+   深色主题另给一张更亮的（8%），否则颗粒在近黑底上完全看不见。 */
+#root {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.14'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 160px 160px;
+}
+[data-theme='dark'] #root {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.18'/%3E%3C/svg%3E");
+}
+
+/* ---- 背景：给玻璃一块可折射的「纸」 ----
+   玻璃的可见度不取决于它有多白，而取决于它和背后那块面差多少。
+   这里在既有极光 + 晶格之上补两团缓慢漂移的冷光；固定定位，
+   不跟内容滚动，否则纹理会在字缝里抖成噪点。
+   色相统一到靛蓝一族、透明度压到 0.06–0.14：四团高饱和彩光是眩晕感的主因。
+   去掉 saturate 滤镜——它在整屏固定层上既贵又把色差又放大了一遍。 */
+body::after {
+  content: '';
+  position: fixed;
+  inset: -12%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(46% 40% at 24% 34%, rgba(99, 102, 241, 0.14) 0%, rgba(99, 102, 241, 0) 72%),
+    radial-gradient(38% 34% at 72% 26%, rgba(59, 130, 246, 0.10) 0%, rgba(59, 130, 246, 0) 74%),
+    radial-gradient(34% 30% at 60% 76%, rgba(34, 211, 238, 0.06) 0%, rgba(34, 211, 238, 0) 76%),
+    radial-gradient(30% 28% at 14% 80%, rgba(99, 102, 241, 0.08) 0%, rgba(99, 102, 241, 0) 76%);
+  animation: lg-drift 72s var(--ease-in-out) infinite alternate;
+}
+[data-theme='dark'] body::after {
+  background:
+    radial-gradient(46% 40% at 24% 34%, rgba(99, 102, 241, 0.16) 0%, rgba(99, 102, 241, 0) 72%),
+    radial-gradient(38% 34% at 72% 26%, rgba(59, 130, 246, 0.11) 0%, rgba(59, 130, 246, 0) 74%),
+    radial-gradient(34% 30% at 60% 76%, rgba(34, 211, 238, 0.07) 0%, rgba(34, 211, 238, 0) 76%),
+    radial-gradient(30% 28% at 14% 80%, rgba(99, 102, 241, 0.09) 0%, rgba(99, 102, 241, 0) 76%);
+}
+@keyframes lg-drift {
+  0% { transform: translate3d(-1%, -0.6%, 0) scale(1); }
+  50% { transform: translate3d(0.8%, 0.9%, 0) scale(1.012); }
+  100% { transform: translate3d(1.2%, -0.8%, 0) scale(1.006); }
+}
+
+/* 工作台底下的「色光」：玻璃要有东西可折射。放在卡片后面而不是
+   body 上，是因为卡片区域经常被白色内容盖住，只有贴近它的色光才透得出来。 */
+.deck::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 22px;
+  pointer-events: none;
+  background:
+    radial-gradient(46% 54% at 16% 40%, rgba(99, 102, 241, 0.20) 0%, rgba(99, 102, 241, 0) 72%),
+    radial-gradient(42% 48% at 78% 28%, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0) 74%),
+    radial-gradient(56% 52% at 52% 58%, rgba(99, 102, 241, 0.17) 0%, rgba(99, 102, 241, 0) 72%),
+    radial-gradient(54% 50% at 58% 92%, rgba(34, 211, 238, 0.10) 0%, rgba(34, 211, 238, 0) 76%);
+  /* 模糊加大、透明度下调：要的是一层底色暖光，不是四块能看出边界的色斑 */
+  filter: blur(16px);
+  opacity: 0.75;
+}
+.deck > .card,
+.deck > .deck-split,
+.deck > .welcome-stage { z-index: 1; }
+
+/* ---- 通用玻璃表面 ----
+   `--lg-surface-*` 是给新组件直接用的出口：
+   <div class="lg-surface"> 或 <div class="lg-frost">。 */
+.lg-surface,
+.rail,
+.card,
+.home-wb__card,
+.panel,
+.rail-branch,
+.rail-flyout,
+.dock-col > .agent-panel,
+.dock-col > .video-note-wrap,
+.ai-panel,
+.mv-tooltip.on,
+.mv-toast {
+  background-color: var(--lg-tint-strong);
+  background-image: var(--lg-tint-image);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  border: 1px solid var(--lg-edge);
+  box-shadow: var(--lg-shadow-soft), inset 0 1px 0 0 rgba(255, 255, 255, 0.55);
+}
+/* 薄霜：卡片与内容容器。比浮层更实，保证长文可读 */
+.lg-frost,
+.card,
+.home-wb__card {
+  background-color: var(--lg-frost);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+}
+
+/* ---- 功能视图容器：把「只美化了首页」这件事补上 ----
+   这些面板原本各自在 03/04/05 里写了实心底色（quiz-panel / recite-panel /
+   sheet-panel / slash-menu / update-notice），点进去就变回一块白板，
+   和首页的玻璃断档。这里统一接管材质，但不动它们的尺寸与布局。 */
+.quiz-panel,
+.convert-panel,
+.draft-panel,
+.recite-panel,
+.sheet-panel,
+.slash-menu,
+.update-notice {
+  background-color: var(--lg-tint-strong);
+  background-image: var(--lg-tint-image);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-shadow-soft), inset 0 0 0 1px var(--lg-edge);
+}
+
+/* 思维导图在 07 里显式关掉了模糊（当时为了性能），这里恢复成玻璃 */
+.mindmap-overlay.panel--full {
+  background-color: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: var(--lg-blur-soft);
+  backdrop-filter: var(--lg-blur-soft);
+}
+
+/* 边缘折射环：用 mask 挖空中间，只留 1px 的渐变边。
+   这一圈是「玻璃」与「半透明白卡」最大的观感分水岭。 */
+.rail::before,
+.card::before,
+.home-wb__card::before,
+.rail-branch::before,
+.rail-flyout::before,
+.dock-col > .agent-panel::before,
+.ai-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--lg-edge) 0%, rgba(255, 255, 255, 0.06) 34%, var(--lg-edge-cool) 72%, var(--lg-edge) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+/* 整屏面板（.panel--full）自己管定位：它在前面的 partial 里是 `position: fixed; inset: 0`。
+   这里若一并改成 relative，fixed 失效、面板缩成 .app 里的一列（宽 0 的舞台），
+   表现就是 3D 解剖 / 知识图谱 / 思维导图「点了没反应 / 打不开」。
+   导航分支浮层（fixed，锚定母按钮屏幕坐标）与字体飞出菜单（absolute，锚定
+   .rail-flyout-wrap）同理必须保留自身定位，否则会被 .app 的 flex 拉伸到整屏高并偏移。 */
+.rail, .card, .home-wb__card, .panel:not(.panel--full), .dock-col > .agent-panel, .ai-panel {
+  position: relative;
+}
+@media (hover: hover) and (pointer: fine) {
+  .card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    background: var(--lg-sheen);
+    opacity: 0;
+    transform: translateX(-18%);
+    transition: opacity var(--t-med) var(--ease), transform 620ms var(--ease);
+    pointer-events: none;
+  }
+  .card:hover::after {
+    opacity: 1;
+    transform: translateX(18%);
+  }
+  .card:hover {
+    background-color: var(--lg-frost-hover);
+    border-color: var(--lg-edge-cool);
+    box-shadow: var(--lg-shadow), inset 0 1px 0 0 rgba(255, 255, 255, 0.65);
+  }
+  /* 卡片内容要压在扫光之上；只认实际的内容容器，不要给所有子元素改定位
+     （会覆盖掉子元素自己的 position:absolute，抓手/角标会跑位）。 */
+  .card > .card-head,
+  .card > .card-body { position: relative; z-index: 1; }
+}
+
+/* ---- 导航轨 ----
+   收起态是「一块立起来的玻璃」；选中项给一块内凹的玻璃胶囊。
+   边缘高光只在上沿，避免四条边一起发亮像塑料。 */
+.rail {
+  background-color: var(--lg-tint);
+  border-right: 1px solid var(--lg-rim);
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.35), 12px 0 40px -24px rgba(15, 23, 42, 0.3);
+}
+[data-theme='dark'] .rail {
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.06), 16px 0 50px -26px rgba(0, 0, 0, 0.8);
+}
+
+.rail-btn.on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  /* 选中态只留淡底：描边与白色顶光曾是「厚重紫块」的来源（用户点名去重），
+     指示条与图标转色已由 06-shell-polish 的 ::before / color 承担 */
+}
+.rail-btn:hover,
+.rail-home:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: var(--lg-inset-highlight);
+}
+
+/* ---- 面板与弹窗 ----
+   遮罩从「近乎不透明的黑」改成带色温的薄雾，让后面的极光还能看见。
+   面板本体用厚玻璃；内容区（表格/表单/正文）仍由各自规则给实底。 */
+.panel-backdrop {
+  background: var(--lg-scrim);
+  -webkit-backdrop-filter: blur(14px) saturate(125%);
+  backdrop-filter: blur(14px) saturate(125%);
+}
+.panel {
+  background-color: var(--lg-frost);
+  border: 1px solid var(--lg-edge);
+  box-shadow: var(--lg-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+/* 整屏面板（课程工坊 / 知识图谱 / PDF / 复习 / 思维导图 / 图片库 / 医学速查）
+   承载 PDF 画布、图谱、长表格，不能像浮层那么透：底色取 --bg 的 88%，
+   只让环境光透上来一点，再补同款模糊与 1px 折射边。
+   选择器必须写成 `.panel.panel--full`（0,2,0）：`.panel` 这条在本文件后面，
+   只写 `.panel--full`（0,1,0）会被它盖掉，全屏面板就退回普通薄霜。 */
+.panel.panel--full {
+  background-color: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: var(--lg-blur-soft);
+  backdrop-filter: var(--lg-blur-soft);
+  box-shadow: inset 0 0 0 1px var(--lg-edge);
+}
+.panel__head {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, transparent 100%);
+  border-bottom-color: var(--lg-rim);
+}
+/* 面板内需要「实底」的内容块不要被玻璃污染 */
+.panel__body .table-wrap,
+.panel__body table,
+.panel__body input,
+.panel__body select,
+.panel__body textarea,
+.panel__body .cm-editor,
+.panel__body .pdf-canvas,
+.panel__body .pdfjs-viewer {
+  background-color: var(--bg-raised);
+}
+
+/* 右侧功能栏 / AI 面板：浮在正文之上，厚度比卡片高一档 */
+.dock-col > .agent-panel,
+.ai-panel {
+  background-color: var(--lg-tint-strong);
+  box-shadow: var(--lg-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.ai-panel .agent-header,
+.agent-panel .agent-header {
+  background: transparent;
+  border-bottom-color: var(--lg-rim);
+}
+
+/* 浮层：导航分支、字体/高亮飞出菜单、提示、toast */
+.rail-branch,
+.rail-flyout {
+  background-color: var(--lg-tint-strong);
+  box-shadow: var(--lg-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+.rail-branch-item:hover,
+.rail-flyout button:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.mv-tooltip.on,
+.mv-toast {
+  background-color: var(--lg-tint-strong);
+  color: var(--text);
+  box-shadow: var(--lg-shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.mv-toast.ok { background: color-mix(in srgb, var(--success) 16%, var(--lg-tint-strong)); }
+.mv-toast.err { background: color-mix(in srgb, var(--danger) 16%, var(--lg-tint-strong)); }
+
+/* 首页：给标题一条极淡的底部光带，让首屏有「被照亮」的中心感，
+   但不改变文字对比度（文字仍是 --text 实色）。 */
+.welcome-stage > .preview.placeholder::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  width: min(520px, 80%);
+  height: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(90deg, transparent, var(--accent-ring), transparent);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* ---- 降级 1：不支持 backdrop-filter ----
+   退成高不透明实底；边缘环与扫光保留（它们不依赖模糊）。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lg-surface,
+  .rail,
+  .card,
+  .home-wb__card,
+  .panel,
+  .rail-branch,
+  .rail-flyout,
+  .dock-col > .agent-panel,
+  .dock-col > .video-note-wrap,
+  .ai-panel,
+  .mv-tooltip.on,
+  .mv-toast {
+    background: var(--bg-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .lg-frost,
+  .card,
+  .home-wb__card { background: var(--bg-raised); }
+  .panel-backdrop { background: var(--lg-scrim); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* ---- 降级 2：降低透明度 / 高对比度 ----
+   两者都退实底 + 明确描边；镜面与扫光整条撤掉。 */
+@media (prefers-reduced-transparency: reduce) {
+  .lg-surface,
+  .rail,
+  .card,
+  .home-wb__card,
+  .panel,
+  .rail-branch,
+  .rail-flyout,
+  .dock-col > .agent-panel,
+  .dock-col > .video-note-wrap,
+  .ai-panel,
+  .mv-tooltip.on,
+  .mv-toast {
+    background: var(--bg-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+  .lg-frost,
+  .card,
+  .home-wb__card { background: var(--bg-raised); }
+  .card::after,
+  .card::before,
+  .home-wb__card::before,
+  .panel::before,
+  .rail::before { display: none; }
+  .panel-backdrop { background: rgba(15, 23, 42, 0.42); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+@media (prefers-contrast: more) {
+  .lg-surface,
+  .rail,
+  .card,
+  .home-wb__card,
+  .panel,
+  .rail-branch,
+  .rail-flyout,
+  .dock-col > .agent-panel,
+  .dock-col > .video-note-wrap,
+  .ai-panel,
+  .mv-tooltip.on,
+  .mv-toast {
+    background: var(--bg-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: 1px solid var(--border-strong);
+    box-shadow: none;
+  }
+  .lg-frost,
+  .card,
+  .home-wb__card { background: var(--bg-raised); }
+  .card::after,
+  .card::before,
+  .home-wb__card::before,
+  .panel::before,
+  .rail::before { display: none; }
+  .panel-backdrop { background: rgba(15, 23, 42, 0.5); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* ---- 降级补齐：功能容器 ----
+   上面四套降级是照「首页那批表面」写的。新接管的 quiz-panel / recite-panel /
+   sheet-panel / slash-menu / update-notice 与整屏面板必须一起退，否则在
+   低透明度、高对比度、打印、老内核里它们仍在半透明，和周围实底打架。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .quiz-panel,
+  .convert-panel,
+  .draft-panel,
+  .recite-panel,
+  .sheet-panel,
+  .slash-menu,
+  .update-notice {
+    background: var(--bg-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .panel.panel--full,
+  .mindmap-overlay.panel--full {
+    background: var(--bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .quiz-panel,
+  .convert-panel,
+  .draft-panel,
+  .recite-panel,
+  .sheet-panel,
+  .slash-menu,
+  .update-notice {
+    background: var(--bg-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .panel.panel--full,
+  .mindmap-overlay.panel--full {
+    background: var(--bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media print {
+  .quiz-panel,
+  .convert-panel,
+  .draft-panel,
+  .recite-panel,
+  .sheet-panel,
+  .slash-menu,
+  .update-notice,
+  .panel.panel--full,
+  .mindmap-overlay.panel--full {
+    background: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+}
+
+/* ---- 降级 3：打印 ----
+   打印稿上任何半透明都会变成灰；全部退白底、去模糊、去阴影、去伪元素。 */
+@media print {
+  .lg-surface,
+  .rail,
+  .card,
+  .home-wb__card,
+  .panel,
+  .rail-branch,
+  .rail-flyout,
+  .dock-col > .agent-panel,
+  .dock-col > .video-note-wrap,
+  .ai-panel,
+  .mv-tooltip.on,
+  .mv-toast {
+    background: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+  .card::before,
+  .card::after,
+  .home-wb__card::before,
+  .panel::before,
+  .rail::before,
+  .welcome-stage > .preview.placeholder::after { display: none; }
+  body::after { display: none; }
+  .panel-backdrop { background: #fff; -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* ---- 降级 4：触屏 / 窄屏 ----
+   模糊按面积计价：手机上一屏十几张卡同时做 22px 模糊会掉帧。
+   薄霜降到 6px，浮层降到 12px；扫光与漂移整条撤掉。 */
+@media (max-width: 900px), (pointer: coarse) {
+  :root {
+    --lg-blur: blur(12px) saturate(145%);
+    --lg-blur-soft: blur(6px) saturate(120%);
+  }
+  .card::after { display: none; }
+  body::after { animation: none; }
+  .rail-branch,
+  .rail-flyout { -webkit-backdrop-filter: var(--lg-blur-soft); backdrop-filter: var(--lg-blur-soft); }
+}
+
+/* ---- 降级 5：减少动效 ----
+   漂移与扫光是纯装饰，直接停。 */
+@media (prefers-reduced-motion: reduce) {
+  body::after,
+  .card::after { animation: none; transition: none; }
+  .card:hover::after { opacity: 0; transform: none; }
+}

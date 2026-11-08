@@ -1,0 +1,49 @@
+/* ============================================================
+   数据自检面板：只读优先，修复动作在头部，问题按检查项分组。
+   颜色只用主题令牌；严重度靠徽标，不给整块染底色。
+   ============================================================ */
+
+.integrity-panel { width: min(760px, 94vw); }
+.integrity-body { padding: var(--sp-4) var(--sp-5) var(--sp-5); display: flex; flex-direction: column; gap: 12px; }
+
+.integrity-summary {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;
+  padding: 12px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg-raised) 72%, transparent);
+}
+.integrity-kpi { display: flex; flex-direction: column; gap: 2px; }
+.integrity-kpi__num { font-size: 24px; font-weight: 700; letter-spacing: -0.03em; color: var(--text); font-variant-numeric: tabular-nums; }
+.integrity-kpi__label { font-size: var(--fs-micro); color: var(--muted); }
+.integrity-note { grid-column: 1 / -1; margin: 2px 0 0; font-size: var(--fs-caption); color: var(--muted); line-height: 1.6; }
+
+.it-check {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg-raised) 66%, transparent);
+}
+.it-check.is-clean { opacity: 0.72; }
+.it-check__head { display: flex; align-items: center; gap: 8px; }
+.it-check__title { margin: 0; font-size: var(--fs-body); font-weight: 600; color: var(--text); }
+.it-check__count { margin-left: auto; font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums; }
+.it-check__hint { margin: 0; font-size: var(--fs-caption); color: var(--muted); line-height: 1.5; }
+
+.it-badge {
+  flex: none; padding: 1px 7px; border-radius: 999px;
+  font-size: var(--fs-micro); font-weight: 650; line-height: 1.6;
+  border: 1px solid transparent;
+}
+.it-badge.it-high { color: var(--danger-text); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 24%, transparent); }
+.it-badge.it-medium { color: var(--amber-text); background: color-mix(in srgb, var(--amber-text) 10%, transparent); border-color: color-mix(in srgb, var(--amber-text) 24%, transparent); }
+.it-badge.it-low { color: var(--cyan-text); background: color-mix(in srgb, var(--cyan-text) 10%, transparent); border-color: color-mix(in srgb, var(--cyan-text) 24%, transparent); }
+
+.it-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; }
+.it-items li { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--panel) 55%, transparent); }
+.it-item__title { font-size: var(--fs-caption); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.it-item__detail { font-size: var(--fs-micro); color: var(--muted); line-height: 1.5; }
+.it-item__more { font-size: var(--fs-micro); color: var(--muted); text-align: center; }
+.integrity-ok { margin: 4px 0 0; padding: 12px; border-radius: var(--r-md); color: var(--success-text); background: color-mix(in srgb, var(--success) 10%, transparent); font-size: var(--fs-caption); }
+
+@media (max-width: 620px) {
+  .integrity-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .integrity-note { grid-column: 1 / -1; }
+}

@@ -1,5 +1,7 @@
 /**
- * 类名守卫：视图里用到的类名，index.css 里必须有对应规则。
+ * 类名守卫：视图里用到的类名，样式文本里必须有对应规则。
+ *
+ * 样式本体已按段落拆到 src/styles/*.css（index.css 只是入口），这里通过 readStyles() 读全量。
  *
  * 这条测试来自一次真实事故：CSS 写的是 `.panel.todo-panel`，而 JSX 里写的是 `todo-page`。
  * 选择器永远匹配不上 → 整页宽度/高度静默失效，界面还是旧的窄浮层；
@@ -11,9 +13,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readStyles } from './cssSource';
 
 const VIEWS = ['src/views/TodoView.tsx', 'src/views/TodoFocus.tsx', 'src/views/TodoStats.tsx'];
-const CSS = 'src/index.css';
 
 /** 故意只做测试钩子的类名（DOM 测试用它取元素），样式由别的类承担 */
 const TEST_HOOKS = new Set(['todo-note-badge']);
@@ -31,7 +33,7 @@ function classesOf(src: string): Set<string> {
 }
 
 describe('类名守卫（视图 ↔ CSS）', () => {
-  const css = readFileSync(resolve(process.cwd(), CSS), 'utf8');
+  const css = readStyles();
 
   for (const file of VIEWS) {
     it(`${file} 用到的 todo-/wb- 类名都有样式`, () => {

@@ -1,5 +1,5 @@
 /**
- * ③ PDF 讲义对照视图：左 PDF 原文（react-pdf-viewer，自带高 DPI/文本层/缩放/适应宽度/翻页），
+ * ③ PDF 讲义对照视图：左 PDF 原文（PDF.js 原生查看器，自带高 DPI/文本层/缩放/适应宽度/翻页），
  *    右智能草稿 + 摘录历史。划选重点 → ✨生成草稿（noteGen 规则引擎）→ 审核 → 入库。
  */
 import {
@@ -8,17 +8,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { useEsc, escThenClose } from './useEsc';
-import { Viewer } from '@react-pdf-viewer/core';
-import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout';
-import '@react-pdf-viewer/core/lib/styles/index.css';
-import '@react-pdf-viewer/default-layout/lib/styles/index.css';
-// worker 地址由 core/pdfLib 统一设置（pdfWorkerSrc 指向 public/pdfjs/ 的稳定路径，
-// 不走 ?url —— 见该文件注释）；这里只需保证打开文档前调用过 loadPdfjs。
 import {
-  detectScannedPdf, loadPdfjs, listPdfBooks, getPdfBook, putPdfBook,
+  detectScannedPdf, listPdfBooks, getPdfBook, putPdfBook,
   removePdfBook, savePdfPage, setCurrentPdfBook, getCurrentPdfName,
-  migrateLegacyPdf, pdfDocumentParams, type PdfBook,
+  migrateLegacyPdf, openPdf, type PdfBook,
 } from '../core/pdfLib';
+import { extractTable, tableToCsv } from '../core/pdfTable';
+import { downloadFile } from '../core/anki';
 import { renderAsync } from 'docx-preview';
 import { sanitizeRenderedHyperlinks } from '../core/domSanitize';
 import { confirmBox, toast } from '../core/feedback';
@@ -26,11 +22,16 @@ import { netErrorHint } from '../core/netError';
 import { generateDraft, draftToMarkdown, type Draft } from '../core/noteGen';
 import { normalizePdfSelection } from '../core/pdfText';
 import {
+  loadExcerpts as loadStoredExcerpts,
+  saveExcerpts as saveStoredExcerpts,
+  type PdfExcerpt as Excerpt,
+} from '../core/pdfExcerpts';
+import {
   beginGeometrySelection, clearHighlights, endGeometrySelection, selectByGeometry,
 } from '../core/pdfCharSelect';
 import { IconPlus, IconClose, IconFile, IconBook } from './icons';
 import { clickable } from './a11y';
-import Loading from './Loading';
+import NativePdfViewer from './NativePdfViewer';
 
 /** 静态资源根：base './' 时构建产物为 './'，GitHub Pages 子路径也能正确加载 */
 const BASE = import.meta.env.BASE_URL;
@@ -50,39 +51,8 @@ interface Props {
   onClose: () => void;
 }
 
-interface Excerpt {
-  id: string;
-  ts: number;
-  text: string;
-  page: number;
-  file: string;
-  title: string;
-  body: string;
-  chapter: string;
-  source: string;
-  savedPath?: string;
-}
-
-const EX_KEY = 'knowlattice-excerpts';
-const loadExcerpts = (): Excerpt[] => {
-  try { return JSON.parse(localStorage.getItem(EX_KEY) ?? '[]') as Excerpt[]; } catch { return []; }
-};
-const saveExcerpts = (list: Excerpt[]) => {
-  try {
-    localStorage.setItem(EX_KEY, JSON.stringify(list));
-  } catch {
-    // Quota exceeded: retry with truncated bodies, then give up quietly.
-    try {
-      const slim = list.map((x) => ({ ...x, body: x.body.slice(0, 2000) }));
-      localStorage.setItem(EX_KEY, JSON.stringify(slim));
-    } catch { /* keep the in-memory list usable */ }
-  }
-};
-
 /** 划选自动成稿开关（默认关：选中后先问要不要成稿，不再自动写入右侧） */
 const AUTODRAFT_KEY = 'knowlattice-pdf-autodraft';
-/** 几何选区开关（默认开：原生划选在绝对定位的文字层上向下拖会把整页框进选区、反复闪烁） */
-const GEOMSEL_KEY = 'knowlattice-pdf-geomsel';
 /** Column mode (default off): middle lines stay inside the drag x band. */
 const COLMODE_KEY = 'knowlattice-pdf-colmode';
 
@@ -92,41 +62,7 @@ interface OpenDoc {
   name: string;
 }
 
-/** PDF 页面渲染器：worker 由 core/pdfLib 统一配置（见 loadPdfjs） */
-function PdfViewer({ doc, plugin, onPageChange }: {
-  doc: OpenDoc;
-  plugin: ReturnType<typeof defaultLayoutPlugin>;
-  onPageChange: (page: number) => void;
-}) {
-  return (
-    <Viewer
-      // 换书必须重挂：<Viewer> 只在挂载时读一次 fileUrl，光改 prop 不会重新加载文档
-      // （切书后画布停在上本、或直接空白，就是这里）。key 由调用方给（书名 + 打开序号）。
-      fileUrl={doc.data}
-      plugins={[plugin]}
-      // <Viewer> 内部自己调 getDocument：中文讲义要的 CMap 不在这里补，文字层就是空的
-      // （页面画得出来、却选不中字 → 摘录功能像是坏了）。
-      transformGetDocumentParams={(params) => ({ ...params, ...pdfDocumentParams() })}
-      // 说明：这里不设 initialPage —— default-layout 下没人消费它（只被 core 收下），
-      // 实测切书后仍停在第 1 页。也没有稳定的跳页途径（jumpToPage 需等插件 store 就绪、
-      // 直接改 .rpv-core__inner-pages 的 scrollTop 会被它的虚拟滚动重置）。
-      // 因此页码只做「记录 + 显示」（书架里能看到读到第几页），暂不自动跳回。
-      renderLoader={(percentages: number) => (
-        <Loading label={`PDF 渲染中… ${Math.round(percentages)}%`} />
-      )}
-      renderError={(error) => (
-        <div className="pdf-error-hint">
-          <p>PDF 渲染失败</p>
-          <p className="muted">{String(error?.message ?? error)}</p>
-        </div>
-      )}
-      onPageChange={(e) => onPageChange(e.currentPage + 1)}
-    />
-  );
-}
-
 export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }: Props) {
-  const defaultLayoutPluginInstance = useRef(defaultLayoutPlugin()).current;
   const [doc, setDoc] = useState<OpenDoc | null>(null);
   const [docType, setDocType] = useState<'pdf' | 'docx' | null>(null);
   const [docBuf, setDocBuf] = useState<ArrayBuffer | null>(null); // docx → 源 buffer（docx-preview 渲染）
@@ -135,15 +71,15 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
   const [selected, setSelected] = useState<{ text: string; x: number; y: number } | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [tab, setTab] = useState<'draft' | 'history'>('draft');
-  const [excerpts, setExcerpts] = useState<Excerpt[]>(loadExcerpts);
+  const [excerpts, setExcerpts] = useState<Excerpt[]>(loadStoredExcerpts);
   const [savedMsg, setSavedMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [tableBusy, setTableBusy] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [targetPath, setTargetPath] = useState('');
   const [saving, setSaving] = useState(false);
   const [currentExcerptIds, setCurrentExcerptIds] = useState<string[]>([]);
   const [autoDraft, setAutoDraft] = useState(() => localStorage.getItem(AUTODRAFT_KEY) === '1');
-  const [geomSel, setGeomSel] = useState(() => localStorage.getItem(GEOMSEL_KEY) !== '0');
   const [colMode, setColMode] = useState(() => localStorage.getItem(COLMODE_KEY) === '1');
   const [scanned, setScanned] = useState(false);
   /** 书架（只含元数据，正文按需单独读） */
@@ -165,6 +101,9 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
   /** rAF throttle for geometry selection during pointermove */
   const rafRef = useRef<number | null>(null);
   const movePointRef = useRef<{ x: number; y: number } | null>(null);
+  /** 几何选区收尾的 window 级兜底（拖出面板/窗口也能结束，不会丢选区） */
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const finishGeometryRef = useRef<(x: number, y: number) => void>(() => {});
   /** savedMsg auto-clear timer (cleared on unmount) */
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -184,6 +123,8 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     const raf = rafRef.current;
     if (typeof raf === 'number') cancelAnimationFrame(raf);
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = null;
   }, []);
 
   // 划选弹层出现时，Enter / Alt+V = 粘贴到右侧，省去鼠标移到弹层
@@ -215,9 +156,6 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         // 用 docx-preview 渲染原始版式（保留段落/表格/图片/分页，可划选）
         setDoc(null); setDocType('docx'); setDocBuf(buf);
       } else {
-        // 必须在渲染 <Viewer> 之前把 pdfjs 的 workerSrc 设好，否则 pdfjs 会按自己的
-        // 默认路径找 worker（那个路径在生产产物里不存在）→ 静默渲染成空白。
-        await loadPdfjs();
         setDoc({ data: new Uint8Array(buf), name });
         setDocType('pdf'); setDocBuf(null);
         setDocSeq((n) => n + 1);
@@ -226,8 +164,6 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         setScanned(false);
         endGeometrySelection();
         clearHighlights(paneRef.current);
-        // 几何选区回到用户偏好（默认开）；扫描件随后强制开启
-        setGeomSel(localStorage.getItem(GEOMSEL_KEY) !== '0');
         if (opts.persist !== false) {
           // 入架并置为当前书；同名文件重选即覆盖（putPdfBook 的 keyPath 就是书名）。
           // 示例 PDF 走 ArrayBuffer 也照此入架，用户不必每次重新载入。
@@ -236,7 +172,6 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         // 采样前几页文字层判断扫描件；必须传副本，pdf.js 会 detach 传入的 ArrayBuffer
         void detectScannedPdf(buf.slice(0)).then((isScanned) => {
           setScanned(isScanned);
-          if (isScanned) setGeomSel(true);
         });
       }
       setFileName(name);
@@ -385,9 +320,9 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
     }
   };
 
-  /** 原生划选（几何选区关闭时）：读取浏览器选区 */
+  /** 原生划选：仅用于 DOCX（PDF 一律走下面的几何选区） */
   const onMouseUp = (e: ReactMouseEvent) => {
-    if (geomSel) return; // 几何选区模式下走下面的 pointer 自绘选区
+    if (docType === 'pdf') return; // PDF 文字层 DOM 顺序不可靠，原生划选会整页跳选
     if ((e.target as HTMLElement).closest('.pdf-popover')) return;
     const sel = window.getSelection();
     const txt = normalizePdfSelection(sel?.toString() ?? '');
@@ -397,19 +332,65 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
   };
 
   // ---- 几何选区：按屏幕几何位置自己算选区，绕开文字层 DOM 顺序 ----
+  /** 把屏幕坐标夹进左侧原文面板：拖出面板后仍以面板边缘为终点 */
+  const clampToPane = (x: number, y: number) => {
+    const pane = paneRef.current;
+    if (!pane) return { x, y };
+    const r = pane.getBoundingClientRect();
+    const right = Math.max(r.left + 1, r.right - 1);
+    const bottom = Math.max(r.top + 1, r.bottom - 1);
+    return {
+      x: Math.min(Math.max(x, r.left + 1), right),
+      y: Math.min(Math.max(y, r.top + 1), bottom),
+    };
+  };
+
+  /** 结束一次几何选区：统一走这里，面板内松开、拖到面板外松开都走同一条收尾路径 */
+  const finishGeometry = (x: number, y: number) => {
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = null;
+    const anchor = anchorRef.current;
+    anchorRef.current = null;
+    const pane = paneRef.current;
+    const raf = rafRef.current;
+    if (typeof raf === 'number') { cancelAnimationFrame(raf); rafRef.current = null; }
+    if (!anchor || !pane) { endGeometrySelection(); return; }
+    const point = clampToPane(x, y);
+    const txt = selectByGeometry(pane, anchor, point, { columnMode: colMode });
+    endGeometrySelection();
+    handleSelection(txt, point.x, point.y);
+  };
+  useEffect(() => { finishGeometryRef.current = finishGeometry; });
+
   const onPanePointerDown = (e: ReactPointerEvent) => {
-    if (!geomSel || e.pointerType !== 'mouse') return;
-    if (!(e.target as HTMLElement).closest('.rpv-core__text-layer')) return;
+    if (e.pointerType !== 'mouse') return;
+    if (!(e.target as HTMLElement).closest('.textLayer')) return;
     clearPdfSelection();
     setSelected(null);
     beginGeometrySelection(paneRef.current);
     anchorRef.current = { x: e.clientX, y: e.clientY };
     // 捕获指针：拖出左栏松开也能收到 pointerup，避免高亮卡在半选状态
     try { paneRef.current?.setPointerCapture(e.pointerId); } catch { /* 指针已失效则忽略 */ }
+    // 再挂一层 window 兜底：指针捕获在部分浏览器/指针设备上会丢，
+    // 拖到面板外松开时用窗口事件收尾并把终点夹回面板内，避免整次划选作废。
+    dragCleanupRef.current?.();
+    const onWinUp = (ev: PointerEvent) => { finishGeometryRef.current(ev.clientX, ev.clientY); };
+    const onWinCancel = () => {
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+      anchorRef.current = null;
+      endGeometrySelection();
+    };
+    window.addEventListener('pointerup', onWinUp, true);
+    window.addEventListener('pointercancel', onWinCancel, true);
+    dragCleanupRef.current = () => {
+      window.removeEventListener('pointerup', onWinUp, true);
+      window.removeEventListener('pointercancel', onWinCancel, true);
+    };
   };
   const onPanePointerMove = (e: ReactPointerEvent) => {
-    if (!geomSel || e.pointerType !== 'mouse' || !anchorRef.current || e.buttons === 0) return;
-    movePointRef.current = { x: e.clientX, y: e.clientY };
+    if (e.pointerType !== 'mouse' || !anchorRef.current || e.buttons === 0) return;
+    movePointRef.current = clampToPane(e.clientX, e.clientY);
     if (typeof rafRef.current === 'number') return;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
@@ -420,16 +401,9 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
     });
   };
   const onPanePointerUp = (e: ReactPointerEvent) => {
-    const anchor = anchorRef.current;
-    anchorRef.current = null;
-    if (!geomSel || !anchor) return;
-    const pane = paneRef.current;
-    if (!pane) return;
-    const raf = rafRef.current;
-    if (typeof raf === 'number') { cancelAnimationFrame(raf); rafRef.current = null; }
-    const txt = selectByGeometry(pane, anchor, { x: e.clientX, y: e.clientY }, { columnMode: colMode });
-    endGeometrySelection();
-    handleSelection(txt, e.clientX, e.clientY);
+    // 窗口级监听通常已先收尾；这里保留同一条路径，兼容未触发窗口事件的场景。
+    if (!anchorRef.current) return;
+    finishGeometry(e.clientX, e.clientY);
   };
 
   /** 粘贴到右侧：选中段落的原文直接追加进右栏草稿正文。
@@ -474,7 +448,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
       const same = (x: Excerpt) => x.text === item.text && x.file === item.file && x.page === item.page;
       const rest = prev.filter((x) => same(x) === false);
       const next = [item, ...rest].slice(0, 50);
-      saveExcerpts(next);
+      saveStoredExcerpts(next);
       return next;
     });
     setSelected(null);
@@ -499,7 +473,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         const next = prev.map((x) =>
           currentExcerptIds.includes(x.id) ? { ...x, savedPath: path } : x
         );
-        saveExcerpts(next);
+        saveStoredExcerpts(next);
         return next;
       });
       if (!targetPath) setTargetPath(path);
@@ -522,7 +496,7 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
   };
   const clearExcerpts = () => {
     setExcerpts([]);
-    saveExcerpts([]);
+    saveStoredExcerpts([]);
   };
 
   const exportExcerpts = () => {
@@ -540,7 +514,45 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
   };
 
   const removeExcerpt = (id: string) => {
-    setExcerpts((prev) => { const next = prev.filter((x) => x.id !== id); saveExcerpts(next); return next; });
+    setExcerpts((prev) => { const next = prev.filter((x) => x.id !== id); saveStoredExcerpts(next); return next; });
+  };
+
+  /** 当前页表格抽取：pdf.js 文本项 → x/y 聚类 → CSV 下载（不识别时明确提示）。 */
+  const extractCurrentTable = async () => {
+    if (!doc || docType !== 'pdf') return;
+    setTableBusy(true);
+    try {
+      const bytes = doc.data.buffer.slice(doc.data.byteOffset, doc.data.byteOffset + doc.data.byteLength) as ArrayBuffer;
+      const pdf = await openPdf(bytes);
+      const pdfPage = await pdf.getPage(page);
+      const tc = await pdfPage.getTextContent();
+      const items = (tc.items as unknown as Array<Record<string, unknown>>)
+        .map((raw) => {
+          const str = String(raw.str ?? '');
+          const tr = raw.transform as number[] | undefined;
+          if (!str.trim() || !tr) return null;
+          return {
+            str,
+            x: tr[4],
+            y: tr[5],
+            w: Number(raw.width ?? 0),
+            h: Number(raw.height ?? Math.abs(tr[3] ?? 0)),
+          };
+        })
+        .filter((item): item is { str: string; x: number; y: number; w: number; h: number } => item !== null);
+      await (pdf as unknown as { destroy?: () => Promise<void> }).destroy?.();
+      const table = extractTable(items);
+      if (!table) {
+        toast('当前页未识别到表格（可能是扫描件或版式不是网格）', 'err');
+        return;
+      }
+      downloadFile(`${doc.name.replace(/\.pdf$/i, '')}-p${page}-table.csv`, tableToCsv(table));
+      toast(`已提取 ${table.header.length ? table.rows.length + 1 : table.rows.length} 行 × ${table.columns} 列`, 'ok');
+    } catch (e) {
+      toast(netErrorHint(e), 'err');
+    } finally {
+      setTableBusy(false);
+    }
   };
 
   return (
@@ -621,22 +633,6 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
           />
           自动粘贴
         </label>
-        <label className="pdf-toggle" title="按视觉位置自绘选区（推荐）：文字层 DOM 顺序与视觉顺序不一致时，原生划选会整页闪烁、跨行跳选；关闭则用浏览器原生划选">
-          <input
-            type="checkbox"
-            checked={geomSel}
-            onChange={(e) => {
-              setGeomSel(e.target.checked);
-              localStorage.setItem(GEOMSEL_KEY, e.target.checked ? '1' : '0');
-              if (!e.target.checked) {
-                // 切回原生划选时清掉残留的自绘高亮
-                clearHighlights(paneRef.current);
-              }
-              setSelected(null);
-            }}
-          />
-          几何选区
-        </label>
         <label className="pdf-toggle" title="2-column PDF: keep each line inside the drag x range">
           <input
             type="checkbox"
@@ -667,18 +663,26 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         >
           载入示例
         </button>
+        <button
+          className="btn-small"
+          disabled={tableBusy || docType !== 'pdf' || !doc}
+          title="把当前页的文本层按行列聚类，导出 CSV"
+          onClick={() => void extractCurrentTable()}
+        >
+          {tableBusy ? '抽表中…' : '提取表格'}
+        </button>
       </div>
 
       <div className="pdf-ocr-tip">
         {scanned
-          ? '扫描件 · 已开「几何选区」· 划选原文，Enter 粘进右栏'
+          ? '扫描件 · 划选原文，Enter 粘进右栏'
           : '划选原文 · Enter 粘进右栏草稿 · 多段累积，一次追加'}
       </div>
 
       <div className="panel__body pdf-split">
-        {/* 左：文档原文（PDF→react-pdf-viewer；Word→mammoth HTML；PPT→每页文本，都支持划选） */}
+        {/* 左：文档原文（PDF→PDF.js；Word→mammoth HTML；PPT→每页文本，都支持划选） */}
         <div
-          className={`pdf-pane${geomSel ? ' pdf-line-mode' : ''}`}
+          className="pdf-pane pdf-line-mode"
           ref={paneRef}
           onPointerDown={onPanePointerDown}
           onPointerMove={onPanePointerMove}
@@ -687,12 +691,11 @@ export default function PdfSplitView({ onSave, onAppend, noteTargets, onClose }:
         >
           {docType === 'pdf' && doc && (
             <div className="pdf-viewer-host">
-              {/* key：换书（或重开同一本）时强制重挂 viewer —— 它只在挂载时读 fileUrl，
-                  否则切书后画布会停在上本书、或干脆空白。序号保证「重开同一本」也会重建。 */}
-              <PdfViewer
+              {/* key：换书（或重开同一本）时强制重挂 viewer，避免沿用上一本文档状态。 */}
+              <NativePdfViewer
                 key={`${doc.name}#${docSeq}`}
-                doc={doc}
-                plugin={defaultLayoutPluginInstance}
+                data={doc.data}
+                name={doc.name}
                 onPageChange={(n) => { setPage(n); endGeometrySelection();
                   clearHighlights(paneRef.current); setSelected(null); }}
               />

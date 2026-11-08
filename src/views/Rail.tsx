@@ -33,12 +33,25 @@ interface Props {
   onHome: () => void;
   /** 每个去处一个处理器；键必须覆盖 RailKey（漏一个会编译失败） */
   actions: Record<RailKey, () => void>;
+  /** 悬停/聚焦时通知外部预取该面板的 chunk（可选：不传就只做导航） */
+  onPrefetch?: (key: RailKey) => void;
 }
 
 /** 浮层与母按钮之间的水平间距（px）；引线宽度跟着它走 */
 const BRANCH_GAP = 8;
 /** 手风琴展开集合的存储键 */
 const RAIL_OPEN_KEY = 'knowlattice-rail-open-groups';
+
+/** 五个母主题的语义色调：只染图标一个维度（hover/激活由 CSS 用同一变量加深）。
+ *  给「五组是同一 Dock 里的五类」提供一眼可辨的锚点。全部取自既有语义令牌，
+ *  不引入新色值——四套主题都随令牌自动适配（国风下 muted/cyan/amber 有各自覆写）。 */
+const GROUP_TINTS: Record<string, string> = {
+  工作区: 'var(--accent)',
+  学习: 'var(--accent)',
+  资料: 'var(--cyan-text)',
+  工具: 'var(--amber-text)',
+  系统: 'var(--muted)',
+};
 
 export default function Rail(p: Props) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -229,6 +242,8 @@ export default function Rail(p: Props) {
         aria-current={p.activeItem === entry.key ? 'page' : undefined}
         aria-pressed={entry.key === 'tree' ? p.treeOpen : undefined}
         data-stay-open={entry.keepDrawer ? 'true' : undefined}
+        onPointerEnter={() => p.onPrefetch?.(entry.key)}
+        onFocus={() => p.onPrefetch?.(entry.key)}
         onClick={() => {
           p.actions[entry.key]();
           setBranch(null);
@@ -284,8 +299,8 @@ export default function Rail(p: Props) {
         </button>
 
         <div className="rail-scroll">
-          <button className="rail-home" aria-label="回到主界面" onClick={p.onHome}>
-            <IconLogo /><span className="rail-label">知识首页</span>
+          <button className="rail-home" aria-label="回到主界面" title="回到主界面" onClick={p.onHome}>
+            <IconLogo /><span className="rail-label">KnowLattice</span>
           </button>
 
           {RAIL_GROUPS.map((group) => {
@@ -297,6 +312,7 @@ export default function Rail(p: Props) {
                 <button
                   ref={(el) => { if (el) groupRefs.current.set(group.title, el); }}
                   className={`rail-btn rail-group-btn${here ? ' on' : ''}${isOpen ? ' is-open' : ''}`}
+                  style={{ ['--rail-tint' as string]: GROUP_TINTS[group.title] }}
                   aria-label={group.title}
                   aria-haspopup={expanded ? undefined : 'true'}
                   aria-expanded={isFolded || isOpen}

@@ -27,6 +27,10 @@ Thumbs.db
 # 浏览器自动化会话产物
 .playwright-mcp/
 
+# Playwright 产物（trace / 截图 / 报告，失败时才有）
+test-results/
+playwright-report/
+
 # 代码分析产物
 .ua/
 
@@ -94,3 +98,13 @@ med-archive/share-only/**
 
 # 本机分析副本与调研抓取物（target.work / .work 里是第三方镜像，不入库、不参与 lint）
 .work/
+
+# 解剖资产管线的中间产物（GLB 可重跑生成，不入库）
+scripts/anatomy-build/out/
+
+# ui-interact 脚本的浏览报告产物（scripts/ui-interact.mjs 写入）
+ui-interact/
+
+# 其他 Agent 工具的本地记忆与一次性演示页（非本项目内容）
+.workbuddy/
+/partridge-bicycle.html

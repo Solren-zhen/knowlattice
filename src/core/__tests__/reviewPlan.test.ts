@@ -8,6 +8,7 @@ import {
   loadPlan,
   savePlan,
   sanitizePlan,
+  importPlan,
 } from '../reviewPlan';
 
 beforeEach(() => {
@@ -31,7 +32,7 @@ describe('reviewPlan · 清洗', () => {
     expect(sanitizePlan({ examDate: 'oops' }).examDate).toBe('');
     expect(sanitizePlan({ dailyCap: -5 }).dailyCap).toBe(0);
     expect(sanitizePlan({ dailyCap: Number.NaN }).dailyCap).toBe(0);
-    expect(sanitizePlan({ dailyCap: 999999 }).dailyCap).toBe(0);
+    expect(sanitizePlan({ dailyCap: 999999, newLimit: 0 }).dailyCap).toBe(0);
     expect(sanitizePlan({ dailyCap: 12.9 }).dailyCap).toBe(12);
   });
 
@@ -42,8 +43,8 @@ describe('reviewPlan · 清洗', () => {
 
 describe('reviewPlan · 存取', () => {
   it('存进去再读出来是同一份（已清洗）', () => {
-    savePlan({ examDate: '2026-10-05', examLabel: '执医笔试', dailyCap: 20 });
-    expect(loadPlan()).toEqual({ examDate: '2026-10-05', examLabel: '执医笔试', dailyCap: 20 });
+    savePlan({ examDate: '2026-10-05', examLabel: '执医笔试', dailyCap: 20, newLimit: 0 });
+    expect(loadPlan()).toEqual({ examDate: '2026-10-05', examLabel: '执医笔试', dailyCap: 20, newLimit: 0 });
   });
 
   it('损坏的存储不影响读取', () => {
@@ -52,7 +53,7 @@ describe('reviewPlan · 存取', () => {
   });
 
   it('默认不限制、未设考试日期', () => {
-    expect(loadPlan()).toEqual({ examDate: '', examLabel: '', dailyCap: 0 });
+    expect(loadPlan()).toEqual({ examDate: '', examLabel: '', dailyCap: 0, newLimit: 0 });
   });
 });
 
@@ -76,28 +77,28 @@ describe('reviewPlan · 每日上限', () => {
   const now = new Date(2026, 9, 5, 9, 0);
 
   it('未设上限时不干预', () => {
-    expect(effectiveDailyCap({ ...DEFAULT_PLAN, dailyCap: 0 }, 500, now)).toBe(0);
+    expect(effectiveDailyCap({ ...DEFAULT_PLAN, dailyCap: 0, newLimit: 0 }, 500, now)).toBe(0);
   });
 
   it('设了上限但没设考试日期：用用户上限', () => {
-    expect(effectiveDailyCap({ examDate: '', examLabel: '', dailyCap: 30 }, 500, now)).toBe(30);
+    expect(effectiveDailyCap({ examDate: '', examLabel: '', dailyCap: 30, newLimit: 0 }, 500, now)).toBe(30);
   });
 
   it('考试当天或已过：不再收紧（临考不该拦人）', () => {
-    expect(effectiveDailyCap({ examDate: '2026-10-05', examLabel: '', dailyCap: 30 }, 500, now)).toBe(30);
-    expect(effectiveDailyCap({ examDate: '2026-09-01', examLabel: '', dailyCap: 30 }, 500, now)).toBe(30);
+    expect(effectiveDailyCap({ examDate: '2026-10-05', examLabel: '', dailyCap: 30, newLimit: 0 }, 500, now)).toBe(30);
+    expect(effectiveDailyCap({ examDate: '2026-09-01', examLabel: '', dailyCap: 30, newLimit: 0 }, 500, now)).toBe(30);
   });
 
   it('按剩余天数收紧（只收不放）', () => {
     // 10 天、500 张待清 → 日均 50；用户上限 30 → 取较小的 30
-    expect(effectiveDailyCap({ examDate: '2026-10-15', examLabel: '', dailyCap: 30 }, 500, now)).toBe(30);
+    expect(effectiveDailyCap({ examDate: '2026-10-15', examLabel: '', dailyCap: 30, newLimit: 0 }, 500, now)).toBe(30);
     // 10 天、50 张待清 → 日均 5；用户上限 30 → 收到 5
-    expect(effectiveDailyCap({ examDate: '2026-10-15', examLabel: '', dailyCap: 30 }, 50, now)).toBe(5);
+    expect(effectiveDailyCap({ examDate: '2026-10-15', examLabel: '', dailyCap: 30, newLimit: 0 }, 50, now)).toBe(5);
   });
 
   it('至少保留 1 张，避免把队列锁死', () => {
     // 9 天、1 张待清 → ceil(1/9)=1；不会变成 0（0 在调用方语义是"不限制"）
-    expect(effectiveDailyCap({ examDate: '2026-10-14', examLabel: '', dailyCap: 30 }, 1, now)).toBe(1);
+    expect(effectiveDailyCap({ examDate: '2026-10-14', examLabel: '', dailyCap: 30, newLimit: 0 }, 1, now)).toBe(1);
   });
 });
 
@@ -116,5 +117,19 @@ describe('reviewPlan · 队列截断', () => {
 
   it('超上限时截断', () => {
     expect(applyDailyCap([1, 2, 3, 4], 2)).toEqual([1, 2]);
+  });
+});
+
+describe('每日新学上限字段', () => {
+  it('与 dailyCap 同口径清洗', () => {
+    expect(sanitizePlan({ newLimit: -1 }).newLimit).toBe(0);
+    expect(sanitizePlan({ newLimit: 15.7 }).newLimit).toBe(15);
+    expect(sanitizePlan({ newLimit: 999999 }).newLimit).toBe(0);
+    expect(sanitizePlan({ newLimit: Number.NaN }).newLimit).toBe(0);
+  });
+
+  it('只设 newLimit 也算有效计划（不会被 importPlan 当成空）', () => {
+    expect(importPlan({ newLimit: 20 })).toBe(true);
+    expect(loadPlan().newLimit).toBe(20);
   });
 });

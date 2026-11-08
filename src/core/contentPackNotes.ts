@@ -10,6 +10,7 @@
  * 同一份文字在库里存两份，改一处另一处就是旧的了）。
  */
 import { CONTENT_PACK_FORMAT } from './contentPack';
+import { asRecord } from './record';
 
 export interface PackPage {
   paper: string;
@@ -41,10 +42,6 @@ export interface ItemBrief {
 }
 
 export const PAGE_INDEX_KEY = 'page2item.json';
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-}
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v : '';

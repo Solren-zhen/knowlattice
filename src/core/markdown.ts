@@ -11,6 +11,7 @@
 
 import { isPathwayLang, renderPathwaySvg } from './pathway';
 import { stripPageAnchors } from './pageAnchor';
+import { sanitizeRenderedHtml } from './domSanitize';
 import type { StateInline } from 'markdown-it';
 
 type MdInstance = InstanceType<(typeof import('markdown-it'))['default']>;
@@ -29,6 +30,34 @@ export function hasMathSyntax(src: string): boolean {
     /\\\[[\s\S]+?\\\]/.test(src) ||
     /(^|[^\\$])\$[^$\n]+\$/.test(src)
   );
+}
+
+/**
+ * 挖空 `{{答案}}`：渲染成一个可揭的按钮，背诵模式下由 CSS 盖住。
+ *
+ * 与 `==高亮==` 同构（同一层 inline 规则，不碰源码、不进复习调度）：编辑态永远看到的是
+ * `{{答案}}` 原文，只有渲染结果会变成可点击的块。`{{}}` 空挖空、跨行、内含 `{` 都不算，
+ * 与 core/cloze.ts 的正则口径保持一致，避免"编辑器认、预览不认"。
+ */
+function clozeRule(state: StateInline, silent: boolean): boolean {
+  const start = state.pos;
+  if (state.src.charCodeAt(start) !== 0x7b || state.src.charCodeAt(start + 1) !== 0x7b) return false;
+  if (start > 0 && state.src.charCodeAt(start - 1) === 0x7b) return false;
+  let end = start + 2;
+  while (end < state.posMax) {
+    const code = state.src.charCodeAt(end);
+    if (code === 0x0a || code === 0x7b) return false;
+    if (code === 0x7d) break;
+    end += 1;
+  }
+  if (end >= state.posMax || end === start + 2) return false;
+  if (state.src.charCodeAt(end + 1) !== 0x7d) return false;
+  if (silent) return true;
+  const token = state.push('cloze', '', 0);
+  token.content = state.src.slice(start + 2, end);
+  token.markup = '{{}}';
+  state.pos = end + 2;
+  return true;
 }
 
 async function build(withMath: boolean): Promise<MdInstance> {
@@ -55,6 +84,9 @@ async function build(withMath: boolean): Promise<MdInstance> {
     state.pos = end + 2;
     return true;
   });
+  md.inline.ruler.before('emphasis', 'cloze', clozeRule);
+  md.renderer.rules.cloze = (tokens, idx) =>
+    '<button type="button" class="cloze-blank">' + md.utils.escapeHtml(tokens[idx].content) + '</button>';
   if (withMath) {
     const [pluginMod] = await Promise.all([
       import('@vscode/markdown-it-katex'),
@@ -86,5 +118,5 @@ function instance(withMath: boolean): Promise<MdInstance> {
 export async function renderMarkdown(src: string): Promise<string> {
   // 页码锚点是存储层坐标，html:false 下会原样显示成文字，渲染前必须剥离
   const clean = stripPageAnchors(src);
-  return (await instance(hasMathSyntax(clean))).render(clean);
+  return sanitizeRenderedHtml((await instance(hasMathSyntax(clean))).render(clean));
 }

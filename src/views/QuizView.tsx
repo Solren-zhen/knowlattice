@@ -2,7 +2,7 @@
  * 题库练习：导入 JSON 题库（文件或粘贴）→ 选库组卷 → 逐题作答 → 结果页错题回顾。
  * 答错且题目关联笔记（note 字段可解析）时自动记入错题本。
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DialogSurface from './DialogSurface';
 import { useEsc } from './useEsc';
 import {
@@ -13,6 +13,7 @@ import {
 } from '../core/qbank';
 import { analyzePick, pickHint } from '../core/answerReview';
 import { questionNotePath, questionToMarkdown } from '../core/qbankNote';
+import type { ImageEntry } from '../core/imageLib';
 import { parseQbankFile, parseQbankJsonText } from '../core/qbankParse';
 import { mergeQuestions, mergeSummary } from '../core/qbankMerge';
 import {
@@ -22,6 +23,8 @@ import {
 import { bankProgress, chapterMastery, consumeSaveFailure, initializeStats, loadStats, recordAnswer, statOf } from '../core/qbankStats';
 import { initializeStars, isStarred, loadStars, starCount, toggleStar, type StarMap } from '../core/qbankStarred';
 import { QUESTION_FIELD_LABELS, searchBanks } from '../core/qbankSearch';
+import { generateCardsFromMistakes, getGeneratableCount } from '../core/qbankCards';
+import { addGeneratedCards, loadGeneratedCards } from '../core/generatedCards';
 import { segment } from '../core/searchHit';
 import { buildTagContext, difficultyBand, DIFFICULTY_LABELS, Q_TAG_LABELS, tagsOf, type DifficultyBand, type QStatusTag } from '../core/qbankTags';
 import { CONFIDENCE_LABELS, CONFIDENCE_VALUES, recordCalibration, type Confidence } from '../core/qbankCalib';
@@ -31,13 +34,16 @@ import {
 } from '../core/reviewGate';
 import { buildChapterIndex, questionNoteLabel, resolveQuestionNote } from '../core/qbankNotes';
 import { getMistake, lapseMistake, recordMistake, stageOf } from '../core/mistakes';
+import ImagePickerSheet from './ImagePickerSheet';
 import { clearCursor, loadCursor, resumeQuestions, saveCursor, type QuizCursor } from '../core/quizCursor';
 import { isKnowledgeDone, markKnowledgeDone, pickTodayKnowledge, type KnowledgePick } from '../core/dailyKnowledge';
 import { toast, confirmBox } from '../core/feedback';
 import { markStudy } from '../core/stats';
+import { recordQuiz } from '../core/studyLog';
 import { bankToAnki, downloadFile } from '../core/anki';
-import { IconRestore, IconClose, IconHelp, IconPencil } from './icons';
-import type { QuoteSelection } from './AiAgentPanel';
+import { IconRestore, IconClose, IconHelp, IconPencil, IconBook } from './icons';
+import type { QuoteSelection } from './agentChat';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   docs: Map<string, string>;
@@ -60,10 +66,16 @@ interface Props {
   refreshToken?: number;
   /** 把当前这道题写成一篇笔记（含解析、我的选择、批注、知识点）。不传则不显示入口 */
   onSaveNote?: (path: string, markdown: string) => void;
+  /** 边刷边改：把侧栏里的笔记正文写回 vault。不传则不显示「笔记」抽屉 */
+  onUpdateNote?: (path: string, content: string) => Promise<void> | void;
+  /** 边刷边记的图片来源：vault 附件图片条目；与 resolveAsset 同时存在时才显示「插图」入口 */
+  onImageEntries?: ImageEntry[];
   /** 从首页「继续刷题」进来：题库就绪后自动接上上次没练完的那一轮（见 core/quizCursor） */
   autoResume?: boolean;
   /** 自动续做已处理（无论接上没有）——调用方清掉标记，免得下次打开题库又自动续 */
   onAutoResumeDone?: () => void;
+  /** 从全局搜索跳进来时带入的关键词：打开即显示跨库搜题结果 */
+  initialSearch?: string;
 }
 
 /** rules 为 null = 不组题，整库洗牌（「全部」入口）；非 null 时「再练一轮」沿用同一套规则 */
@@ -137,7 +149,7 @@ function readZoom(): number {
   }
 }
 
-export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAskAi, onOpenExam, resolveAsset, onUnifiedImport, refreshToken, onSaveNote, autoResume, onAutoResumeDone }: Props) {
+export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAskAi, onOpenExam, resolveAsset, onUnifiedImport, refreshToken, onSaveNote, onUpdateNote, onImageEntries, autoResume, onAutoResumeDone, initialSearch }: Props) {
   const [banks, setBanks] = useState<QuizBank[]>([]);
   /** 题库行操作区：默认折叠成行内竖向面板，用户自己决定展开哪些（偏好记在 localStorage） */
   const [openBankActions, setOpenBankActions] = useState<Set<string>>(new Set());
@@ -200,10 +212,22 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
   const [composing, setComposing] = useState<QuizBank | null>(null);
   const [rules, setRules] = useState<ComposeRules>(DEFAULT_RULES);
   const [stats, setStats] = useState(loadStats);
-  /** 收藏/重点题（与逐题统计分开，见 core/qbankStarred）：组题范围与练习中收藏按钮都用它 */
+  /** 已生成错题卡的卡片键：生成后更新它，让「可生成数量」立刻减少 */
+  const [generatedKeys, setGeneratedKeys] = useState<Set<string>>(
+    () => new Set(loadGeneratedCards().map((c) => c.key)),
+  );
+  const questionIndex = useMemo(() => {
+    const index = new Map<string, QuizQuestion>();
+    for (const bank of banks) for (const q of bank.questions) index.set(q.id, q);
+    return index;
+  }, [banks]);
+  const generatable = useMemo(
+    () => getGeneratableCount(stats, generatedKeys),
+    [stats, generatedKeys],
+  );  /** 收藏/重点题（与逐题统计分开，见 core/qbankStarred）：组题范围与练习中收藏按钮都用它 */
   const [stars, setStars] = useState<StarMap>(loadStars);
   /** 搜题关键词（跨题库）；非空时题库列表区改显搜索结果 */
-  const [searchQ, setSearchQ] = useState('');
+  const [searchQ, setSearchQ] = useState(initialSearch ?? '');
   /** 背题模式：不判分、直接摊开答案背一遍（进入即按「背题」渲染，见下方背题分支） */
   const [beatMode, setBeatMode] = useState(false);
   /** 断点续做：上次没练完的那一轮（见 core/quizCursor；过期/失效的游标读出来就是 null） */
@@ -219,6 +243,16 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
   };
   /** 今日知识点「看过了」的标记键（当天+库+章节）；null = 还没点 */
   const [knowDoneKey, setKnowDoneKey] = useState<string | null>(null);
+  /** 边刷边改：右侧笔记抽屉。notePath = 正在改的笔记；noteDraft 是本地草稿，停手 900ms 落一次盘 */
+  const [notePaneOpen, setNotePaneOpen] = useState(false);
+  const [notePath, setNotePath] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteDirty, setNoteDirty] = useState(false);
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteSavedAt, setNoteSavedAt] = useState<number | null>(null);
+  /** 边刷边记里的「插图」：内嵌图片选择器开关。选图直接追加进笔记草稿（无光标概念就落文末） */
+  const [notePickerOpen, setNotePickerOpen] = useState(false);
+  const noteSnapshotRef = useRef<{ path: string | null; draft: string; dirty: boolean }>({ path: null, draft: '', dirty: false });
 
   /**
    * 首页「继续刷题」的两个 prop 走 ref：父组件内联箭头函数每次都换引用，直接进 effect 依赖
@@ -325,6 +359,169 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     resolveQuestionNote(question, resolveLink, chapterIndex, (p) => docs.has(p));
 
   const q = session?.questions[idx];
+
+  /* ---------- 边刷边改：右侧笔记抽屉 ---------- */
+  const noteChoices = useMemo(
+    () => [...docs.keys()].filter((p) => p.endsWith('.md')).sort((a, b) => a.localeCompare(b, 'zh')),
+    [docs],
+  );
+  const suggestedNote = q ? notePathOf(q) : null;
+  const onUpdateNoteRef = useRef(onUpdateNote);
+  onUpdateNoteRef.current = onUpdateNote;
+
+  const saveNoteNow = useCallback(async (): Promise<boolean> => {
+    const save = onUpdateNoteRef.current;
+    if (!save || !notePath || !noteDirty) return true;
+    const savingDraft = noteDraft;
+    const savingPath = notePath;
+    setNoteSaving(true);
+    try {
+      await save(savingPath, savingDraft);
+      // 保存期间用户又改了字：不要把新的 dirty 清掉，下一轮自动保存继续
+      if (noteSnapshotRef.current.path === savingPath && noteSnapshotRef.current.draft === savingDraft) {
+        setNoteDirty(false);
+        setNoteSavedAt(Date.now());
+      }
+      return true;
+    } catch (e) {
+      toast(`笔记保存失败：${(e as Error).message}`, 'err');
+      return false;
+    } finally {
+      setNoteSaving(false);
+    }
+  }, [notePath, noteDraft, noteDirty]);
+
+  const loadNote = useCallback((path: string) => {
+    setNotePath(path);
+    setNoteDraft(docs.get(path) ?? '');
+    setNoteDirty(false);
+    setNoteSavedAt(null);
+  }, [docs]);
+
+  const switchNote = async (path: string) => {
+    if (!path || path === notePath) return;
+    const ok = await saveNoteNow();
+    if (!ok) return;
+    loadNote(path);
+  };
+
+  const openNotePane = () => {
+    if (!notePath) {
+      const pick = suggestedNote ?? noteChoices[0] ?? null;
+      if (pick) loadNote(pick);
+    }
+    setNotePaneOpen(true);
+  };
+
+  const closeNotePane = () => {
+    void saveNoteNow();
+    setNotePaneOpen(false);
+  };
+
+  useEffect(() => {
+    noteSnapshotRef.current = { path: notePath, draft: noteDraft, dirty: noteDirty };
+  }, [notePath, noteDraft, noteDirty]);
+
+  // 停手约 1 秒自动落盘；切题不会中断这个计时（notePath / 草稿不变）
+  useEffect(() => {
+    if (!noteDirty || !notePath) return;
+    const timer = window.setTimeout(() => { void saveNoteNow(); }, 900);
+    return () => window.clearTimeout(timer);
+  }, [noteDirty, notePath, noteDraft, saveNoteNow]);
+
+  // 关闭题库（卸载）时把最后不到 1 秒的改动补写一次；只跑在卸载，不跟父组件每次渲染
+  useEffect(() => () => {
+    const s = noteSnapshotRef.current;
+    if (s.dirty && s.path) void onUpdateNoteRef.current?.(s.path, s.draft);
+  }, []);
+
+  const noteToggle = onUpdateNote ? (
+    <button
+      type="button"
+      className={`btn-small quiz-note-toggle${notePaneOpen ? ' is-on' : ''}`}
+      aria-expanded={notePaneOpen}
+      aria-controls="quiz-note-pane"
+      title="边刷题边改笔记：在右侧打开笔记编辑区，保存走当前知识库"
+      onClick={() => { if (notePaneOpen) closeNotePane(); else openNotePane(); }}
+    >
+      <IconPencil size={14} /> {notePaneOpen ? '收起笔记' : '笔记'}
+    </button>
+  ) : null;
+
+  const notePaneNode = notePaneOpen ? (
+    <aside className="quiz-note-pane" id="quiz-note-pane" aria-label="边刷边记">
+      <div className="quiz-note-head">
+        <span className="quiz-note-title"><IconPencil size={14} /> 边刷边记</span>
+        <select
+          className="quiz-note-select"
+          aria-label="选择要编辑的笔记"
+          value={notePath ?? ''}
+          onChange={(e) => { void switchNote(e.target.value); }}
+        >
+          <option value="" disabled={Boolean(notePath)}>选择一篇笔记…</option>
+          {notePath && !docs.has(notePath) && <option value={notePath}>（笔记已删除）</option>}
+          {noteChoices.map((p) => (
+            <option key={p} value={p}>{p.replace(/\.md$/, '')}</option>
+          ))}
+        </select>
+        <button className="btn-icon" onClick={closeNotePane} aria-label="收起笔记" title="收起笔记">
+          <IconClose size={14} />
+        </button>
+      </div>
+      {notePath ? (
+        <>
+          <textarea
+            className="quiz-note-text"
+            data-note-input
+            value={noteDraft}
+            onChange={(e) => { setNoteDraft(e.target.value); setNoteDirty(true); }}
+            placeholder="在这里改笔记，停手约 1 秒自动保存…"
+            spellCheck={false}
+            aria-label={`编辑笔记：${notePath}`}
+          />
+          <div className="quiz-note-foot">
+            <span className={`quiz-note-status${noteDirty ? ' is-dirty' : ''}`} role="status">
+              {noteSaving ? '保存中…' : noteDirty ? '未保存' : noteSavedAt ? '已保存' : '自动保存'}
+            </span>
+            <span className="muted">{noteDraft.replace(/\s/g, '').length} 字</span>
+            {suggestedNote && suggestedNote !== notePath && (
+              <button className="quiz-note-jump" onClick={() => { void switchNote(suggestedNote); }} title="切换到本题关联的笔记">
+                本题笔记
+              </button>
+            )}
+            <button
+              className="btn-small"
+              title="从图片库选一张图插入笔记"
+              onClick={() => setNotePickerOpen(true)}
+            >
+              插图
+            </button>
+            <button className="btn-small" disabled={!noteDirty || noteSaving} onClick={() => { void saveNoteNow(); }}>
+              保存
+            </button>
+          </div>
+          {notePickerOpen && onImageEntries && resolveAsset && (
+            <ImagePickerSheet
+              entries={onImageEntries}
+              resolveAsset={resolveAsset}
+              onPick={(md) => {
+                // 没有光标位置概念（textarea 不暴露选区锚点到渲染层），追加到文末并保证前后空行分隔
+                setNoteDraft((d) => (d.endsWith('\n\n') || d === '' ? `${d}${md}\n` : `${d}\n\n${md}\n`));
+                setNoteDirty(true);
+              }}
+              onClose={() => setNotePickerOpen(false)}
+            />
+          )}
+        </>
+      ) : (
+        <div className="quiz-note-empty">
+          <IconBook size={26} />
+          <p>先在上方选一篇笔记，再开始边刷边改。</p>
+          {noteChoices.length === 0 && <p className="muted">知识库里还没有笔记。</p>}
+        </div>
+      )}
+    </aside>
+  ) : null;
 
   /**
    * Exit policy: a practice run in progress must not be lost to a stray click.
@@ -580,7 +777,9 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     // 报过把握度才记样本：校准要的是「自信 vs 实际」的对照，没报的作答没有对照价值
     if (confidence !== null) recordCalibration(confidence, correct);
     setResults((prev) => prev.map((r, i) => (i === idx ? correct : r)));
+    const wasWrong = (statOf(stats, session!.bankName, q.id)?.wrong ?? 0) > 0;
     await recordAnswer(session!.bankName, q.id, correct);
+    recordQuiz(correct, wasWrong);
     setStats(loadStats());
     // 持久化失败时记录只在内存里活着，本轮结束就没了——必须告知用户
     if (consumeSaveFailure()) {
@@ -594,10 +793,21 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     }
   };
 
+  /** 错题 → 复习卡：答错 3 次以上且没生成过的题，批量转成 FSRS 卡片（见 core/qbankCards）。 */
+  const generateMistakeCards = () => {
+    const existing = new Set(loadGeneratedCards().map((c) => c.key));
+    const cards = generateCardsFromMistakes(stats, questionIndex, existing);
+    const added = addGeneratedCards(cards.map((c) => ({ ...c, source: 'mistake' as const, createdAt: Date.now() })));
+    setGeneratedKeys(new Set(loadGeneratedCards().map((c) => c.key)));
+    toast(
+      added > 0 ? `已生成 ${added} 张错题复习卡，去「复习」即可看到` : '没有新的可生成错题卡',
+      added > 0 ? 'ok' : 'info',
+    );
+  };
+
   const next = () => {
     setPicked([]);
-    setRevealed(false);
-    setExplIdx(0);
+    setRevealed(false);    setExplIdx(0);
     setConfidence(null);
     setEditing(null);
     setIdx((i) => i + 1);
@@ -643,6 +853,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     if (!q || !session) return;
     markStudy();
     await recordAnswer(session.bankName, q.id, correct);
+    recordQuiz(correct);
     setStats(loadStats());
     next();
   };
@@ -695,14 +906,14 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
   // ---------- 渲染 ----------
   if (!ready || loadError) {
     return (
-      <div className="panel-backdrop quiz-overlay">
+      <PanelOverlay tone="quiz">
         <DialogSurface className="panel quiz-panel" label={loadError ? '题库加载失败' : '题库正在加载'}>
           <div className="panel__body quiz-body">
             <p role="status">{loadError ?? '\u6b63\u5728\u52a0\u8f7d\u9898\u5e93...'}</p>
             {loadError && <button className="btn-small" onClick={() => setReloadKey((key) => key + 1)}>{'\u91cd\u8bd5'}</button>}
           </div>
         </DialogSurface>
-      </div>
+      </PanelOverlay>
     );
   }
 
@@ -717,8 +928,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     const stemImg = q.image ? resolveAsset?.(q.image) : undefined;
     const notePath = notePathOf(q);
     return (
-      <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
-        <DialogSurface className="panel quiz-panel" style={{ zoom }} label={`背题模式，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
+      <PanelOverlay tone="quiz" onClose={requestClose}>
+        <DialogSurface className={`panel quiz-panel${notePaneOpen ? ' quiz-panel--note-open' : ''}`} style={{ zoom }} label={`背题模式，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">背题 · {session.bankName} · 第 {idx + 1} / {session.questions.length} 题</span>
             <button
@@ -732,10 +943,13 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
             <button className="btn-icon" aria-label="缩小题目界面" title="缩小" onClick={() => nudgeZoom(-0.1)}>A−</button>
             <button className="btn-icon" aria-label="放大题目界面" title="放大" onClick={() => nudgeZoom(0.1)}>A+</button>
             <span className="muted">{(zoom * 100).toFixed(0)}%</span>
+            {noteToggle}
             <button className="btn-small" onClick={() => setBeatMode(false)}>退出背题</button>
             <button className="btn-icon" onClick={requestClose} aria-label="关闭"><IconClose /></button>
           </div>
           <div className="quiz-progress"><i style={{ width: `${((idx + 1) / session.questions.length) * 100}%` }} /></div>
+          <div className="quiz-workbench">
+            <div className="quiz-main">
           {/* key={idx}：换题时重挂载，让 .quiz-body 的入场动画重播 —— 否则题干/选项/解析
               会在同一帧整体换掉（瞬移）。用 animation 而非 transition 也是因为这个原因。 */}
           <div className="panel__body quiz-body" key={idx}>
@@ -807,8 +1021,11 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
               <button className="btn-primary" onClick={exitToList}>结束背题</button>
             )}
           </div>
+            </div>
+            {notePaneNode}
+          </div>
         </DialogSurface>
-      </div>
+      </PanelOverlay>
     );
   }
 
@@ -839,8 +1056,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     const qTags = tagCtx ? tagsOf(q, statOf(stats, session.bankName, q.id), tagCtx) : [];
     const starredNow = isStarred(stars, session.bankName, q.id);
     return (
-      <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
-        <DialogSurface className="panel quiz-panel" style={{ zoom }} label={`${session.bankName}练习，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
+      <PanelOverlay tone="quiz" onClose={requestClose}>
+        <DialogSurface className={`panel quiz-panel${notePaneOpen ? ' quiz-panel--note-open' : ''}`} style={{ zoom }} label={`${session.bankName}练习，第 ${idx + 1} 题`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">{session.bankName} · 第 {idx + 1} / {session.questions.length} 题</span>
             <span className="muted">已对 {correctCount}</span>
@@ -854,6 +1071,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
               title="背题模式：不判分，直接看答案背；可以标「掌握了 / 没掌握」"
               onClick={() => setBeatMode(true)}
             >背题</button>
+            {noteToggle}
             {onSaveNote && (
               <button
                 className="btn-small"
@@ -884,6 +1102,8 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
           </div>
           <div className="quiz-progress"><i style={{ width: `${((idx + (answered ? 1 : 0)) / session.questions.length) * 100}%` }} /></div>
 
+          <div className="quiz-workbench">
+            <div className="quiz-main">
           {/* key={idx}：同上，换题重挂载以重播入场动画。
               注意另外两处 .quiz-body 不能加 key：加载/错误态（上方）与「自动组题」表单，
               后者加 key 会在换题时清空用户已填的表单。 */}
@@ -1233,8 +1453,11 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
               )}
             </div>
           )}
+            </div>
+            {notePaneNode}
+          </div>
         </DialogSurface>
-      </div>
+      </PanelOverlay>
     );
   }
 
@@ -1245,7 +1468,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
     /** 真正进了错题本的错题数（关联不到笔记的题进不去，别把话说满） */
     const wrongFiled = wrong.filter((w) => notePathOf(w)).length;
     return (
-      <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
+      <PanelOverlay tone="quiz" onClose={requestClose}>
         <DialogSurface className="panel quiz-panel" label={`练习成绩：${session.bankName}`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">练习成绩 · {session.bankName}</span>
@@ -1285,7 +1508,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
             </div>
           </div>
         </DialogSurface>
-      </div>
+      </PanelOverlay>
     );
   }
 
@@ -1325,7 +1548,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
         return { ...r, difficulty: cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d] };
       });
     return (
-      <div className="panel-backdrop quiz-overlay" onClick={() => setComposing(null)}>
+      <PanelOverlay tone="quiz" onClose={() => setComposing(null)}>
         <DialogSurface className="panel quiz-panel" label={`自动组题：${b.name}`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">自动组题 · {b.name}</span>
@@ -1438,13 +1661,13 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
             </div>
           </div>
         </DialogSurface>
-      </div>
+      </PanelOverlay>
     );
   }
 
   // ---------- 题库列表 ----------
   return (
-    <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
+    <PanelOverlay tone="quiz" onClose={requestClose}>
       <DialogSurface className="panel quiz-panel" label="题库练习" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title">题库练习</span>
@@ -1466,6 +1689,16 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
             onChange={(e) => setSearchQ(e.target.value)}
           />
           {searching && <button className="btn-small" onClick={() => setSearchQ('')}>清除</button>}
+          {generatable > 0 && (
+            <button
+              type="button"
+              className="btn-small"
+              onClick={generateMistakeCards}
+              title="答错 3 次以上、且还没生成过卡片的题：生成后会进入复习队列"
+            >
+              错题卡 +{generatable}
+            </button>
+          )}
         </div>
 
         <div className="quiz-help" id="quiz-format-help" hidden={!showHelp}>
@@ -1733,6 +1966,6 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
         </div>
         )}
       </DialogSurface>
-    </div>
+    </PanelOverlay>
   );
 }

@@ -2,25 +2,19 @@
  * pdf.js 懒加载共享模块 + 最近使用的 PDF 持久化（IndexedDB 独立库 knowlattice-pdfs，
  * 避免与 vault 的 knowlattice 库版本冲突）。
  *
- * 版本必须停在 3.x：
- * - @react-pdf-viewer/core@3.12 只认 pdfjs 的 `renderTextLayer` / `SVGGraphics` 两个具名导出；
- * - pdfjs 4.x 已把这两个 API 删除（改用 TextLayer 类），viewer 调用即失败 →
- *   PDF 面板静默渲染成一片空白，控制台连报错都没有。
- * 3.x 是 UMD 产物，浏览器里 `import('pdfjs-dist')` 拿不到具名导出，因此下面走 cjs 入口
- * 并在 vite.config 的 optimizeDeps 里显式声明，让 Vite 做 CJS → ESM 互操作。
+ * PDF.js 6 已统一为 ESM，worker 与 CMaps 仍随包复制到 public/pdfjs/：构建器对
+ * `?url` 的处理不可靠，固定同源路径同时覆盖 Vite 开发、GitHub Pages 和 Tauri。
  */
 import { openDB } from 'idb';
-// 走包入口（vite.config 里把 'pdfjs-dist' alias 到 3.x 的 build/pdf.js），
-// 与 @react-pdf-viewer/core 内部 require 的是同一份，worker 配置才生效。
 import * as pdfjsNs from 'pdfjs-dist';
-import { installPdfIntersectionFallback } from './pdfio';
+import type { DocumentInitParameters } from 'pdfjs-dist/types/src/display/api';
 
-let _pdfjs: any = null;
+let _pdfjs: typeof pdfjsNs | null = null;
 
 /**
  * pdf.js 的 worker 地址。
  *
- * 指向 `public/pdfjs/pdf.worker.min.js`（由 scripts/copy-pdf-worker.mjs 在构建前同步），
+ * 指向 `public/pdfjs/pdf.worker.min.mjs`（由 scripts/copy-pdf-worker.mjs 在构建前同步），
  * 而不是 `import '...?url'`：当前 Rolldown 版 Vite 会把 pdfjs worker 的 `?url` 导入
  * 退化成副作用导入，模块拿不到 URL 字符串 —— 线上实测 workerSrc 为空串、worker 不加载，
  * PDF 面板静默渲染成一片空白。
@@ -28,7 +22,7 @@ let _pdfjs: any = null;
  * 用 BASE_URL 拼绝对路径，GitHub Pages 子路径部署同样成立。
  */
 export function pdfWorkerSrc(): string {
-  return `${import.meta.env.BASE_URL}pdfjs/pdf.worker.min.js`;
+  return `${import.meta.env.BASE_URL}pdfjs/pdf.worker.min.mjs`;
 }
 
 /**
@@ -38,64 +32,32 @@ export function pdfWorkerSrc(): string {
  * getTextContent() 对这些文件返回空串：看得见的文字层读出来是空的，于是被判成扫描件、
  * 对照模式选不中字、能「打开 PDF 却不能摘录」。资源由 scripts/copy-pdf-worker.mjs 同步到 public/pdfjs/。
  */
-export function pdfAssetUrl(kind: 'cmaps' | 'standard_fonts'): string {
+export function pdfAssetUrl(kind: 'cmaps' | 'standard_fonts' | 'wasm' | 'iccs'): string {
   return `${import.meta.env.BASE_URL}pdfjs/${kind}/`;
 }
 
 /**
- * 每处 getDocument 都必须带上的参数。三处调用（本文件的 openPdf、react-pdf-viewer 的
- * transformGetDocumentParams、智能草稿的 PDF 导入）共用这一份，避免漏配后行为不一致。
+ * 每处 getDocument 都必须带上的参数。阅读器、智能草稿和转换入口共用这一份，
+ * 避免漏配后中文文字层或替代字体行为不一致。
  */
-export function pdfDocumentParams(): {
-  cMapUrl: string;
-  cMapPacked: boolean;
-  standardFontDataUrl: string;
-  isEvalSupported: false;
-} {
+export function pdfDocumentParams(): Pick<
+  DocumentInitParameters,
+  'cMapUrl' | 'cMapPacked' | 'standardFontDataUrl' | 'wasmUrl' | 'iccUrl'
+> {
   return {
     cMapUrl: pdfAssetUrl('cmaps'),
     cMapPacked: true,
     standardFontDataUrl: pdfAssetUrl('standard_fonts'),
-    // pdf.js 3.x 会为字体字形拼出 JS 再用 new Function 编译；恶意 PDF 可借
-    // CVE-2024-4367 这条路径执行脚本。Tauri 的 CSP 只能兜桌面版，Web 版必须
-    // 在参数层显式关闭。
-    isEvalSupported: false,
+    wasmUrl: pdfAssetUrl('wasm'),
+    iccUrl: pdfAssetUrl('iccs'),
   };
 }
 
-/**
- * @react-pdf-viewer/core 需要 pdfjs 的这几项具名导出。本仓库自己只调 getDocument，
- * 生产构建摇树时会把「看似没人用」的 renderTextLayer / SVGGraphics 删掉
- * （线上实测：产物里连标识符都不存在 → viewer 静默空白）。用动态属性名访问钉住它们。
- */
-const VIEWER_APIS = ['PDFWorker', 'renderTextLayer', 'SVGGraphics', 'PasswordResponses'] as const;
-
-/** 保住 viewer 依赖的 pdfjs 导出不被摇树删掉；返回缺失的 API 名（正常为空数组） */
-export function keepViewerPdfApis(pdfjs: Record<string, unknown>): string[] {
-  const missing: string[] = [];
-  for (const name of VIEWER_APIS) {
-    // 用变量下标访问：写成 pdfjs.SVGGraphics 会被 Rolldown 判定为未使用并删除
-    if (pdfjs[name as string] === undefined) missing.push(name);
-  }
-  return missing;
-}
-
-export async function loadPdfjs(): Promise<any> {
+export async function loadPdfjs(): Promise<typeof pdfjsNs> {
   if (_pdfjs) return _pdfjs;
-  // viewer 的文档加载要靠 IntersectionObserver 的「容器可见」回调才会启动；
-  // 冷缓存首次打开时那个回调可能不来（详见 pdfio.ts），这里先装好兜底再返回。
-  installPdfIntersectionFallback();
-  // UMD 经 CJS→ESM 互操作后可能被双层包裹（default 里再套 default）
-  const mod: any = pdfjsNs;
-  const pdfjs: any = mod?.default?.default ?? mod?.default ?? mod;
-  const missing = keepViewerPdfApis(pdfjs);
-  if (missing.length) {
-    // 别静默：PDF 面板会因此空白，留一条可诊断的日志
-    console.error('pdfjs 缺少 viewer 需要的 API：', missing.join(', '));
-  }
-  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc();
-  _pdfjs = pdfjs;
-  return pdfjs;
+  pdfjsNs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc();
+  _pdfjs = pdfjsNs;
+  return _pdfjs;
 }
 
 /** 打开 PDF（File 或 ArrayBuffer）→ PDFDocumentProxy */
@@ -125,7 +87,7 @@ export async function detectScannedPdf(data: ArrayBuffer): Promise<boolean> {
       if (chars > maxChars) maxChars = chars;
       if (maxChars >= 40) break; // 已有足够文字，不必再采样
     }
-    await doc.destroy();
+    await doc.loadingTask.destroy();
     return maxChars < 40;
   } catch {
     return false; // 判定失败时不改变默认行为

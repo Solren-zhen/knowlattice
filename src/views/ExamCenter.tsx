@@ -28,13 +28,25 @@ import {
 } from '../core/dailyPractice';
 import { difficultyCounts, DIFFICULTY_LABELS, highFreqChapters, Q_TAG_LABELS, tagCounts, type DifficultyBand, type QTag } from '../core/qbankTags';
 import { markStudy } from '../core/stats';
+import { recordQuiz } from '../core/studyLog';
+import { recordMistake } from '../core/mistakes';
 import { toast, confirmBox } from '../core/feedback';
 import { IconCards, IconChart, IconClose, IconQuiz, IconTarget } from './icons';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   onClose: () => void;
   /** 从题库列表点「模拟考试」进来时预选的题库 */
   initialBank?: string;
+  /**
+   * 全库笔记正文：交卷时把错题写进错题本（core/mistakes 需要原文提章节与标题）。
+   * 不传则不写——与 QuizView 的错题收录同一前提。
+   */
+  docs?: Map<string, string>;
+  /** 从错题本「重做本组」进来：直接开一场错题重练 */
+  initialMode?: 'wrong';
+  /** 重做范围：只考关联到这些笔记路径的错题；空/不传 = 全部错题 */
+  seedPaths?: string[];
 }
 
 type Mode = 'exam' | 'daily' | 'wrong';
@@ -65,7 +77,7 @@ function gradeOne(q: QuizQuestion, picked: number[]): boolean {
   return mine.length === right.length && mine.every((v, k) => v === right[k]);
 }
 
-export default function ExamCenter({ onClose, initialBank }: Props) {
+export default function ExamCenter({ onClose, initialBank, docs, initialMode, seedPaths }: Props) {
   const [banks, setBanks] = useState<QuizBank[]>([]);
   const [ready, setReady] = useState(false);
   const [stats, setStats] = useState<StatsMap>(loadStats);
@@ -98,8 +110,15 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
       setHistory(loadExamHistory());
       setBankName((prev) => prev || loadedBanks[0]?.name || '');
       setReady(true);
+      // 从错题本「重做本组」进来：题库就绪后直接开一场错题重练（范围=这组笔记）
+      if (initialMode === 'wrong') {
+        setMode('wrong');
+        beginWrongFrom(loadedBanks, seedPaths);
+      }
     }).catch(() => { if (active) setReady(true); });
     return () => { active = false; };
+    // initialMode/seedPaths 只在挂载时消费一次；beginWrongFrom 不依赖任何状态
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const bank = banks.find((b) => b.name === bankName) ?? null;
@@ -147,13 +166,19 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
     setPhase('running');
   };
 
-  const beginWrong = () => {
+  const beginWrongFrom = (list: QuizBank[], paths?: string[]) => {
+    // paths 非空 = 错题本「重做本组」：只考关联到这组笔记的题（错题重练池再按笔记路径收窄）
+    const pathSet = paths && paths.length > 0 ? new Set(paths) : null;
     const out: PaperItem[] = [];
-    for (const b of banks) {
+    for (const b of list) {
       const pool = filterPool(b.questions, { count: 0, chapters: [], types: ['choice'], scope: 'wrong', order: 'shuffle' }, loadStats(), b.name);
-      for (const q of pool) out.push({ bank: b.name, q });
+      const scoped = pathSet ? pool.filter((q) => q.note !== undefined && pathSet.has(q.note)) : pool;
+      for (const q of scoped) out.push({ bank: b.name, q });
     }
-    if (out.length === 0) { toast('还没有做错过的题，先去练一轮吧', 'info'); return; }
+    if (out.length === 0) {
+      toast(pathSet ? '这组笔记还没有可重做的错题（题目需已答错且关联到笔记）' : '还没有做错过的题，先去练一轮吧', 'info');
+      return;
+    }
     const picked = shuffle(out).slice(0, 30);
     setItems(picked);
     setAnswers(new Array(picked.length).fill(null));
@@ -164,6 +189,8 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
     setCleared(0);
     setPhase('running');
   };
+
+  const beginWrong = () => beginWrongFrom(banks);
 
   // ---------- 作答 ----------
   const setPick = (qIndex: number, picked: number[]) => {
@@ -186,7 +213,15 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
       const picked = answers[i] ?? [];
       const right = picked.length > 0 && gradeOne(it.q, picked);
       void recordAnswer(it.bank, it.q.id, right, Date.now(), relearn);
+      recordQuiz(right, relearn);
       markStudy();
+      // 错题进错题本（笔记级，与 QuizView 同一收录口径）。错题重练是已收录错题的
+      // 巩固环节，不再重复计数；只有原文在手（docs）才收——core/mistakes 要拿正文提章节与标题。
+      if (!right && mode !== 'wrong') {
+        const note = it.q.note;
+        const content = note ? docs?.get(note) : undefined;
+        if (note && content !== undefined) recordMistake(note, content);
+      }
     });
     const res = buildExamResult(
       mode === 'exam' ? (bank?.name ?? singleBank) : `${MODE_LABELS[mode]}·${singleBank}`,
@@ -206,7 +241,7 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
     setStats(loadStats());
     setPhase('report');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, answers, mode, startedAt, deadline, bank?.name, today]);
+  }, [items, answers, mode, startedAt, deadline, bank?.name, today, docs]);
 
   const submitRef = useRef(submit);
   submitRef.current = submit;
@@ -253,11 +288,11 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
 
   if (!ready) {
     return (
-      <div className="panel-backdrop quiz-overlay">
+      <PanelOverlay tone="quiz">
         <DialogSurface className="panel quiz-panel exam-panel" label="考试中心加载中">
           <div className="panel__body quiz-body"><p role="status">正在加载题库…</p></div>
         </DialogSurface>
-      </div>
+      </PanelOverlay>
     );
   }
 
@@ -268,7 +303,7 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
     const isMulti = Boolean(it.q.answers && it.q.answers.length > 1);
     const answeredCount = answers.filter((a) => a && a.length).length;
     return (
-      <div className="panel-backdrop quiz-overlay" onClick={requestClose}>
+      <PanelOverlay tone="quiz" onClose={requestClose}>
         <DialogSurface className="panel quiz-panel exam-panel" label={`${MODE_LABELS[mode]}，第 ${cur + 1} 题`} onClick={(e) => e.stopPropagation()}>
           <div className="panel__head quiz-header">
             <span className="panel__title quiz-title">{(mode === 'exam' ? bank?.name : MODE_LABELS[mode]) ?? ''} · 第 {cur + 1} / {items.length} 题</span>
@@ -321,7 +356,7 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
             <button className="btn-primary" onClick={() => submitRef.current()}>交卷（已答 {answeredCount}/{items.length}）</button>
           </div>
         </DialogSurface>
-      </div>
+      </PanelOverlay>
     );
   }
 
@@ -330,7 +365,7 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
     const delta = mode === 'exam' ? scoreDelta(result, history.filter((r) => r.id !== result.id)) : null;
     const weak = weakChapters(result);
     return (
-      <div className="panel-backdrop quiz-overlay" onClick={onClose}>
+      <PanelOverlay tone="quiz" onClose={onClose}>
         <DialogSurface className="panel quiz-panel exam-panel" label={`${MODE_LABELS[mode]}成绩`} onClick={(e) => e.stopPropagation()}>
           {head(`${MODE_LABELS[mode]}成绩`)}
           <div className="panel__body quiz-body">
@@ -430,7 +465,7 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
             </div>
           </div>
         </DialogSurface>
-      </div>
+      </PanelOverlay>
     );
   }
 
@@ -441,7 +476,7 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
     const toggleChapter = (c: string) =>
       setConfig((r) => ({ ...r, chapters: r.chapters.includes(c) ? r.chapters.filter((x) => x !== c) : [...r.chapters, c] }));
     return (
-      <div className="panel-backdrop quiz-overlay" onClick={() => setPhase('home')}>
+      <PanelOverlay tone="quiz" onClose={() => setPhase('home')}>
         <DialogSurface className="panel quiz-panel exam-panel" label="模拟考试设置" onClick={(e) => e.stopPropagation()}>
           {head(`模拟考试 · ${bank?.name ?? ''}`, () => setPhase('home'))}
           <div className="panel__body quiz-body">
@@ -490,13 +525,13 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
             </div>
           </div>
         </DialogSurface>
-      </div>
+      </PanelOverlay>
     );
   }
 
   // ---- 首页 ----
   return (
-    <div className="panel-backdrop quiz-overlay" onClick={onClose}>
+    <PanelOverlay tone="quiz" onClose={onClose}>
       <DialogSurface className="panel quiz-panel exam-panel" label="考试中心" onClick={(e) => e.stopPropagation()}>
         {head('考试中心')}
         <div className="panel__body quiz-body">
@@ -594,6 +629,6 @@ export default function ExamCenter({ onClose, initialBank }: Props) {
           )}
         </div>
       </DialogSurface>
-    </div>
+    </PanelOverlay>
   );
 }

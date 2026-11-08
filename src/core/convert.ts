@@ -559,7 +559,7 @@ export async function pdfToMarkdown(
     chars += lines.reduce((s, l) => s + l.text.length, 0);
     onProgress?.(p, numPages);
   }
-  await doc.destroy();
+  await doc.loadingTask.destroy();
   if (chars < 40) {
     throw new Error('未提取到文字：这可能是扫描版 PDF（无文字层），需要先 OCR');
   }

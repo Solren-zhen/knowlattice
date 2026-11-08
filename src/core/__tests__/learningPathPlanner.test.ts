@@ -204,6 +204,9 @@ describe('learningPathPlanner', () => {
       const path = generateLearningPath(beginnerReport);
 
       expect(path.title).toContain('探索');
+      // 没有做题历史时不能声称「提升正确率」；也不能把同一条「学习新笔记」重复塞满计划
+      expect(path.goal).not.toContain('正确率');
+      expect(path.steps.filter((step) => step.description === '学习新笔记')).toHaveLength(1);
     });
   });
 

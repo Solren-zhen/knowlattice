@@ -12,8 +12,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { ImportResult, TreeNode } from '../core/vault';
 import { NOTE_TYPE_LABELS, type NoteType } from '../core/parser';
-import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore, IconTrash, IconImage } from './icons';
+import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore, IconTrash, IconImage, IconSearch, IconClose } from './icons';
+import { loadTreeOpenDirs, saveTreeOpenDirs } from '../core/treeState';
 import { toast, confirmBox } from '../core/feedback';
+import { tauriErrorText } from '../storage/tauriError';
 import { clickable } from './a11y';
 import { useEsc } from './useEsc';
 import { packSummary, parseKnowledgePack } from '../core/knowledgePack';
@@ -79,6 +81,13 @@ interface Props {
  * 笔记名 = 缩进 + 12），看起来就是「错位」；批量模式下还多差一个槽（见笔记行那段注释）。
  * 现在两边同一套缩进 + 同一个固定宽度的箭头槽（.tree-caret），名字列逐层对齐。
  */
+/** 从章节名里拆出「编号前缀 + 标题」（如 "1.1 COPD" → no="1.1 ", title="COPD"）。
+ *  编号形态：行首的 1~2 段数字/点/空格；不匹配就原样返回 null，调用方不包 <b>。 */
+const splitNo = (name: string): { no: string; title: string } | null => {
+  const m = name.match(/^(\d+(?:\.\d+)*[.．]?\s+)(.+)$/);
+  return m ? { no: m[1], title: m[2] } : null;
+};
+
 const rowIndent = (depth: number) => depth * 14 + 8;
 
 /** 虚拟滚动行高 —— 与 index.css 的 .tree-row 固定高度保持一致 */
@@ -153,7 +162,9 @@ const Row = memo(function Row({
       <div className="tree-row-wrap">
         <div
           className={`tree-row file ${currentPath === node.path ? 'active' : ''}`}
-          style={{ paddingLeft: rowIndent(depth) }}
+          style={{ paddingLeft: rowIndent(depth), ['--depth' as string]: depth }}
+          data-depth={depth}
+          title={name}
           onClick={() => (batchMode ? onToggle(node) : onOpen(node.path))}
           onContextMenu={(e) => {
             // 整篇笔记的鼠标入口：右键弹「打开 / 删除整篇」
@@ -167,7 +178,9 @@ const Row = memo(function Row({
               多出「箭头 14 + 间距 6」，② 批量时目录行有槽、笔记行没有，又差 20px。同一层级
               两种行的名字列必须落在同一列上，空槽是最省事也最稳的做法。 */}
           <span className="tree-caret" aria-hidden />
-          <span className="tree-name">{name}</span>
+          {(() => { const s = splitNo(name); return s
+            ? <span className="tree-name"><b className="tree-no">{s.no}</b>{s.title}</span>
+            : <span className="tree-name">{name}</span>; })()}
         </div>
         {!batchMode && (
           <button
@@ -185,7 +198,9 @@ const Row = memo(function Row({
   return (
     <div
       className="tree-row dir"
-      style={{ paddingLeft: rowIndent(depth) }}
+      style={{ paddingLeft: rowIndent(depth), ['--depth' as string]: depth }}
+      data-depth={depth}
+      title={`${node.name}（${count} 篇）`}
       onClick={() => {
         if (batchMode) { onToggle(node); return; }
         onPickDir(node.path);
@@ -202,7 +217,9 @@ const Row = memo(function Row({
           箭头有了自己的 14px 盒子（以前是裸 <svg>，位置由「相邻文本节点怎么被合并/换行」决定，
           没有稳定的落点），行内空间再紧也是这一个盒在占位，不靠文本节点凑。 */}
       <span className="tree-caret"><IconChevron open={open} /></span>
-      <span className="tree-name">{node.name}</span>
+      {(() => { const s = splitNo(node.name); return s
+        ? <span className="tree-name"><b className="tree-no">{s.no}</b>{s.title}</span>
+        : <span className="tree-name">{node.name}</span>; })()}
       <span className="dir-count">{count}</span>
     </div>
   );
@@ -241,24 +258,35 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
   const ankiRef = useRef<HTMLInputElement>(null);
   const datasetRef = useRef<HTMLInputElement>(null);
 
-  /** 目录展开态（默认展开前两层） */
-  const [openDirs, setOpenDirs] = useState<Set<string>>(new Set());
+  /** 目录展开态（持久化到 core/treeState，重启不收回） */
+  const [openDirs, setOpenDirs] = useState<Set<string>>(() => loadTreeOpenDirs());
+  /** 启动时有没有持久化历史：没有才退回「默认展开前两层」的初始体验 */
+  const hadPersisted = useRef(loadTreeOpenDirs().size > 0);
+  /** 目录筛选词：命中文件名 / 目录名；非空时目录链强制展开，清空恢复原树 */
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
   const treeKey = useRef('');
   useEffect(() => {
     const key = tree.map((n) => n.path).join('|');
     if (key === treeKey.current) return;
     treeKey.current = key;
+    const existing = new Set<string>();
     const base = new Set<string>();
     const walk = (nodes: TreeNode[], depth: number) => {
-      if (depth >= 2) return;
       for (const n of nodes) {
-        if (n.type === 'dir') { base.add(n.path); walk(n.children ?? [], depth + 1); }
+        if (n.type !== 'dir') continue;
+        existing.add(n.path);
+        if (depth < 2) base.add(n.path);
+        walk(n.children ?? [], depth + 1);
       }
     };
     walk(tree, 0);
     setOpenDirs((prev) => {
-      const next = new Set(base);
-      prev.forEach((p) => { if (base.has(p)) next.add(p); });
+      // 以持久化集合为准（只保留仍存在的路径：目录改名/删除后自然失效）；
+      // 没有持久化历史（首次使用 / 清过存储）才补上「前两层默认展开」。
+      // 之前是 base ∪ prev∩base——用户收起的一级目录会被强制重新展开，持久化形同虚设。
+      const next = new Set([...prev].filter((p) => existing.has(p)));
+      if (!hadPersisted.current) base.forEach((p) => next.add(p));
       return next;
     });
   }, [tree]);
@@ -284,13 +312,22 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
   }, [tree]);
 
   const toggleDirOpen = useCallback((node: TreeNode) => {
+    // 用户动过目录后，落盘 effect 才开始生效（否则首次会话会把「默认两层」当成历史写回）
+    hadPersisted.current = true;
     setOpenDirs((prev) => {
+      // 纯更新：副作用（saveTreeOpenDirs）在 openDirs 的 effect 里做，不进 updater
       const next = new Set(prev);
       if (next.has(node.path)) next.delete(node.path);
       else next.add(node.path);
       return next;
     });
   }, []);
+
+  /** 展开状态落盘：openDirs 每次变化（toggle / 树合并）后写回持久层 */
+  useEffect(() => {
+    if (!hadPersisted.current) return;
+    saveTreeOpenDirs(openDirs);
+  }, [openDirs]);
 
   const toggleNode = useCallback((node: TreeNode) => {
     const paths = node.type === 'dir' ? dirFiles.get(node.path) ?? [] : [node.path];
@@ -427,16 +464,62 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
 
   const flatRows = useMemo(() => {
     const rows: FlatRow[] = [];
-    const walk = (nodes: TreeNode[], depth: number) => {
+    if (!q) {
+      const walk = (nodes: TreeNode[], depth: number) => {
+        for (const n of nodes) {
+          const open = n.type === 'dir' && openDirs.has(n.path);
+          rows.push({ node: n, depth, open, count: n.type === 'dir' ? dirFiles.get(n.path)?.length ?? 0 : 0 });
+          if (open) walk(n.children ?? [], depth + 1);
+        }
+      };
+      walk(tree, 0);
+      return rows;
+    }
+    // 筛选模式：文件名 / 目录名命中才显示；目录一律按展开渲染——筛选视图的目标
+    // 是「直接看到命中的东西」，不读 openDirs、也不写回它。目录名命中时整个子树全显。
+    const pushAll = (nodes: TreeNode[], depth: number) => {
       for (const n of nodes) {
-        const open = n.type === 'dir' && openDirs.has(n.path);
-        rows.push({ node: n, depth, open, count: n.type === 'dir' ? dirFiles.get(n.path)?.length ?? 0 : 0 });
-        if (open) walk(n.children ?? [], depth + 1);
+        if (n.type === 'file') rows.push({ node: n, depth, open: false, count: 0 });
+        else {
+          rows.push({ node: n, depth, open: true, count: dirFiles.get(n.path)?.length ?? 0 });
+          pushAll(n.children ?? [], depth + 1);
+        }
       }
     };
-    walk(tree, 0);
+    const walkF = (nodes: TreeNode[], depth: number): boolean => {
+      let any = false;
+      for (const n of nodes) {
+        if (n.type === 'file') {
+          if (n.name.toLowerCase().includes(q)) {
+            rows.push({ node: n, depth, open: false, count: 0 });
+            any = true;
+          }
+          continue;
+        }
+        if (n.name.toLowerCase().includes(q)) {
+          rows.push({ node: n, depth, open: true, count: dirFiles.get(n.path)?.length ?? 0 });
+          pushAll(n.children ?? [], depth + 1);
+          any = true;
+          continue;
+        }
+        // 目录自身没命中：先递归子层，命中了再把目录行插回父位置（splice 到递归前标记处）
+        const mark = rows.length;
+        if (walkF(n.children ?? [], depth + 1)) {
+          rows.splice(mark, 0, { node: n, depth, open: true, count: dirFiles.get(n.path)?.length ?? 0 });
+          any = true;
+        }
+      }
+      return any;
+    };
+    walkF(tree, 0);
     return rows;
-  }, [tree, openDirs, dirFiles]);
+  }, [tree, openDirs, dirFiles, q]);
+
+  /** 筛选命中篇数（目录不计）：给筛选框右侧的「N 篇」提示 */
+  const hitCount = useMemo(
+    () => (q ? flatRows.reduce((n, r) => n + (r.node.type === 'file' ? 1 : 0), 0) : 0),
+    [flatRows, q],
+  );
 
   const total = flatRows.length;
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
@@ -754,7 +837,7 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
                       setMoreOpen(false);
                       void onChangeVaultFolder()
                         .then((dir) => { if (dir) toast(`库文件夹已切换：${dir}`, 'ok', 4200); })
-                        .catch((err: unknown) => toast(`切换库文件夹失败：${(err as Error).message}`, 'err'));
+                        .catch((err: unknown) => toast(`切换库文件夹失败：${tauriErrorText(err)}`, 'err'));
                     }}
                     {...clickable()}
                     title={vaultDir ? `当前：${vaultDir}` : undefined}
@@ -856,6 +939,25 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
             </details>
           )}
         </div>
+      </div>
+      {/* 目录筛选：命中文件名 / 目录名的行才显示，命中文件的祖先目录链强制展开。
+          不动 openDirs——清空筛选立即恢复原树的原展开状态。 */}
+      <div className="tree-search">
+        <IconSearch size={13} />
+        <input aria-label="筛选章节与笔记"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setQuery(''); }}
+          placeholder="筛选章节与笔记…"
+        />
+        {q && (
+          <>
+            <span className="tree-search-hint">{hitCount} 篇</span>
+            <button className="tree-search-clear" onClick={() => setQuery('')} aria-label="清除筛选">
+              <IconClose size={12} />
+            </button>
+          </>
+        )}
       </div>
       {creating && (
         <div className="new-note">

@@ -83,21 +83,28 @@ describe('解剖学抽查：层级要符合常识', () => {
   const deep: Array<[string, number]> = [
     ['Infraspinatus muscle', 3],
     ['Soleus muscle', 3],
-    ['Flexor digitorum profundus', 3],
+    ['Flexor digitorum profundus', 4],
     ['Iliocostalis lumborum muscle', 3],   // 竖脊肌
-    ['Vastus intermedius muscle', 3],
-    ['Psoas major', 4],
-    ['Multifidus colli muscle', 4],
-    ['Interspinales colli muscles', 4],
-    ['Rotatores', 4],
-    ['Quadratus lumborum muscle', 4],
-    ['Transversus thoracis muscle', 4],
-    ['Semispinalis colli muscle', 4],
-    ['Diaphragm', 4],
+    ['Vastus intermedius muscle', 4],
+    ['Psoas major', 5],
+    ['Multifidus colli muscle', 6],
+    ['Interspinales colli muscles', 6],
+    ['Rotatores', 6],
+    ['Quadratus lumborum muscle', 5],
+    ['Transversus thoracis muscle', 6],
+    ['Semispinalis colli muscle', 6],
+    ['Diaphragm', 6],
     ['Subscapularis muscle', 4],
+    ['Dorsal interossei muscles of foot', 5],   // 手/足内在肌：骨间肌最深
+    ['Lumbrical muscles of hand', 4],
+  ];
+  /** 原偏差修正项：不在「深层 ≥3」清单里，但属于第 2 层 */
+  const repositioned: Array<[string, number]> = [
+    ['Flexor digitorum brevis', 2],             // 足底第一层不再一刀切到中层
+    ['Deep head of pronator teres', 2],         // 深头比浅头深一层
   ];
 
-  it.each([...superficial, ...deep])('%s → 第 %i 层', (name, layer) => {
+  it.each([...superficial, ...deep, ...repositioned])('%s → 第 %i 层', (name, layer) => {
     expect(layerOfMuscle(find(name))).toBe(layer);
   });
 
@@ -112,7 +119,7 @@ describe('assignMuscleLayers', () => {
 
   it('每个条目都有层级', () => {
     expect(layers.size).toBe(muscular.length);
-    for (const [, l] of layers) expect([1, 2, 3, 4]).toContain(l);
+    for (const [, l] of layers) expect([1, 2, 3, 4, 5, 6]).toContain(l);
   });
 
   it('层级分布真实反映解剖学：浅层是少数、深层占多数', () => {
@@ -121,8 +128,8 @@ describe('assignMuscleLayers', () => {
     const total = muscleLayers.length;
     expect(count(1)).toBeGreaterThan(30);                     // 浅层得有内容
     expect(count(1)).toBeLessThan(total * 0.4);               // 但只占少数
-    expect(count(3) + count(4)).toBeGreaterThan(total * 0.4); // 深层合计占多数
-    for (const l of [1, 2, 3, 4]) expect(count(l)).toBeGreaterThan(5);
+    expect(count(4) + count(5) + count(6)).toBeGreaterThan(total * 0.3); // 深层合计占可观比例
+    for (const l of [1, 2, 3, 4, 5, 6]) expect(count(l)).toBeGreaterThan(5);
   });
 
   it('同名肌腱跟随同名肌肉的层级（不被独立乱分）', () => {
@@ -145,6 +152,6 @@ describe('assignMuscleLayers', () => {
 
   it('筋膜不会被塞进最深层（它包在肌肉外面）', () => {
     const fascia = muscular.find((o) => /^Deltoid fascia$/i.test(baseName(o.name_en)))!;
-    expect(layers.get(fascia.organ_id)).toBeLessThan(4);
+    expect(layers.get(fascia.organ_id)).toBeLessThan(6);
   });
 });

@@ -23,18 +23,32 @@ import {
 import { reviewPressure } from '../core/reviewPressure';
 import { needsAttention, severityHint, severityInfo } from '../core/mistakeSeverity';
 import { activeBacklog, forecastBacklog, forecastLine, netByDay } from '../core/backlogForecast';
+import { recommendNotesForMistake, type NoteMetadata, type NoteRecommendation } from '../core/mistakeNoteRecommendation';
+import { loadBanks, type QuizQuestion } from '../core/qbank';
+import { loadStats } from '../core/qbankStats';
+import { generateCardsFromMistakes } from '../core/qbankCards';
+import { addGeneratedCards, loadGeneratedCards } from '../core/generatedCards';
+import { toast } from '../core/feedback';
 import { IconClose } from './icons';
 import { clickable } from './a11y';
-import type { QuoteSelection } from './AiAgentPanel';
+import type { QuoteSelection } from './agentChat';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   onOpenPath: (path: string) => void;
   onClose: () => void;
   /** 与 AI 笔记联动：把这条错题交给 AI 归因；不传则不显示入口 */
   onAskAi?: (quote: QuoteSelection) => void;
+  /** 全库正文：用于「错题 → 相关笔记」的章节/关键词匹配；不传则不显示推荐 */
+  docs?: Map<string, string>;
+  /**
+   * 「重做本组错题」：把这组笔记关联的题库错题开成一场错题重练。
+   * 参数是当前组（章节筛选或全部）错题记录的笔记路径集合；不传则不显示入口。
+   */
+  onRedoChapters?: (paths: string[]) => void;
 }
 
-export default function MistakeBook({ onOpenPath, onClose, onAskAi }: Props) {
+export default function MistakeBook({ onOpenPath, onClose, onAskAi, docs, onRedoChapters }: Props) {
   // Esc 关闭（接进全局 Esc 栈，与其余面板一致）
   useEsc(onClose);
   const [mistakes, setMistakes] = useState<MistakeMap>(loadMistakes);
@@ -44,6 +58,32 @@ export default function MistakeBook({ onOpenPath, onClose, onAskAi }: Props) {
 
   const heat = useMemo(() => chapterHeat(mistakes), [mistakes]);
   const maxCount = Math.max(1, ...heat.map((h) => h.count));
+
+  // 错题 → 相关笔记：把错题的标题当题干、章节当筛选条件，走 core/mistakeNoteRecommendation
+  // 的同一套评分（章节 > 标题关键词 > 正文关键词）。当前这条错题自己的笔记会被排除。
+  const noteMeta = useMemo<NoteMetadata[]>(() => {
+    if (!docs) return [];
+    return [...docs.entries()]
+      .filter(([path]) => path.endsWith('.md'))
+      .map(([path, content]) => ({
+        path,
+        title: (path.split('/').pop() ?? path).replace(/\.md$/, ''),
+        content,
+      }));
+  }, [docs]);
+  const relatedByPath = useMemo(() => {
+    const out = new Map<string, NoteRecommendation[]>();
+    if (noteMeta.length === 0) return out;
+    for (const [path, record] of Object.entries(mistakes)) {
+      const list = recommendNotesForMistake(
+        { stem: record.title, chapter: record.chapter },
+        noteMeta,
+        4,
+      ).filter((rec) => rec.notePath !== path);
+      if (list.length > 0) out.set(path, list.slice(0, 3));
+    }
+    return out;
+  }, [mistakes, noteMeta]);
 
   // 错因分布按全表算（不随章节筛选变），并随 mistakes 重算：
   // setMistakeReason/clearMistake 会把模块缓存一起换掉，所以这里读得到刚写入的值。
@@ -93,8 +133,45 @@ export default function MistakeBook({ onOpenPath, onClose, onAskAi }: Props) {
   const toggleFilter = (chapter: string) =>
     setFilterChapter((cur) => (cur === chapter ? null : chapter));
 
+  /** 当前组（章节筛选或全部）错题记录的笔记路径集合——重做与转卡共用这个口径 */
+  const groupPaths = (): string[] => {
+    const chapters = filterChapter ? [filterChapter] : heat.map((h) => h.chapter);
+    return [...new Set(
+      Object.values(mistakes)
+        .filter((r) => chapters.includes(r.chapter))
+        .map((r) => r.path),
+    )];
+  };
+
+  const redoGroup = () => {
+    if (!onRedoChapters) return;
+    const paths = groupPaths();
+    if (paths.length === 0) { toast('当前组没有错题', 'info'); return; }
+    onRedoChapters(paths);
+  };
+
+  /** 批量转复习卡：当前组笔记关联的题库错题（逐题答错 ≥3 次且未生成过）→ FSRS 卡片 */
+  const convertToCards = () => {
+    void (async () => {
+      const banks = await loadBanks();
+      const questionIndex = new Map<string, QuizQuestion>(banks.flatMap((b) => b.questions.map((q) => [q.id, q] as const)));
+      const existing = new Set(loadGeneratedCards().map((c) => c.key));
+      const cards = generateCardsFromMistakes(loadStats(), questionIndex, existing);
+      const paths = new Set(items.map((r) => r.path));
+      const scoped = cards.filter((c) => {
+        const q = questionIndex.get(c.questionId);
+        return q?.note !== undefined && paths.has(q.note);
+      });
+      const added = addGeneratedCards(scoped.map((c) => ({ ...c, source: 'mistake' as const, createdAt: Date.now() })));
+      toast(
+        added > 0 ? `已生成 ${added} 张错题复习卡，去「间隔复习」完成` : '没有新的可转卡片：逐题答错 ≥3 次才会生成',
+        added > 0 ? 'ok' : 'info',
+      );
+    })();
+  };
+
   return (
-    <div className="panel-backdrop mistake-overlay" onClick={onClose}>
+    <PanelOverlay tone="mistakes" onClose={onClose}>
       <div className="panel mistake-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head mistake-header">
           <span>
@@ -193,6 +270,27 @@ export default function MistakeBook({ onOpenPath, onClose, onAskAi }: Props) {
               {minCount > 1 && hidden > 0 && (
                 <span className="mistake-hidden muted">另有 {hidden} 条低于该阈值</span>
               )}
+              {/* 行动出口：看完本组错题，下一步直接重做或转成复习卡，不必回题库面板重新组卷 */}
+              {onRedoChapters && (
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={redoGroup}
+                  title={filterChapter
+                    ? `开一场错题重练，只考与「${filterChapter}」这组笔记关联的错题`
+                    : '开一场错题重练，考与全部错题笔记关联的题目'}
+                >
+                  {filterChapter ? '重做本组' : '重做全部'}
+                </button>
+              )}
+              <button
+                type="button"
+                className="chip"
+                onClick={convertToCards}
+                title="把当前筛选下的笔记所关联的题库错题（逐题答错 ≥3 次）批量转成复习卡"
+              >
+                错题转复习卡
+              </button>
             </div>
 
             <div className="panel__body mistake-list">
@@ -221,6 +319,26 @@ export default function MistakeBook({ onOpenPath, onClose, onAskAi }: Props) {
                         </span>
                       )}
                     </div>
+                    {relatedByPath.get(r.path)?.length ? (
+                      <div
+                        className="mistake-related"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <span className="muted">相关笔记</span>
+                        {relatedByPath.get(r.path)!.map((rec) => (
+                          <button
+                            key={rec.notePath}
+                            type="button"
+                            className="chip"
+                            title={rec.reason}
+                            onClick={() => onOpenPath(rec.notePath)}
+                          >
+                            {rec.noteTitle}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                     {/* 错因标注：点已选中的那一档 = 取消（回到未标注）。
                         容器上拦掉 click/keydown 冒泡，免得标注顺手把笔记打开了。 */}
                     <div
@@ -313,6 +431,6 @@ export default function MistakeBook({ onOpenPath, onClose, onAskAi }: Props) {
           </>
         )}
       </div>
-    </div>
+    </PanelOverlay>
   );
 }

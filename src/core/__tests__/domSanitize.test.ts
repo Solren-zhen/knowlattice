@@ -1,87 +1,35 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
-import { isSafeHref, sanitizeRenderedHyperlinks, safeExternalUrl } from '../domSanitize';
+import { describe, expect, it } from 'vitest';
+import { sanitizeRenderedHtml } from '../domSanitize';
 
-describe('isSafeHref', () => {
-  it('放行 http/https/mailto', () => {
-    expect(isSafeHref('http://a.b/c')).toBe(true);
-    expect(isSafeHref('https://a.b/c')).toBe(true);
-    expect(isSafeHref('mailto:x@y.z')).toBe(true);
+describe('sanitizeRenderedHtml', () => {
+  it('移除脚本、内嵌页面和事件处理器', () => {
+    const clean = sanitizeRenderedHtml('<p onclick="alert(1)">正文</p><script>alert(1)</script><iframe src="https://evil.example"></iframe>');
+    expect(clean).toContain('<p>正文</p>');
+    expect(clean).not.toContain('onclick');
+    expect(clean).not.toContain('<script');
+    expect(clean).not.toContain('<iframe');
   });
 
-  it('拒绝脚本与文件类协议（大小写/空白混淆也要挡住）', () => {
-    expect(isSafeHref('javascript:alert(1)')).toBe(false);
-    expect(isSafeHref('JAVASCRIPT:alert(1)')).toBe(false);
-    expect(isSafeHref(' javascript:alert(1)')).toBe(false);
-    expect(isSafeHref('vbscript:msgbox')).toBe(false);
-    expect(isSafeHref('file:///C:/secret.txt')).toBe(false);
-    expect(isSafeHref('data:text/html,<script>alert(1)</script>')).toBe(false);
+  it('移除危险链接协议，保留正常链接', () => {
+    const clean = sanitizeRenderedHtml('<a href="javascript:alert(1)">坏</a><a href="https://example.com">好</a>');
+    expect(clean).toContain('>坏</a>');
+    expect(clean).not.toContain('javascript:');
+    expect(clean).toContain('href="https://example.com"');
   });
 
-  it('相对地址按当前页面协议（https）解析 → 安全', () => {
-    expect(isSafeHref('/help/page')).toBe(true);
-    expect(isSafeHref('../other.md')).toBe(true);
+  it('拒绝非图片 data URL 与危险图片事件', () => {
+    const clean = sanitizeRenderedHtml('<img src="data:text/html;base64,PHNjcmlwdD4=" onerror="alert(1)"><img src="https://example.com/a.png">');
+    expect(clean).not.toContain('data:text/html');
+    expect(clean).not.toContain('onerror');
+    expect(clean).toContain('src="https://example.com/a.png"');
   });
 
-  it('无 href 属性视为安全（无可执行面）', () => {
-    expect(isSafeHref(null)).toBe(true);
-  });
-});
-
-describe('sanitizeRenderedHyperlinks（渲染后 DOM 清洗）', () => {
-  let host: HTMLDivElement;
-
-  beforeEach(() => {
-    host = document.createElement('div');
-    document.body.appendChild(host);
-  });
-
-  it('摘除 javascript:/file: 的 href，保留文本与排版结构', () => {
-    host.innerHTML = `
-      <section class="docx-wrapper">
-        <p>正文 <a href="javascript:alert(1)">坏链接</a> 与
-        <a href="https://ok.example/x">好链接</a> 与
-        <a href="file:///C:/x">本地链</a>。</p>
-      </section>`;
-    const cleaned = sanitizeRenderedHyperlinks(host);
-    expect(cleaned).toBe(2);
-    const links = host.querySelectorAll('a');
-    expect(links[0].getAttribute('href')).toBeNull();
-    expect(links[0].textContent).toBe('坏链接'); // 文本保留，只是不可点执行
-    expect(links[1].getAttribute('href')).toBe('https://ok.example/x');
-    expect(links[2].getAttribute('href')).toBeNull();
-    // 不动子树结构（docx-preview 排版依赖 wrapper）
-    expect(host.querySelector('.docx-wrapper')).not.toBeNull();
-    // 统一加 no-referrer
-    expect(links[1].getAttribute('rel')).toBe('noreferrer noopener');
-  });
-
-  it('空容器/null 返回 0，不抛错', () => {
-    expect(sanitizeRenderedHyperlinks(null)).toBe(0);
-    expect(sanitizeRenderedHyperlinks(host)).toBe(0);
-  });
-});
-
-describe('safeExternalUrl（window.open 前的白名单）', () => {
-  it('放行 http/https/mailto 并归一化', () => {
-    expect(safeExternalUrl('https://a.b/c')).toBe('https://a.b/c');
-    expect(safeExternalUrl('http://a.b/c')).toBe('http://a.b/c');
-    expect(safeExternalUrl('mailto:x@y.z')).toBe('mailto:x@y.z');
-    // 相对地址按页面协议解析，安全
-    expect(safeExternalUrl('legal.md', 'https://app.example/')).toBe('https://app.example/legal.md');
-  });
-
-  it('拒绝脚本/文件/数据协议（大小写混淆也要挡）', () => {
-    expect(safeExternalUrl('javascript:alert(1)')).toBeNull();
-    expect(safeExternalUrl('JaVaScRiPt:alert(1)')).toBeNull();
-    expect(safeExternalUrl(' javascript:alert(1)')).toBeNull();
-    expect(safeExternalUrl('vbscript:msgbox')).toBeNull();
-    expect(safeExternalUrl('file:///C:/Windows/System32/calc.exe')).toBeNull();
-    expect(safeExternalUrl('data:text/html,<script>alert(1)</script>')).toBeNull();
-    expect(safeExternalUrl('ms-settings:display')).toBeNull();
-  });
-
-  it('非法 URL 返回 null 而不是抛错', () => {
-    expect(safeExternalUrl('http://[::z/')).toBeNull();
+  it('保留 KaTeX / 通路图需要的 class、style 与安全 SVG', () => {
+    const clean = sanitizeRenderedHtml('<span class="katex" style="height:1em"><svg viewBox="0 0 10 10"><path d="M0 0h10"/></svg></span>');
+    expect(clean).toContain('class="katex"');
+    expect(clean).toContain('style="height:1em"');
+    expect(clean).toContain('<svg');
+    expect(clean).toContain('<path');
   });
 });

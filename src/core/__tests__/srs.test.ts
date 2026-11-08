@@ -162,3 +162,49 @@ describe('导入导出（回归：due 序列化为 ISO 字符串）', () => {
     expect(Object.keys(srs.exportSrsState())).toEqual(['a.md']);
   });
 });
+
+describe('每日新学上限（newLimit）', () => {
+  const NOW = 1_752_000_000_000;
+  const dayStart = () => {
+    const d = new Date(NOW);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  /** 到期卡：今天之前就学过的旧卡 */
+  const dueState = { due: NOW - 1000, reps: 5, stability: 10, difficulty: 3, state: 2, last_review: dayStart() - 86_400_000 };
+
+  it('newLimit=0 保持旧行为：新卡全部进队列', async () => {
+    const srs = await loadSrs();
+    const q = srs.dueQueue([card('a.md'), card('b.md'), card('c.md')], NOW);
+    expect(q).toHaveLength(3);
+  });
+
+  it('只截新卡，到期卡一张不少', async () => {
+    seed({ 'due1.md': dueState, 'due2.md': dueState });
+    const srs = await loadSrs();
+    const q = srs.dueQueue(
+      [card('due1.md'), card('due2.md'), card('n1.md'), card('n2.md'), card('n3.md')],
+      NOW,
+      2,
+    );
+    expect(q.filter((c) => c.path.startsWith('due'))).toHaveLength(2);
+    expect(q.filter((c) => c.path.startsWith('n'))).toHaveLength(2);
+  });
+
+  it('今天已首学的卡占用当天额度', async () => {
+    seed({
+      'done.md': { due: NOW + 86_400_000, reps: 1, stability: 1, difficulty: 3, state: 1, last_review: dayStart() + 1000 },
+    });
+    const srs = await loadSrs();
+    expect(srs.todaysNewStudied(srs.loadCards(), NOW)).toBe(1);
+    expect(srs.dueQueue([card('n1.md'), card('n2.md'), card('n3.md')], NOW, 2)).toHaveLength(1);
+  });
+
+  it('额度用尽时不再出新卡', async () => {
+    seed({
+      'done.md': { due: NOW + 86_400_000, reps: 1, stability: 1, difficulty: 3, state: 1, last_review: dayStart() + 1000 },
+    });
+    const srs = await loadSrs();
+    expect(srs.dueQueue([card('n1.md')], NOW, 1)).toHaveLength(0);
+  });
+});

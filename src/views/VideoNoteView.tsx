@@ -10,6 +10,7 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '../core/feedback';
+import { getBiliProxyIssue } from '../core/biliPlay';
 import { formatTime, parseTimestamp } from '../core/subtitle';
 import {
   addClip,
@@ -46,6 +47,19 @@ interface Props {
   onUrl: (url: string) => void;
   onInsert: (markdown: string) => boolean;
   onAttach: (name: string, blob: Blob) => Promise<string | null>;
+  /** 当前视频关联到的课程（B 站分P 与课程笔记/工坊通过 bvid + page 对上） */
+  course?: {
+    bvid: string;
+    page: number;
+    courseTitle?: string;
+    part?: string;
+    notePath?: string;
+    noteTitle?: string;
+  } | null;
+  /** 打开关联的课程笔记（视频栏保持打开，插入片段仍写当前笔记） */
+  onOpenCourseNote?: (path: string) => void;
+  /** 返回课程工坊（会关掉视频栏） */
+  onOpenCourse?: (bvid: string) => void;
   /** 附件是否已占用（截帧重名让位用；不给就退回原始文件名，会覆盖同名的旧帧） */
   hasAttachment?: (path: string) => boolean;
   onClose: () => void;
@@ -120,6 +134,9 @@ export default function VideoNoteView({
   onUrl,
   onInsert,
   onAttach,
+  course,
+  onOpenCourseNote,
+  onOpenCourse,
   hasAttachment,
   onClose,
   onDragStart,
@@ -459,6 +476,35 @@ export default function VideoNoteView({
       </div>
       </Foldable>
 
+      {course && (
+        <Foldable
+          onToggle={onFoldToggle}
+          id="course"
+          title="课程"
+          hint={course.noteTitle || course.courseTitle || undefined}
+        >
+          <div className="vn__course">
+            <div className="vn__course-title">
+              <b>{course.courseTitle || course.noteTitle || course.bvid}</b>
+              <span>P{course.page}{course.part ? ` · ${course.part}` : ''}</span>
+            </div>
+            <div className="vn__row">
+              {course.notePath && onOpenCourseNote && (
+                <button className="btn-small" type="button" onClick={() => onOpenCourseNote(course.notePath!)}>
+                  打开课程笔记
+                </button>
+              )}
+              {onOpenCourse && (
+                <button className="btn-small" type="button" onClick={() => onOpenCourse(course.bvid)}>
+                  返回课程工坊
+                </button>
+              )}
+            </div>
+            <p className="vn__hint">打开课程笔记后，用「片段」里的插入按钮把时间点写进笔记。</p>
+          </div>
+        </Foldable>
+      )}
+
       {source.kind === 'bilibili' && bili && nativeBili ? (
         <BiliPlayer
           bvid={bili.bvid ?? ''}
@@ -534,6 +580,7 @@ export default function VideoNoteView({
         <p className="vn__warn">
           原生播放不可用（多半是没走 dev 转发），已退回官方内嵌播放器：能看，但跨域读不到进度，
           清晰度由播放器自己决定。想用账号的最高清晰度，用 `npm run dev` 打开本应用。
+          {getBiliProxyIssue() ? `（代理原因：${getBiliProxyIssue()}）` : ''}
         </p>
       ) : null}
 

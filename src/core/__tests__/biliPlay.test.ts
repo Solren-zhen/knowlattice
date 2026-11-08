@@ -6,10 +6,29 @@
  * 2) __ct 标记必须跟着媒体地址走 —— 分轨 DASH 的音频段被 CDN 报成 octet-stream，
  *    没有这个标记 <audio> 会拒播，而单测是唯一能在没人点界面时发现它丢了的地方。
  */
-import { describe, expect, it } from 'vitest';
-import { BILI_PROXY, parseCookieInput, proxied, topQuality, type BiliPlayInfo } from '../biliPlay';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  BILI_PROXY,
+  checkAccount,
+  getBiliProxyBase,
+  parseCookieInput,
+  proxied,
+  setBiliProxyBase,
+  topQuality,
+  type BiliPlayInfo,
+} from '../biliPlay';
 
 describe('proxied', () => {
+  it('桌面端注入的基址会用于 API 与媒体请求', () => {
+    setBiliProxyBase('http://127.0.0.1:45678/bili-proxy');
+    expect(proxied('https://api.bilibili.com/x/web-interface/view?bvid=BV1xx')).toBe(
+      'http://127.0.0.1:45678/bili-proxy/api.bilibili.com/x/web-interface/view?bvid=BV1xx',
+    );
+    expect(getBiliProxyBase()).toBe('http://127.0.0.1:45678/bili-proxy');
+    setBiliProxyBase('');
+    expect(getBiliProxyBase()).toBe(BILI_PROXY);
+  });
+
   it('把绝对地址改写成同源代理路径', () => {
     expect(proxied('https://api.bilibili.com/x/web-interface/view?bvid=BV1xx')).toBe(
       `${BILI_PROXY}/api.bilibili.com/x/web-interface/view?bvid=BV1xx`,
@@ -56,5 +75,33 @@ describe('topQuality', () => {
 
   it('没有档位时返回 null', () => {
     expect(topQuality({ qualities: [] } as unknown as BiliPlayInfo)).toBeNull()
+  })
+})
+
+describe('checkAccount', () => {
+  it('nav 的 isLogin 决定登录态，并带回用户名', async () => {
+    setBiliProxyBase('http://proxy.test/bili-proxy')
+    const calls: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      calls.push(String(url))
+      return new Response(JSON.stringify({ code: 0, data: { isLogin: true, uname: '某讲师' } }), {
+        status: 200,
+      })
+    })
+    const ok = await checkAccount({ sessdata: 'x'.repeat(30) })
+    expect(ok).toEqual({ loggedIn: true, name: '某讲师' })
+    expect(calls[0]).toContain('/x/web-interface/nav')
+    vi.unstubAllGlobals()
+  })
+
+  it('没有账号时不发请求，直接视为未登录', async () => {
+    let called = false
+    vi.stubGlobal('fetch', async () => {
+      called = true
+      return new Response('{}')
+    })
+    expect(await checkAccount(null)).toEqual({ loggedIn: false })
+    expect(called).toBe(false)
+    vi.unstubAllGlobals()
   })
 })

@@ -94,3 +94,35 @@ describe('通路图（```pathway 围栏块）', () => {
     expect(html).not.toContain('<svg');
   });
 });
+describe('挖空渲染（{{答案}}）', () => {
+  it('渲染成可揭的按钮，前后文字照常', async () => {
+    const html = await renderMarkdown('左心室{{收缩}}时');
+    expect(html).toContain('<button type="button" class="cloze-blank">收缩</button>');
+    expect(html).toContain('左心室');
+    expect(html).toContain('时');
+  });
+
+  it('空挖空、三花括号、跨行都不当挖空（与 core/cloze 口径一致）', async () => {
+    expect(await renderMarkdown('{{}}')).toContain('{{}}');
+    expect(await renderMarkdown('{{{x}}}')).toContain('{{{x}}}');
+    expect(await renderMarkdown('{{a\nb}}')).not.toContain('cloze-blank');
+  });
+
+  it('代码块里的 {{}} 原样保留', async () => {
+    const html = await renderMarkdown('```js\nconst a = {{x}};\n```');
+    expect(html).not.toContain('cloze-blank');
+    expect(html).toContain('{{x}}');
+  });
+
+  it('与 ==高亮== 共存', async () => {
+    const html = await renderMarkdown('==高亮== 与 {{挖空}}');
+    expect(html).toContain('<mark>高亮</mark>');
+    expect(html).toContain('class="cloze-blank"');
+  });
+
+  it('答案里的 HTML 被转义（不因为变成按钮就放宽）', async () => {
+    const html = await renderMarkdown('{{<b>x</b>}}');
+    expect(html).toContain('&lt;b&gt;');
+    expect(html).not.toContain('<b>x</b>');
+  });
+});

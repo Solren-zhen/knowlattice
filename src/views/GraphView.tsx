@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEsc } from './useEsc';
-import ForceGraph from 'force-graph';
+import ForceGraph, { type ForceGraphGeneric, type LinkObject, type NodeObject } from 'force-graph';
 import { parseFrontmatterCached } from '../core/parser';
 import { loadMistakes } from '../core/mistakes';
 import type { LinkIndex } from '../core/linkIndex';
@@ -49,10 +49,23 @@ interface Props {
   onClose: () => void;
 }
 
-interface GNode { id: string; path: string; label: string; color: string; deg: number; isTag: boolean; chapter: string; heat: number }
-interface GLink { source: string; target: string }
+interface GNode extends NodeObject {
+  id: string;
+  path: string;
+  label: string;
+  color: string;
+  deg: number;
+  isTag: boolean;
+  chapter: string;
+  heat: number;
+  /** d3-force 在运行时挂上的邻接表（force-graph 的类型里没有） */
+  neighbors?: GNode[];
+}
+interface GLink extends LinkObject<GNode> { source: string | GNode; target: string | GNode }
 
-type FG = any;
+type FG = ForceGraphGeneric<ForceGraph<GNode, GLink>, GNode, GLink>;
+/** force-graph 的类型声明是 class，运行时导出的是「先建实例、再传 DOM」的柯里化工厂 */
+const createForceGraph = ForceGraph as unknown as () => (el: HTMLElement) => FG;
 
 export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -155,7 +168,7 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
     const small = graph.nodes.length <= SMALL_LIMIT; // 小图：更舒展的斥力
     const dark = () => document.documentElement.getAttribute('data-theme') === 'dark';
 
-    const fg = (ForceGraph as any)()(el)
+    const fg = createForceGraph()(el)
       .width(el.clientWidth)
       .height(el.clientHeight)
       .graphData(graph)
@@ -197,7 +210,7 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
         hl.links.clear();
         if (n) {
           hl.nodes.add(n);
-          for (const nb of (n as any).neighbors ?? []) hl.nodes.add(nb);
+          for (const nb of n.neighbors ?? []) hl.nodes.add(nb);
           for (const l of fgRef.current?.graphData()?.links ?? []) {
             const s = typeof l.source === 'object' ? l.source.id : l.source;
             const t = typeof l.target === 'object' ? l.target.id : l.target;
@@ -210,7 +223,8 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
         const hl = hlRef.current;
         const dimmed = hl.nodes.size > 0 && !hl.nodes.has(n);
         const hovered = hl.nodes.has(n) && hl.nodes.size > 1;
-        const nd = n as any; // d3 运行时会挂 x/y 坐标
+        // d3 运行时在节点上挂 x/y 坐标；类型声明里是可选值
+        const nd = n as GNode & { x: number; y: number };
         const val = (n.isTag ? 1.5 + Math.sqrt(n.deg * 2) : 1 + Math.sqrt(n.deg * 3))
           * (1 + (showHeatRef.current ? n.heat * 0.7 : 0));
         const r = 5 * Math.sqrt(val) * (hovered ? 1.2 : 1); // 悬停轻微放大
@@ -227,7 +241,7 @@ export default function GraphView({ docs, linkIndex, resolveLink, onOpenPath, on
           : (dark() ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.14)');
         ctx.stroke();
         ctx.globalAlpha = 1;
-      }) as FG;
+      });
     // 少节点时加大斥力，让布局舒展不拥挤（默认 -30 偏挤）
     const charge = fg.d3Force('charge');
     if (small && charge && typeof charge.strength === 'function') charge.strength(-80);

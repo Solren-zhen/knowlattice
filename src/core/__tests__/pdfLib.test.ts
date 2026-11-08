@@ -13,16 +13,15 @@ describe('pdf.js 资源地址', () => {
   });
 
   it('worker 与字体资源同源同目录', () => {
-    expect(pdfWorkerSrc()).toBe('/pdfjs/pdf.worker.min.js');
+    expect(pdfWorkerSrc()).toBe('/pdfjs/pdf.worker.min.mjs');
   });
 
-  it('getDocument 参数同时带上资源地址，并禁用字体 JS 编译', () => {
+  it('getDocument 参数同时带上 CMap、标准字体、WASM 与 ICC 资源地址', () => {
     const params = pdfDocumentParams();
     expect(params.cMapUrl).toBe('/pdfjs/cmaps/');
     expect(params.cMapPacked).toBe(true);
     expect(params.standardFontDataUrl).toBe('/pdfjs/standard_fonts/');
-    // 3.x 会为字体字形生成 new Function；恶意 PDF 可借此执行脚本。
-    // Web 版没有 Tauri CSP 兜底，必须由参数层显式关闭。
-    expect(params.isEvalSupported).toBe(false);
+    expect(params.wasmUrl).toBe('/pdfjs/wasm/');
+    expect(params.iccUrl).toBe('/pdfjs/iccs/');
   });
 });

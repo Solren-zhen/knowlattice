@@ -12,16 +12,15 @@
  *
  * 这里钉住让改后结果成立的四条原因，任何一条被删掉，裁剪都会回来。
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readStyles } from './cssSource';
 
-const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8');
+const css = readStyles();
 
 /** 取选择器的声明块首段（`\n选择器 { … }`）：不解析嵌套，够用且不会误匹配注释里的同类文字 */
 function block(selector: string): string {
   const at = css.indexOf(`\n${selector} {`);
-  if (at < 0) throw new Error(`index.css 里找不到规则 ${selector}`);
+  if (at < 0) throw new Error(`样式文本里找不到规则 ${selector}`);
   return css.slice(at, css.indexOf('}', at));
 }
 

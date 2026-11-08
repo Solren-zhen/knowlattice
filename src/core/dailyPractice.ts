@@ -12,6 +12,9 @@
 import { composeQuestions, type ComposeRules } from './qbankCompose';
 import type { QuizBank, QuizQuestion } from './qbank';
 import type { StatsMap } from './qbankStats';
+import { todayKey } from './dateKey';
+
+export { todayKey };
 
 const KEY = 'knowlattice-daily-practice';
 
@@ -19,14 +22,6 @@ const KEY = 'knowlattice-daily-practice';
 export const DAILY_COUNT = 20;
 /** 每日一练可选题量 */
 export const DAILY_COUNT_OPTIONS = [10, 20, 30, 50];
-
-/** 本地日历日 `YYYY-MM-DD`（与 core/stats.ts 同一口径，跨时区不会错位）。 */
-export function todayKey(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
 
 function addDays(iso: string, n: number): string {
   const [y, m, d] = iso.split('-').map(Number);

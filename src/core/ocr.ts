@@ -149,7 +149,7 @@ export async function ocrPdfToMarkdown(
   const doc = (await openPdf(file)) as {
     numPages: number;
     getPage: (n: number) => Promise<unknown>;
-    destroy: () => Promise<void>;
+    loadingTask: { destroy: () => Promise<void> };
   };
 
   const total = Math.min(doc.numPages, MAX_OCR_PAGES);
@@ -173,7 +173,7 @@ export async function ocrPdfToMarkdown(
     }
   } finally {
     await worker.terminate();
-    await doc.destroy();
+    await doc.loadingTask.destroy();
   }
 
   onProgress?.({ ratio: 1, label: '整理结果' });

@@ -1,7 +1,7 @@
 /**
  * 医学速查：症状 → 疾病 / 方剂口诀。
  *
- * 两个页签共用一条本地数据加载路径。内置数据 + 公有领域口诀 + 用户自建三合一，
+ * 两个页签共用一条本地数据加载路径。内置数据、用户修改与隐藏清单三合一，
  * 用户条目同名时覆盖内置（自己改的不能被生成物盖回去）。
  *
  * 「新增/编辑」就地展开成表单，不弹二级对话框：医学速查是随手查的东西，
@@ -25,6 +25,8 @@ import {
 } from '../core/medRef';
 import {
   MY_BOOK,
+  loadHiddenMnemonics,
+  loadHiddenSymptoms,
   loadUserMnemonics,
   loadUserSymptoms,
   mergeMnemonicBooks,
@@ -34,8 +36,8 @@ import {
   upsertUserSymptom,
   type UserMnemonic,
 } from '../core/medRefStore';
-import { PUBLIC_MNEMONIC_BOOK } from '../core/publicMnemonics';
 import { IconClose } from './icons';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   onClose: () => void;
@@ -78,6 +80,8 @@ export default function MedRefView({ onClose, onToast }: Props) {
   const [catFilter, setCatFilter] = useState('');
   const [userSyms, setUserSyms] = useState<MedSymptom[]>(loadUserSymptoms);
   const [userMnes, setUserMnes] = useState<UserMnemonic[]>(loadUserMnemonics);
+  const [hiddenSyms, setHiddenSyms] = useState<string[]>(loadHiddenSymptoms);
+  const [hiddenMnes, setHiddenMnes] = useState(loadHiddenMnemonics);
   const [symDraft, setSymDraft] = useState<SymDraft | null>(null);
   const [mneDraft, setMneDraft] = useState<MneDraft | null>(null);
 
@@ -90,12 +94,12 @@ export default function MedRefView({ onClose, onToast }: Props) {
   }, []);
 
   const allSymptoms = useMemo(
-    () => mergeSymptoms(data?.symptoms ?? [], userSyms),
-    [data, userSyms],
+    () => mergeSymptoms(data?.symptoms ?? [], userSyms, hiddenSyms),
+    [data, userSyms, hiddenSyms],
   );
   const allBooks = useMemo<MedMnemonicLib[]>(
-    () => mergeMnemonicBooks([...(data?.books ?? []), PUBLIC_MNEMONIC_BOOK], userMnes),
-    [data, userMnes],
+    () => mergeMnemonicBooks(data?.books ?? [], userMnes, hiddenMnes),
+    [data, userMnes, hiddenMnes],
   );
 
   const symptoms = useMemo(
@@ -110,7 +114,7 @@ export default function MedRefView({ onClose, onToast }: Props) {
       .filter((book) => book.entries.length > 0);
   }, [allBooks, q, catFilter]);
 
-  /** 两个页签各有一套分类：症状按「发热」这类证候分，口诀按「补益之剂」这类门类分 */
+  /** 两个页签各有一套分类：症状按证候分，口诀按用户自己的门类分 */
   const symCats = useMemo(() => countCats(allSymptoms.map((s) => s.cat)), [allSymptoms]);
   const mneCats = useMemo(
     () => countCats(allBooks.flatMap((book) => book.entries.map((e) => e.cat))),
@@ -132,6 +136,7 @@ export default function MedRefView({ onClose, onToast }: Props) {
       symDraft.original || undefined,
     );
     setUserSyms(loadUserSymptoms());
+    setHiddenSyms(loadHiddenSymptoms());
     setSymDraft(null);
     onToast?.(ok ? '症状已保存' : '没存上：本机存储已满或被禁用', ok ? 'ok' : 'err');
   };
@@ -149,12 +154,13 @@ export default function MedRefView({ onClose, onToast }: Props) {
       mneDraft.original || undefined,
     );
     setUserMnes(loadUserMnemonics());
+    setHiddenMnes(loadHiddenMnemonics());
     setMneDraft(null);
     onToast?.(ok ? '口诀已保存' : '没存上：本机存储已满或被禁用', ok ? 'ok' : 'err');
   };
 
   return (
-    <div className="panel-backdrop" onClick={onClose}>
+    <PanelOverlay tone="plain" onClose={onClose}>
       <div className="panel panel--full medref-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head">
           <span className="panel__title">医学速查</span>
@@ -262,7 +268,6 @@ export default function MedRefView({ onClose, onToast }: Props) {
               </div>
             )}
             {symptoms.map((s) => {
-              const mine = userSyms.some((u) => u.name === s.name);
               return (
                 <div key={s.name} className="medref-row medref-row--sym">
                   <div className="medref-row__main">
@@ -272,27 +277,24 @@ export default function MedRefView({ onClose, onToast }: Props) {
                   <div className="medref-sym">
                     {s.diseases.map((d) => <span key={d} className="chip chip--static">{d}</span>)}
                   </div>
-                  {mine && (
-                    <>
-                      <button
-                        className="btn-small"
-                        onClick={() => setSymDraft({
-                          original: s.name,
-                          name: s.name,
-                          cat: s.cat,
-                          diseases: s.diseases.join('、'),
-                        })}
-                      >编辑</button>
-                      <button
-                        className="btn-small"
-                        onClick={() => {
-                          const ok = removeUserSymptom(s.name);
-                          setUserSyms(loadUserSymptoms());
-                          onToast?.(ok ? `已删除自建条目：${s.name}` : '没删掉：本机存储不可用', ok ? 'ok' : 'err');
-                        }}
-                      >删除</button>
-                    </>
-                  )}
+                  <button
+                    className="btn-small"
+                    onClick={() => setSymDraft({
+                      original: s.name,
+                      name: s.name,
+                      cat: s.cat,
+                      diseases: s.diseases.join('、'),
+                    })}
+                  >编辑</button>
+                  <button
+                    className="btn-small"
+                    onClick={() => {
+                      const ok = removeUserSymptom(s.name);
+                      setUserSyms(loadUserSymptoms());
+                      setHiddenSyms(loadHiddenSymptoms());
+                      onToast?.(ok ? `已删除症状：${s.name}` : '没删掉：本机存储不可用', ok ? 'ok' : 'err');
+                    }}
+                  >删除</button>
                 </div>
               );
             })}
@@ -308,7 +310,7 @@ export default function MedRefView({ onClose, onToast }: Props) {
               onChange={(e) => setMneDraft({ ...mneDraft, term: e.target.value })}
             />
             <input
-              placeholder="分类，如 补益之剂（选已有的或直接写新的）"
+              placeholder="分类（选已有的或直接写新的）"
               aria-label="口诀分类"
               list="medref-mne-cats"
               value={mneDraft.cat}
@@ -325,7 +327,7 @@ export default function MedRefView({ onClose, onToast }: Props) {
               onChange={(e) => setMneDraft({ ...mneDraft, body: e.target.value })}
             />
             <input
-              placeholder="备注/主治（可空）"
+              placeholder="备注（可空）"
               aria-label="口诀备注"
               value={mneDraft.tip}
               onChange={(e) => setMneDraft({ ...mneDraft, tip: e.target.value })}
@@ -339,7 +341,11 @@ export default function MedRefView({ onClose, onToast }: Props) {
 
         {tab === 'mnemonics' && (
           <div className="medref-list">
-            {data && books.length === 0 && <div className="muted medref-tip">没找到「{q}」。</div>}
+            {data && books.length === 0 && (
+              <div className="muted medref-tip">
+                {q || catFilter ? `没有匹配${q ? `「${q}」` : ''}的口诀。` : '还没有口诀，点「＋ 新增」添加一条。'}
+              </div>
+            )}
             {books.map((book) => (
               <div key={book.book} className="medref-lib">
                 <div className="medref-lib__head">
@@ -347,38 +353,34 @@ export default function MedRefView({ onClose, onToast }: Props) {
                   {book.note && <span className="muted">{book.note}</span>}
                 </div>
                 {book.entries.map((e) => {
-                  const mine = userMnes.some((u) => u.book === book.book && u.term === e.term);
                   return (
                     <div key={e.term} className="medref-row medref-row--mne">
                       <div className="medref-row__main">
                         <b>{e.term}</b>
                         <span className="muted">{e.cat}</span>
                         <span className="medref-detail">{e.body}</span>
-                        {e.tip && <span className="medref-mne">{mine ? '' : '主治：'}{e.tip}</span>}
+                        {e.tip && <span className="medref-mne">备注：{e.tip}</span>}
                       </div>
-                      {mine && (
-                        <>
-                          <button
-                            className="btn-small"
-                            onClick={() => setMneDraft({
-                              original: e.term,
-                              book: book.book,
-                              term: e.term,
-                              cat: e.cat,
-                              body: e.body,
-                              tip: e.tip,
-                            })}
-                          >编辑</button>
-                          <button
-                            className="btn-small"
-                            onClick={() => {
-                              const ok = removeUserMnemonic(book.book, e.term);
-                              setUserMnes(loadUserMnemonics());
-                              onToast?.(ok ? `已删除自建口诀：${e.term}` : '没删掉：本机存储不可用', ok ? 'ok' : 'err');
-                            }}
-                          >删除</button>
-                        </>
-                      )}
+                      <button
+                        className="btn-small"
+                        onClick={() => setMneDraft({
+                          original: e.term,
+                          book: book.book,
+                          term: e.term,
+                          cat: e.cat,
+                          body: e.body,
+                          tip: e.tip,
+                        })}
+                      >编辑</button>
+                      <button
+                        className="btn-small"
+                        onClick={() => {
+                          const ok = removeUserMnemonic(book.book, e.term);
+                          setUserMnes(loadUserMnemonics());
+                          setHiddenMnes(loadHiddenMnemonics());
+                          onToast?.(ok ? `已删除口诀：${e.term}` : '没删掉：本机存储不可用', ok ? 'ok' : 'err');
+                        }}
+                      >删除</button>
                     </div>
                   );
                 })}
@@ -387,6 +389,6 @@ export default function MedRefView({ onClose, onToast }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </PanelOverlay>
   );
 }

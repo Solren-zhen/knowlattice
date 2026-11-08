@@ -1,0 +1,697 @@
+/* ============================================================
+   KnowLattice 设计系统 v3 · Operate 模式（极光临床蓝紫 Aurora Indigo）
+   原则：工具消失于任务；一致性 > 惊喜；动效只传达状态。
+   ============================================================ */
+
+:root {
+  /* ---- 中性色阶（清透珍珠锌冷灰：衬托科技极光靛蓝） ---- */
+  --bg: #f8f9fb;
+  --bg-raised: #ffffff;
+  --panel: #f1f4f8;
+  --panel-deep: #e5eaf2;
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.15);
+  --border-accent: rgba(79, 70, 229, 0.32);
+
+  /* ---- 文字 ---- */
+  --text: #0f172a;
+  --text-2: #334155;
+  --muted: #475569;
+
+  /* ---- 强调色：主操作/选中/状态（极光靛蓝 Indigo） ---- */
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: rgba(79, 70, 229, 0.08);
+  --accent-ring: rgba(79, 70, 229, 0.28);
+  /* 主色填充之上的文字色：浅色用白，深色反转为深墨，两主题均 ≥4.5:1 */
+  --accent-ink: #ffffff;
+  /* 渐变顶端压暗 2%：白字压在 #6366f1 上只有 4.47:1 不达 AA，
+     #5f63ee 达到 4.66:1；底端 #4f46e5 为 6.29:1。 */
+  --grad-primary: linear-gradient(180deg, #5f63ee 0%, var(--accent) 100%);
+  --grad-primary-hover: linear-gradient(180deg, #4f46e5 0%, var(--accent-hover) 100%);
+
+  /* ---- 状态色 ---- */
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.06);
+  --success: #10b981;
+  /* 中性警示与信息色：判分按钮 hover 的描边/淡底用，文字压淡底时改用 -text 变体（见下） */
+  --amber: #f59e0b;
+  --cyan: #06b6d4;
+  /* 状态色填充之上的文字色：与 --accent-ink 同一套规则，浅色深色都 ≥4.5:1
+     （白字在 --success 上只有 2.54:1、深色下在 --danger 上 2.77:1） */
+  --success-ink: #052e22;
+  --danger-ink: #ffffff;
+  /* 状态色「文字压自身淡底」的变体：原色直接压在自己的 6~8% 淡底上时，
+     浅色主题只有 2.0~4.4:1（困难 2.02 / 简单 2.26 / 重来 3.39 / 危险 4.40）。
+     描边与填充仍用原色，只有文字改用这里的深色变体。 */
+  --danger-text: #b91c1c;
+  --amber-text: #b45309;
+  --cyan-text: #0e7490;
+  /* 判分对的 ✓ 等文字用 --success-text：#10b981 压在 12% 成功淡底上
+     只有 2.54:1，不达 4.5:1。 */
+  --success-text: #047857;
+  --warn-bg: #eff6ff;
+  --warn-border: #bfdbfe;
+  --warn-text: #1d4ed8;
+
+  /* ---- 文本高亮（==文字==）----
+     醒目实底 + 反白字：白字压 #dc2626 = 4.83:1（达 AA），压在浅色纸面上对比强烈。
+     深色主题沿用同一组值：红底在 #08090d 上同样立得住。
+     用户可在导航轨「高亮色」里换色，由 core/highlight.ts 覆写到这两个变量。 */
+  --hl-bg: #dc2626;
+  --hl-ink: #ffffff;
+
+  /* ---- 空状态入口的常驻气泡 ----
+     蓝紫取自本应用的强调色族（--accent 靛蓝 #4f46e5 / 深色 #818cf8），与背景同源，
+     不引入第二种色相。气泡常驻可见，底色必须基本不透明：它压在晶格纹之上，
+     半透明会让纹路透进文字里。 */
+  --bubble-bg: #e6e9fd;
+  /* 描边透明度 0.5：压在本页底上约 2.46:1，与深色主题的 2.53:1 对齐。
+     浅色下气泡底与页面底都是高明度，亮度差只有 1.19:1，
+     气泡的轮廓靠这条描边立住，因此不能再调淡。 */
+  --bubble-border: rgba(79, 70, 229, 0.50);
+  --bubble-ink: #3730a3;
+  --bubble-shadow: 0 1px 2px rgba(79, 70, 229, 0.10);
+
+  /* ---- 字体：三套字栈各司其职，统一从变量出口 ----
+     --font-ui      界面文字（现代科技无衬线字栈，Linear / Raycast 级）
+     --font-reading 笔记正文（默认同界面字栈；切「衬线 / 等宽」时随 data-font 改变）
+     --font-mono    代码块、公式报错、按键提示等真正的等宽语境
+     正文绑定 --font-reading，不跟随 .cm-scroller 的字栈，
+     「切换字体」对界面与笔记正文同时生效。 */
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-reading: var(--font-ui);
+  --font-mono: 'Cascadia Code', 'Fira Code', Consolas, 'JetBrains Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
+  /* --font-hand 手写/手绘语境（通路图的节点与酶名）：与正文/等宽分开，出口仍统一在变量上 */
+  --font-hand: 'KaiTi', 'STKaiti', 'Kaiti SC', 楷体, var(--font-ui);
+  /* --font-display 标题层字栈：只给「标题 / 空态大标题 / 消息内 h1-h4」用。
+     正文永远走 --font-ui/--font-reading——衬线只用在一层上，层级才立得住；
+     多了会变成半本书，标题与正文互相抵消。系统自带的宋体族在 Win/mac 都有，不回退到网络字体。 */
+  --font-display: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  color-scheme: light;
+
+  /* ---- 动效（按运动角色分层缓动；取值与配比取自 video-shotcraft 镜头卡参数表） ----
+     一个 --ease 打全场的问题：进场、退场、循环是三类不同的运动，共用同一条强缓出
+     曲线会同时丢掉「落位的那一下」和「循环的匀速感」。分四档：
+     --ease-out   强缓出：进场与状态变化，落位快、收尾软（默认，等价于 --ease）
+     --ease-in    退场：起步慢、加速离开。退场用缓出曲线＝该走的元素在屏幕上磨蹭
+     --ease-in-out 对称：循环/呼吸类（脉冲、微光扫光、打字点）。单向强缓出挂在
+                   infinite 上会「一闪一爬」，读作卡顿（aesthetic-rules R2 同族）
+     --ease-back  软过冲 ≈1%：把落位那一帧从「停」变成「扣住」（list-reveal 卡：
+                   bezier(0.3, 1.18, 0.5, 1)，刻意小到几乎读不出来才算软件过冲） */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-back: cubic-bezier(0.3, 1.18, 0.5, 1);
+  /* 交互元素的过渡属性集：只动 paint/compositor 层（颜色/阴影/位移/透明度），
+     不带 layout 属性——transition:all 会把 padding/宽度拉进动画，
+     且每次属性变化都要全量比对。fill/stroke 是 SVG 控件（pw-svg 等）需要的。 */
+  --tr-interact: color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease),
+    fill var(--t-fast) var(--ease), stroke var(--t-fast) var(--ease);
+  --t-fast: 130ms;
+  --t-med: 200ms;
+  --t-slow: 260ms;
+  --t-exit: 160ms; /* 退场比进场快一档：消失的元素不需要被看清 */
+
+  /* ---- 按压物理（第 8 项）----
+     缩放差值按控件尺寸分档：小控件要更大的差值才有同样的「按下去」手感，
+     所以不是所有按钮都写 0.96。释放回弹的过冲量单独给一个令牌。 */
+  --press-scale-sm: 0.93;   /* 42px 图标按钮（.rail-btn） */
+  --press-scale: 0.96;      /* 常规按钮与胶囊 */
+  --press-scale-lg: 0.985;  /* 大块可点面（答题选项 .opt） */
+  --press-overshoot: 0.006; /* 释放回弹峰值：越过静止位 0.6%，读得出但不跳 */
+  --press-dur: 90ms;        /* 按下成型：要快，按下去不该等 */
+  --press-rebound: 220ms;   /* 释放回弹总时长 */
+  --press-inset: inset 0 2px 6px rgba(15, 23, 42, 0.12), inset 0 1px 1px rgba(15, 23, 42, 0.07);
+
+  /* ---- 阴影与光影层级（双层柔和漫射 + 极光氛围微光） ---- */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.03);
+  --shadow-md: 0 4px 16px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 14px 40px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.05);
+  --shadow-modal: 0 24px 64px -12px rgba(15, 23, 42, 0.2), 0 8px 24px -4px rgba(15, 23, 42, 0.06);
+  --glow-accent: 0 0 0 1px rgba(79, 70, 229, 0.18), 0 4px 18px -2px rgba(79, 70, 229, 0.3);
+
+  /* ---- 圆角体系 ---- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  /* 卡片级容器档：面板内卡片与外壳 .card 共用的 16px（19-panel-skin / 06-shell-polish） */
+  --r-card: 16px;
+
+  /* ---- 间距体系 ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* ---- 玻璃拟态与双层镜面高光 (Linear / Raycast 级 Bento 质感) ---- */
+  --panel-glass: rgba(248, 250, 252, 0.78);
+  --panel-glass-strong: rgba(248, 250, 252, 0.9);
+  --glass-surface: rgba(255, 255, 255, 0.88);
+  --glass-shine: inset 0 1px 0 0 rgba(255, 255, 255, 0.9), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  --glass-border: rgba(15, 23, 42, 0.08);
+  --glass-blur: blur(16px) saturate(180%);
+  /* ---- 欢迎页中心柔光 ----
+     0.82 的纯白柔光会把首屏网格与极光背景压成一片灰白，标题与徽标都显脏。
+     降到 0.72：正文仍是 #0f172a 压近白底（对比度 >15:1），只是让装饰背景重新透出来。 */
+  --hero-halo: rgba(248, 250, 252, 0.72);
+  /* ---- 首屏晶格纹（与应用背景的六边网格同源，仅作装饰） ---- */
+  --lattice-line: rgba(79, 70, 229, 0.13);
+  /* 正文两侧的「呼吸边距」。早先这里是 --read-width: 900px，正文按它居中：
+     窗口 1856px 时两侧各空 400px，用户实测反馈「笔记不能铺满整个界面」。
+     现在正文铺满整栏，只留这条边距；行长由换行 + 阅读字号保证，不再靠砍宽度。 */
+  --read-gutter: clamp(12px, 2.2vw, 30px);
+}
+
+/* ---- 浏览器表面主题化 ---- */
+::selection { background: rgba(79, 70, 229, 0.18); }
+* { caret-color: var(--accent); }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+/* Firefox：滚动条同样从主题取色（等效 8px 细条） */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    /* 关键帧一律压平：入场、抖动、循环位移都不该播 */
+    animation-duration: 0.01ms !important;
+    /* 延迟必须显式清零：兜底压不住 animation-delay，列表项会白等半秒 */
+    animation-delay: 0ms !important;
+    /* 过渡只保留颜色/透明度一类：transform / width / height 被摘掉，位置变化消失；
+       悬停变色、焦点描边、按下反馈仍以 120ms 过渡。
+       为什么用 transition-property 收窄而不是把 duration 压成 0.01ms：
+       后者会把 41 处 --tr-interact 的**颜色**反馈一起变成硬切 —— 那是「归零」而不是
+       「减少」（AUDIT.md §6）。收窄属性才是「保留有助于理解的过渡，去掉位置变化」。
+       注意：这里的 !important 会盖过下方各降级块里的 `transition: none`
+       （如 .glide-ink、.rail-indicator），效果是那些元素从「瞬变」变成
+       「只对颜色/透明度做 120ms 过渡」，位移仍然瞬变 —— 方向是对的。 */
+    transition-property: color, background-color, border-color, box-shadow, opacity, fill, stroke !important;
+    transition-duration: 120ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* ============================================================ 排版标尺
+   全站字号收敛为 6 级：一个角色在任何面板里都是同一个字号、字重、行高，
+   不允许出现 12.5 / 13.3 这类杂散值。
+     微型 M  11px   角标 / 计数 / 坐标 / 快捷键旁注
+     说明 C  12px   说明文案（.muted 一类）
+     控件 K  12.5px 按钮、输入框、下拉、chip、选项卡
+     正文 B  13px   面板内列表行 / 菜单项 / 摘录
+     标题 T  14.5px 面板标题
+     主级 L  15px   空态标题、主 CTA、题干
+   字号之外的两条：控件文字一律 500 字重（主 CTA 600），行高一律 1.3，
+   保证同一行里的控件看起来是同一套字体。 */
+:root {
+  --fs-micro: 11px;
+  --fs-caption: 12px;
+  --fs-control: 12.5px;
+  --fs-body: 13px;
+  --fs-title: 14.5px;
+  --fs-lead: 15px;
+  /* 展示与数字档：把散在各面板的大号字值收进令牌（等值迁移，不改观感） */
+  --fs-display: 24px;
+  --fs-num-lg: 26px;
+  --fs-num-xl: 44px;
+  --fs-num-xxl: 64px;
+  --lh-control: 1.3;
+  --lh-caption: 1.5;
+  --fw-control: 500;
+  --fw-title: 650;
+}
+
+/* ============================================================ 基础 */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+/* 应用底层背景图与 Linear 极光氛围：固定、铺满、主内容区透明面板可通透折射极光 */
+body {
+  background-color: var(--bg);
+  background-image: url('/background.svg');
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  color: var(--text);
+  position: relative;
+}
+/* 环境光场（液态玻璃的「壁纸」层）。
+   玻璃好不好看，取决于它背后有没有值得折射的东西：纯色底上的玻璃就是一块白卡。
+   这里用四团大半径低饱和色池 + 一道斜向镜面反光，整体在 90s 内缓慢漂移，
+   远看是带冷暖过渡的白玻璃，近看才有颜色。透明度压在 0.11–0.20：
+   色相多、但饱和度低，才不会回到「眼花缭乱」。 */
+body::before {
+  content: '';
+  position: fixed;
+  /* 外扩 10%：漂移时边缘不会露出空白 */
+  inset: -10%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(52% 46% at 16% 18%, rgba(99, 102, 241, 0.20) 0%, rgba(99, 102, 241, 0) 72%),
+    radial-gradient(46% 42% at 82% 8%, rgba(139, 92, 246, 0.14) 0%, rgba(139, 92, 246, 0) 74%),
+    radial-gradient(44% 40% at 74% 84%, rgba(34, 211, 238, 0.13) 0%, rgba(34, 211, 238, 0) 76%),
+    radial-gradient(38% 34% at 18% 86%, rgba(59, 130, 246, 0.11) 0%, rgba(59, 130, 246, 0) 76%),
+    /* 两道镜面反光：一强一弱、角度不同，模拟玻璃把环境光折成两条的高光边 */
+    linear-gradient(118deg, transparent 34%, rgba(255, 255, 255, 0.5) 47%,
+      rgba(190, 210, 255, 0.22) 53%, transparent 64%),
+    linear-gradient(62deg, transparent 24%, rgba(255, 255, 255, 0.34) 31%,
+      rgba(220, 235, 255, 0.12) 35%, transparent 44%);
+  animation: bg-ambient 90s ease-in-out infinite alternate;
+}
+@keyframes bg-ambient {
+  0% { transform: translate3d(-1.5%, -1%, 0) scale(1.02); }
+  50% { transform: translate3d(1%, 1.5%, 0) scale(1.05); }
+  100% { transform: translate3d(2%, -1%, 0) scale(1.03); }
+}
+#root {
+  position: relative;
+  z-index: 1;
+}
+/* 表单控件默认不继承排版：UA 样式表给 button/input/select/textarea 指定了
+   Arial 13.33px，必须把整套 font 属性交给继承，控件文字才能与所在上下文
+   完全一致（只补 font-family 的话 input/select 仍是 Arial 13.3333px）。 */
+button, input, select, textarea { font: inherit; letter-spacing: inherit; }
+.muted { color: var(--muted); font-size: var(--fs-caption); }
+
+.loading {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; color: var(--muted);
+}
+
+/* 知识库加载失败拦截页（见 core/vault.ts + views/Workspace.tsx）：
+   库没读出来时停在这里，不进入可写状态。样式自足——此时应用其余部分都没渲染。 */
+.load-error {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; height: 100%; padding: 24px; text-align: center;
+}
+.load-error h2 { margin: 0; font-size: 17px; font-weight: 600; color: var(--text); }
+.load-error-msg {
+  max-width: 480px; margin: 0; padding: 10px 14px;
+  border: 1px solid var(--danger-soft); border-radius: var(--r-md);
+  background: var(--bg-raised); color: var(--danger-text);
+  font-size: var(--fs-caption); line-height: 1.6; word-break: break-word;
+}
+.load-error .muted { max-width: 480px; margin: 0; line-height: 1.6; }
+/* .btn-primary 默认整行宽（表单主按钮），这里收窄到内容宽度 */
+.load-error .btn-primary { width: auto; padding: 8px 22px; font-size: var(--fs-control); }
+
+/* ============================================================ 按钮 */
+.btn-small,
+.btn-icon {
+  display: inline-flex; align-items: center; gap: 5px;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-2);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  box-shadow: var(--shadow-xs), var(--glass-shine);
+  transition: var(--tr-interact);
+}
+/* 控件标签永远单行：这些按钮不少是定高 28px 的（工具栏/面板头），一旦允许折行，
+   两行文字会撑出按钮盒子压到相邻元素上（复习页头部的「← 返回主页面」就是这样）。 */
+.btn-small { padding: 5px 12px; font-size: var(--fs-control); line-height: var(--lh-control); font-weight: var(--fw-control); white-space: nowrap; }
+/* 纯图标按钮显式声明控件级字号，避免吃 UA 默认的 13.3333px */
+.btn-icon  { width: 28px; height: 28px; padding: 0; font-size: var(--fs-control); line-height: var(--lh-control); }
+.btn-small:hover, .btn-icon:hover {
+  border-color: var(--border-accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-sm), var(--glow-accent);
+  transform: translateY(-1px);
+}
+.btn-small:active, .btn-icon:active {
+  transform: translateY(0) scale(var(--press-scale));
+  box-shadow: var(--press-inset);
+  transition-duration: var(--press-dur);
+}
+.btn-small:disabled, .btn-icon:disabled {
+  /* 0.45 的不透明度在玻璃底上仍带完整边框与底色，看起来仍可点。
+     disabled 的第一信号是「变平」：去边框、去阴影、压字色，其次才是降不透明度。 */
+  opacity: 0.55; cursor: not-allowed;
+  transform: none; box-shadow: none;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.btn-small:disabled:hover, .btn-icon:disabled:hover {
+  border-color: transparent; background: transparent; color: var(--muted);
+}
+/* 实底主按钮的 disabled 保持「存在但压暗」，不能被上面的透明化掏空 */
+.btn-primary:disabled {
+  opacity: 0.5; cursor: not-allowed;
+  border-color: transparent;
+  background: var(--panel-deep);
+  color: var(--muted);
+  box-shadow: none;
+}
+.btn-small.danger:hover {
+  border-color: var(--danger);
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.2);
+}
+.btn-primary {
+  display: block; width: 100%;
+  background: var(--grad-primary);
+  color: var(--accent-ink);
+  border: 1px solid rgba(255, 255, 255, 0.2); border-radius: var(--r-md);
+  padding: 12px 0; font-size: var(--fs-lead); font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px -2px rgba(79, 70, 229, 0.45), var(--glow-accent), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: color var(--t-med) var(--ease), background-color var(--t-med) var(--ease), border-color var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease), transform var(--t-med) var(--ease), opacity var(--t-med) var(--ease);
+}
+.btn-primary:hover {
+  background: var(--grad-primary-hover);
+  box-shadow: 0 8px 24px -2px rgba(79, 70, 229, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  transform: translateY(0) scale(var(--press-scale));
+  box-shadow: var(--press-inset), 0 2px 8px rgba(79, 70, 229, 0.35);
+  transition-duration: var(--press-dur);
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  font-size: var(--fs-micro);
+  font-weight: 550;
+  font-family: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-bottom: 2px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text-2);
+  line-height: 1.4;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  letter-spacing: 0.02em;
+}
+[data-theme='dark'] kbd {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  border-bottom-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* ============================================================ 目录面板（原侧边栏）
+   布局重构后：导航职责移交左侧 rail，本面板只承载「新建 + 目录树 + 数据操作」，
+   并被包在 .card 里作为悬浮卡片出现。 */
+.tree-panel {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-header {
+  /* 定位上下文：它的宽度 = 面板宽，所以「⋯」菜单（.more-menu）以它为基准做右对齐 + 宽度上限，
+     菜单才不会比侧栏宽（见下方 .more-wrap .more-menu 的注释）。 */
+  position: relative;
+  /* 新建 + 「⋯」两个控件一行 */
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 6px;
+  /* 头部与筛选行之间不再画分割线：背景渐变已经完成了「这是一块头部」的表达，
+     实线只会增加视觉噪声（用户点名：减少不必要的分割线） */
+  background: linear-gradient(180deg, var(--panel) 0%, transparent 100%);
+}
+.header-actions { display: flex; gap: 6px; width: 100%; align-items: center; justify-content: space-between; }
+
+/* 侧栏头部：新建 = 主动作（带文字）；备份/导入导出/批量删除收纳进「⋯」 */
+.new-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2); color: var(--accent-ink);
+  background: var(--grad-primary);
+  border-radius: var(--r-md);
+  padding: 0 13px; height: 28px;   /* 与同排的 .btn-icon 对齐 */
+  font-size: var(--fs-control); font-weight: 600; font-family: inherit;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px -1px rgba(79, 70, 229, 0.4), var(--glow-accent), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  transition: var(--tr-interact);
+}
+.new-btn:hover {
+  background: var(--grad-primary-hover);
+  box-shadow: 0 4px 14px -1px rgba(79, 70, 229, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transform: translateY(-1px);
+}
+.new-btn:active {
+  transform: translateY(0) scale(0.96);
+  box-shadow: 0 1px 4px rgba(79, 70, 229, 0.35);
+}
+/* 「⋯」菜单的定位上下文是**侧栏头部**（宽度 = 面板宽），不是那个 28px 的按钮外壳：
+   菜单右对齐到头部内边距处、宽度以头部宽为上限，于是它永远不会比侧栏宽。
+   事故现场：菜单按内容宽铺开（最长那行「导入笔记（.md / .json / … / .csv）」→ 整个菜单 417px），
+   而侧栏只有 263px → 菜单左边缘被拖到面板外约 167px，被 .tree-panel{overflow:hidden} 裁掉，
+   用户看到的是面板底部孤零零一行「…pkg / .txt / .docx / .pdf / .xlsx / .csv)」。
+   所以：**不要给 .more-wrap 加 position**（.sidebar-header 才是定位上下文，见上方主规则）；
+   下面这条的特异性还需高于 .import-menu 的 left:0，否则右对齐被覆盖、菜单会冲出卡片被裁剪。 */
+.more-wrap .more-menu { left: auto; right: 12px; max-width: calc(100% - 24px); }
+/* 长标签允许换行：一行放不下时宁可折行，也不许把菜单顶得比侧栏还宽；
+   flex:none 保住行首图标（否则折行时它会被一起压缩）。 */
+.more-menu div { display: flex; align-items: center; gap: 8px; white-space: normal; overflow-wrap: anywhere; }
+.more-menu div > svg { flex: none; }
+.more-menu div.menu-danger { color: var(--danger); }
+.more-menu div.menu-danger:hover { color: var(--danger-text); background: rgba(220, 38, 38, 0.07); }
+
+/* 导入方式选择菜单 */
+.import-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 60;
+  background: var(--bg-raised);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+  /* min-width 也用同一套上限：面板窄到放不下 220px 时，宁可菜单更窄，也不许它比侧栏宽
+     （min-width 优先于 max-width，若这里是死值 220px，窄侧栏下裁剪会再次出现） */
+  padding: 5px; min-width: min(220px, calc(100% - 24px));
+  animation: rise-in var(--t-fast) var(--ease);
+}
+.import-menu div {
+  padding: 8px 12px; border-radius: var(--r-sm);
+  font-size: var(--fs-body); cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+.import-menu div:hover { background: var(--accent-soft); color: var(--accent); }
+
+.new-note {
+  display: flex; flex-direction: column; gap: 6px; padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  animation: slide-down var(--t-med) var(--ease);
+}
+/* 新建向导：类型选择 chips */
+.new-note-types { display: flex; flex-wrap: wrap; gap: 4px; }
+.type-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: var(--fs-control); font-family: inherit;
+  cursor: pointer;
+  transition: var(--tr-interact);
+}
+.type-chip:hover { border-color: var(--accent); color: var(--accent); }
+.type-chip.on {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+}
+.new-note-row { display: flex; gap: 6px; }
+.new-note-dir {
+  font-size: var(--fs-caption); color: var(--accent); cursor: pointer;
+  padding: 3px 8px; border-radius: var(--r-sm);
+  background: var(--accent-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.new-note input {
+  flex: 1; min-width: 0; padding: 6px 10px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--bg-raised); font-size: var(--fs-control);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.new-note input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  outline: none;
+}
+
+.tree {
+  overflow-y: auto; flex: 1; padding: var(--sp-1) var(--sp-2);
+  /* 目录滚动条跟着主题走：系统默认的浅灰槽压在玻璃卡片上会割裂 */
+  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+}
+.tree::-webkit-scrollbar { width: 8px; }
+.tree::-webkit-scrollbar-track { background: transparent; }
+.tree::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: 999px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+.tree::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box; }
+/* 批量勾选框 */
+.tree-row .ck {
+  width: 14px; height: 14px; flex-shrink: 0;
+  border: 1.5px solid var(--border-strong); border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-micro); color: transparent; font-weight: 700;
+  transition: var(--tr-interact);
+}
+.tree-row .ck.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tree-row .dir-count {
+  margin-left: auto; min-width: 18px; text-align: right;
+  font-size: var(--fs-micro); font-weight: 600; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  /* 纯数字、无药丸底：计数是辅助信息，不该比章节名更醒目 */
+}
+
+/* 目录筛选框：header 下一行，安静实底 + 主题边框；聚焦时才亮起 */
+.tree-search {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0 12px 6px; padding: 0 8px; height: 28px; flex-shrink: 0;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--panel-deep) 55%, transparent);
+  color: var(--muted);
+  transition: var(--tr-interact);
+}
+.tree-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  color: var(--text-2);
+}
+.tree-search input {
+  flex: 1; min-width: 0; border: 0; padding: 0;
+  background: none; outline: none;
+  color: var(--text); font: inherit; font-size: var(--fs-caption);
+}
+.tree-search input::placeholder { color: var(--muted); }
+.tree-search-hint { flex-shrink: 0; font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums; }
+.tree-search-clear {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0; border: none; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.tree-search-clear:hover { color: var(--text); background: var(--panel-deep); }
+/* 批量操作条 */
+.tree-batchbar {
+  border-top: 1px solid var(--border); padding: 8px 12px;
+  display: flex; align-items: center; gap: 8px; font-size: var(--fs-caption);
+  background: var(--panel-glass-strong);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-sm), var(--glass-shine);
+  animation: rise-in var(--t-med) var(--ease);
+}
+.tree-batchbar .count { flex: 1; color: var(--text-2); font-variant-numeric: tabular-nums; font-weight: 500; }
+.tree-batchbar .del { border-color: var(--danger); color: var(--danger-text); background: rgba(220, 38, 38, 0.06); }
+.tree-batchbar .del:disabled { opacity: 0.4; }
+.tree-row {
+  /* 固定行高：虚拟滚动按 26px/行 窗口化渲染（ChapterTree ROW_H） */
+  height: 26px; flex-shrink: 0;
+  position: relative; /* 缩进引导线（::before）的定位上下文 */
+  padding: 0 10px; border-radius: var(--r-sm); cursor: pointer;
+  font-size: var(--fs-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  user-select: none;
+  display: flex; align-items: center; gap: 6px;
+  transition: var(--tr-interact);
+}
+/* 目录行 = 结构层：字重与颜色拉出层级，靠缩进引导线表达父子——不再用每行一条
+   border-top 的实线分割（那是文件管理器的做法，也是用户点名的视觉噪声）。 */
+.tree-row.dir {
+  font-weight: 650; color: var(--text);
+  font-size: var(--fs-control); letter-spacing: 0.01em;
+}
+.tree-row.dir:hover { background: var(--panel-deep); color: var(--text); }
+/* 缩进引导线：每行在自己的父级列（depth-1 层的箭头中点）画一条 1px 竖线，
+   读起来是「这条内容挂在哪个层级下」。画在行内绝对定位，不占布局空间——
+   虚拟滚动的 26px 行高锁不被破坏。顶层（depth 0）没有父级，不画。 */
+.tree-row[data-depth]::before {
+  content: ''; position: absolute; top: 0; bottom: 0;
+  left: calc((var(--depth) - 1) * 14px + 21px); width: 1px;
+  background: color-mix(in srgb, var(--border-strong) 55%, transparent);
+  pointer-events: none;
+}
+.tree-row[data-depth='0']::before { display: none; }
+/* 文件行 = 可点的行 + 行内独立删除入口（ChapterTree 的 .tree-row-wrap）。
+   删除键做成行的兄弟节点：行本身是 role="button"，里面再套 button 是嵌套可交互元素。 */
+.tree-row-wrap { display: flex; align-items: center; height: 26px; flex-shrink: 0; }
+.tree-row-wrap > .tree-row { flex: 1; min-width: 0; }
+/* 名字：min-width:0 才允许在这个 flex 行里收缩（默认 auto 会把行撑开、把后面的元素挤出视野），
+   配合 ellipsis 长名字显示成「…」而不是被剪掉。 */
+/* 章节编号（"1.1 " 开头的前缀）弱化：编号是定位坐标不是内容，
+   压暗一档让标题词先被读到。用 :first-child + 文本开头无法匹配，
+   改在 ChapterTree 渲染时给带编号的名字包 <b class="tree-no">，这里只管样式。 */
+.tree-row .tree-no {
+  font-weight: inherit;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tree-row .tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 箭头槽：目录行放箭头、笔记行留空，**两边同宽**，所以同一层级的名字列逐层对齐；
+   flex:none 给它一个不会被收缩的 14px 盒子（以前箭头是裸 svg，没有任何盒子兜底）。 */
+.tree-row .tree-caret {
+  width: 14px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.tree-row-wrap .tree-del {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  /* 触达目标 ≥28px（移动端 WCAG 2.5.8 / Apple HIG 44 的折中），视觉尺寸由内层 svg 决定 */
+  width: 28px; height: 28px; margin: 0 -3px 0 0; padding: 0;
+  border: none; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted);
+  /* 默认隐藏、行悬停/键盘聚焦时出现：静观目录时行内只有内容（用户本轮明确要求）。
+     触屏没有 hover，@media (hover:none) 下退回常显低对比，可发现性不丢。 */
+  opacity: 0; cursor: pointer;
+  transition: color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+}
+.tree-row-wrap:hover .tree-del,
+.tree-row-wrap:focus-within .tree-del { opacity: 1; }
+@media (hover: none) {
+  .tree-row-wrap .tree-del { opacity: 0.4; }
+}
+.tree-row-wrap .tree-del:hover { color: var(--danger-text); background: var(--danger-soft); }
+.tree-row-wrap .tree-del:focus-visible { opacity: 1; outline: 2px solid var(--accent-ring); outline-offset: 1px; }
+.tree-row.file:hover { background: var(--panel); color: var(--text); }
+.tree-row.file.active {
+  position: relative;
+  /* 淡底 + 左侧细指示条，三层强调里去掉了描边与发光——「明确但不突兀」
+     （用户本轮点名：不要厚重紫色块）。指示条用 ::after，::before 留给缩进引导线。 */
+  background: color-mix(in srgb, var(--accent-soft) 62%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+  border-radius: var(--r-sm);
+}
+.tree-row.file.active::after {
+  content: '';
+  position: absolute;
+  left: 2px; top: 5px; bottom: 5px;
+  width: 2.5px; border-radius: 2px;
+  background: var(--accent);
+}
+.tree-empty { padding: 16px 14px; color: var(--muted); font-size: var(--fs-caption); line-height: 1.8; }

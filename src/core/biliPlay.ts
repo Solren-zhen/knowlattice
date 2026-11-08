@@ -9,12 +9,46 @@
  * `accept_quality`（这个账号**实际**能取到的清晰度全集）和 DASH 音视频分轨地址。
  * 于是「登录一次」= 存一次 cookie，「最高清晰度」= 从 accept_quality 里挑最大。
  *
- * 请求必须经 dev server 的 /bili-proxy 转发（见 scripts/vite-bili-proxy.ts）：
- * api 不发 CORS 头、媒体地址校验 Referer，两件事 <video> 自己都做不到。
+ * 请求必须经代理转发：api 不发 CORS 头、媒体地址校验 Referer，两件事 <video> 自己都做不到。
+ * 开发期用 Vite 的 /bili-proxy（scripts/vite-bili-proxy.ts）；安装版由 Tauri 启动
+ * 本机回环代理（src-tauri/src/bili_proxy.rs），启动后通过 setBiliProxyBase 注入端口。
  */
 
 export const BILI_COOKIE_KEY = 'knowlattice-bili-cookie'
 export const BILI_PROXY = '/bili-proxy'
+
+let proxyBase = BILI_PROXY
+let proxyToken = ''
+let proxyIssue = ''
+
+/** 由桌面端启动流程注入（例如 http://127.0.0.1:54321/bili-proxy）；传空串回退同源。 */
+export function setBiliProxyBase(base: string): void {
+  proxyBase = base.trim().replace(/\/+$/, '') || BILI_PROXY
+}
+
+/** 桌面端回环代理的每次启动令牌；开发期 Vite 代理不需要，留空即不加参数。 */
+export function setBiliProxyToken(token: string): void {
+  proxyToken = token.trim()
+}
+
+/** 代理启动失败的原因：界面据此显示「代理没起来」，而不是笼统的取流错误。 */
+export function setBiliProxyIssue(issue: string): void {
+  proxyIssue = issue.trim()
+}
+
+export function getBiliProxyIssue(): string {
+  return proxyIssue
+}
+
+/** 令牌只能放查询参数：<video>/<audio> 的 src 改不了请求头。 */
+function withProxyToken(url: string): string {
+  if (!proxyToken) return url
+  return `${url}${url.includes('?') ? '&' : '?'}__kn=${encodeURIComponent(proxyToken)}`
+}
+
+export function getBiliProxyBase(): string {
+  return proxyBase
+}
 
 /** 清晰度代码 → 中文标签（B 站自家文案，接口的 accept_description 也带，作为兜底） */
 export const QUALITY_LABEL: Record<number, string> = {
@@ -42,6 +76,8 @@ export interface BiliPart {
   cid: number
   page: number
   part: string
+  /** 该分P时长（秒）：view 接口的 pages[] 会带，单P稿件缺省时由总时长兜底 */
+  duration?: number
 }
 
 export interface BiliView {
@@ -50,6 +86,10 @@ export interface BiliView {
   duration: number
   cid: number
   parts: BiliPart[]
+  /** UP 主名：课程笔记的 frontmatter 要用；接口没给时不填 */
+  owner?: string
+  /** 封面图地址：只给界面显示，不写进笔记 */
+  coverUrl?: string
 }
 
 export interface BiliStream {
@@ -137,13 +177,13 @@ export function proxied(url: string, kind?: 'video' | 'audio'): string {
   const u = url.replace(/^https?:\/\//, '')
   const cut = u.indexOf('/')
   if (cut <= 0) return url
-  const base = `${BILI_PROXY}/${u.slice(0, cut)}${u.slice(cut)}`
+  const base = `${proxyBase}/${u.slice(0, cut)}${u.slice(cut)}`
   /**
    * 分轨 DASH 的音频段常被 CDN 报成 application/octet-stream，<audio> 会拒播。
    * 所以由调用方声明这是音轨还是视轨，代理据此改写 content-type。
    */
-  if (!kind) return base
-  return `${base}${base.includes('?') ? '&' : '?'}__ct=${kind}`
+  if (!kind) return withProxyToken(base)
+  return withProxyToken(`${base}${base.includes('?') ? '&' : '?'}__ct=${kind}`)
 }
 
 async function api<T>(path: string, acc: BiliAccount | null): Promise<T> {
@@ -178,20 +218,59 @@ export function biliErrorText(code: number, message?: string): string {
   }
 }
 
-export async function fetchView(bvid: string, acc: BiliAccount | null): Promise<BiliView> {
-  const data = await api<{
+/**
+ * 登录态是否真的被 B 站认可。
+ * 为什么需要它：本地存着一段 SESSDATA 不等于还能用（过期、被踢下线、粘贴时被截断），
+ * 而字幕清单在「未登录」和「视频没有字幕」两种情况下都返回空数组，
+ * 不校验就会把「登录失效」误报成「该课程没有字幕」。
+ */
+export async function checkAccount(
+  acc: BiliAccount | null,
+): Promise<{ loggedIn: boolean; name?: string }> {
+  if (!acc) return { loggedIn: false };
+  const ck = cookieHeader(acc);
+  try {
+    const res = await fetch(proxied('https://api.bilibili.com/x/web-interface/nav'), {
+      headers: ck ? { 'x-bili-cookie': ck } : {},
+      cache: 'no-store',
+    });
+    if (!res.ok) return { loggedIn: false };
+    const json = (await res.json()) as { data?: { isLogin?: boolean; uname?: string } };
+    const name = (json.data?.uname ?? '').trim();
+    return { loggedIn: Boolean(json.data?.isLogin), ...(name ? { name } : {}) };
+  } catch {
+    // 网络失败不等于未登录，但这里只能保守处理：交给调用方提示重试
+    return { loggedIn: false };
+  }
+}
+
+export async function fetchView(bvid: string, acc: BiliAccount | null): Promise<BiliView> {  const data = await api<{
     bvid: string
     title: string
     duration: number
     cid: number
-    pages?: { cid: number; page: number; part: string }[]
+    pages?: { cid: number; page: number; part: string; duration?: number }[]
+    owner?: { name?: string }
+    pic?: string
   }>(`/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`, acc)
+  const owner = (data.owner?.name ?? '').trim()
+  const coverUrl = (data.pic ?? '').trim()
+  const pages = data.pages ?? [{ cid: data.cid, page: 1, part: data.title, duration: data.duration }]
+  // 实测单P稿件的 pages[0].part 是空串（多P 的 part 才稳定）；空标题回落到视频标题
+  const parts = pages.map((p) => ({
+    cid: p.cid,
+    page: p.page,
+    part: (p.part ?? '').trim() || (pages.length === 1 ? data.title : `P${p.page}`),
+    duration: p.duration,
+  }))
   return {
     bvid: data.bvid,
     title: data.title,
     duration: data.duration,
     cid: data.cid,
-    parts: data.pages ?? [{ cid: data.cid, page: 1, part: data.title }],
+    parts,
+    ...(owner ? { owner } : {}),
+    ...(coverUrl ? { coverUrl } : {}),
   }
 }
 

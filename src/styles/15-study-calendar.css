@@ -1,0 +1,553 @@
+/* ============================================================
+   学习日历 — 第 16 个 partial
+   月历（每日分科圆环 + 一句话小结）与历史汇总（累计/趋势/分科占比）。
+   数据来自番茄记录；这里只负责呈现，统计口径在 core/studyCalendar.ts。
+   ============================================================ */
+
+.sc-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* 分科配色：0–8 是科目槽，9 固定给「未分类」。首页紧凑月历与报告页完整月历共用 */
+.sc-panel,
+.sc-embed,
+.home-cal {
+  --sc-slot-0: #5b8def;
+  --sc-slot-1: #f0b429;
+  --sc-slot-2: #3fbf7f;
+  --sc-slot-3: #9b7bf0;
+  --sc-slot-4: #2fc2c9;
+  --sc-slot-5: #ef8354;
+  --sc-slot-6: #e5648d;
+  --sc-slot-7: #7a8ff5;
+  --sc-slot-8: #78c26d;
+  --sc-slot-9: #9aa4b2;
+}
+
+.sc-head {
+  gap: var(--sp-3);
+}
+.sc-head__meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.sc-tabs {
+  display: flex;
+  gap: 6px;
+}
+.sc-tabs .btn[aria-pressed='true'],
+.sc-ranges .btn[aria-pressed='true'] {
+  border-color: var(--border-accent);
+  color: var(--accent);
+  background: var(--bg-raised);
+}
+
+.sc-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* ---- 月历 ---- */
+.sc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sc-month {
+  margin-left: 4px;
+  font-size: var(--fs-body);
+}
+.sc-week,
+.sc-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.sc-week {
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  text-align: center;
+}
+.sc-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 88px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 10px);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.sc-cell:hover {
+  border-color: var(--border-strong);
+}
+.sc-cell[data-sel] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+.sc-cell[data-out] {
+  opacity: 0.45;
+}
+.sc-cell[data-future] {
+  opacity: 0.55;
+}
+.sc-day {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+}
+.sc-ring {
+  width: 34px;
+  height: 34px;
+  align-self: center;
+  transform: rotate(-90deg);
+}
+.sc-ring__track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 3.2;
+}
+.sc-ring__seg {
+  fill: none;
+  stroke-width: 3.2;
+  stroke-linecap: butt;
+}
+.sc-mins {
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.sc-note {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---- 当天编辑 ---- */
+.sc-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+.sc-editor__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-caption);
+}
+.sc-editor__total {
+  color: var(--muted);
+}
+.sc-editor__subs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.sc-chip i,
+.sc-subj i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.sc-editor__row {
+  display: flex;
+  gap: 8px;
+}
+.sc-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+}
+.sc-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* ---- 汇总 ---- */
+.sc-summary {
+  gap: var(--sp-4);
+}
+.sc-stat {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.sc-stat__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 150px;
+}
+.sc-stat__label {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.sc-stat__main b {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  letter-spacing: 0.5px;
+}
+.sc-stat__sub {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.sc-donut {
+  flex: none;
+  width: 132px;
+  height: 132px;
+}
+.sc-donut .sc-ring__track,
+.sc-donut .sc-ring__seg {
+  stroke-width: 14;
+}
+.sc-subj {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sc-subj li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-caption);
+}
+.sc-subj__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sc-subj__min {
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+.sc-subj__pct {
+  width: 48px;
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.sc-empty {
+  color: var(--muted);
+}
+.sc-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 10px);
+  background: var(--panel);
+}
+.sc-trend__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sc-ranges {
+  display: flex;
+  gap: 4px;
+}
+.sc-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 180px;
+  padding-top: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.sc-bar {
+  flex: 1;
+  min-width: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0.85;
+}
+.sc-bar[data-zero] {
+  background: var(--border);
+  opacity: 0.6;
+}
+.sc-bars__foot {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 900px) {
+  .sc-cell {
+    min-height: 70px;
+    padding: 6px;
+  }
+  .sc-note {
+    display: none;
+  }
+  .sc-grid,
+  .sc-week {
+    gap: 4px;
+  }
+  .sc-editor__row {
+    flex-wrap: wrap;
+  }
+}
+
+/* ============================================================
+   嵌入学习报告（Dashboard）：不再是独立面板，没有自己的遮罩与滚动区。
+   月份切换 / 当天小结 / 历史汇总都在这里；首页只放紧凑月历。
+   ============================================================ */
+.sc-embed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: 12px;
+}
+.sc-embed__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.sc-embed__head h4 {
+  margin: 0;
+}
+.sc-embed .sc-head__meta {
+  flex: 1;
+}
+/* 报告页自己滚整页，这一块不能再生出第二个滚动容器（否则滚轮在月历上只滚月历） */
+.sc-embed .sc-body {
+  flex: none;
+  overflow: visible;
+  padding: 0;
+}
+
+/* ============================================================
+   首页工作台：当前月份的紧凑月历（只读）。
+   整卡占满工作台一行——7 列 × 5~6 行在 240px 的三列格里会把日期挤扁。
+   ============================================================ */
+.home-wb__grid > .home-cal {
+  grid-column: 1 / -1;
+}
+.home-cal {
+  gap: 8px;
+}
+.home-cal__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.home-cal__meta b {
+  font-size: var(--fs-body);
+  font-weight: 650;
+  color: var(--text);
+}
+.home-cal__week,
+.home-cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.home-cal__week {
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  text-align: center;
+}
+.home-cal__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 2px 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+.home-cal__cell[data-out] {
+  opacity: 0.4;
+}
+.home-cal__cell[data-future] {
+  opacity: 0.55;
+}
+.home-cal__cell[data-today] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-ring);
+}
+.home-cal__day {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.home-cal__cell[data-today] .home-cal__day {
+  color: var(--accent);
+}
+.home-cal .sc-ring {
+  width: 24px;
+  height: 24px;
+}
+/* 首页格子比整页日历小，线宽按 viewBox 放大，多科目分段才分得清 */
+.home-cal .sc-ring__track,
+.home-cal .sc-ring__seg {
+  stroke-width: 4.2;
+}
+.home-cal__mins {
+  min-height: 9px;
+  font-size: 9px;
+  line-height: 1;
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+/* 科目图例：圆环的分段颜色靠它才有名字（科目 + 本月累计时长） */
+.home-cal__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding-top: 2px;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.home-cal__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.home-cal__legend-item i {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 3px;
+}
+.home-cal__legend-name {
+  max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.home-cal__legend-item b {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* 元信息做成胶囊：本月时长 / 今日时长一眼可扫，不再是一串灰字 */
+.home-cal__meta span {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 热力档位（2026-11）----
+   组件只写 data-level（core/studyCalendar.heatLevel），颜色集中在这里：
+   0 无记录 / 1 ≤25min / 2 ≤60min / 3 更多。深浅只调 accent 与 panel 的混合比例，
+   换主题自动跟随，不写死颜色。 */
+.home-cal__cell {
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.home-cal__cell:hover {
+  border-color: var(--border-accent);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.home-cal__cell[data-level='1'] { background: color-mix(in srgb, var(--accent) 9%, var(--panel)); }
+.home-cal__cell[data-level='2'] {
+  background: color-mix(in srgb, var(--accent) 19%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+}
+.home-cal__cell[data-level='3'] {
+  background: color-mix(in srgb, var(--accent) 30%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+.home-cal__cell[data-today] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-ring), var(--shadow-sm);
+}
+
+/* 整页日历的格子：同样的档位语言，尺度更大 */
+.sc-cell {
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.sc-cell:hover {
+  border-color: var(--border-accent);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.sc-cell[data-level='1'] { background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.sc-cell[data-level='2'] { background: color-mix(in srgb, var(--accent) 11%, var(--panel)); }
+.sc-cell[data-level='3'] {
+  background: color-mix(in srgb, var(--accent) 17%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+}
+.sc-cell[data-sel] {
+  box-shadow: 0 0 0 2px var(--accent-ring), var(--shadow-sm);
+}
+
+@media (max-width: 640px) {
+  .home-cal__cell {
+    padding: 3px 1px 2px;
+  }
+  .home-cal .sc-ring {
+    width: 18px;
+    height: 18px;
+  }
+  .home-cal__mins {
+    font-size: 8px;
+  }
+}

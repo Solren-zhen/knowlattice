@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KNOWLATTICE · 非配色设计提案</title>
+<style>
+  :root{
+    --bg:#f8f9fb; --raised:#fff; --panel:#f1f4f8; --deep:#e5eaf2;
+    --line:rgba(15,23,42,.08); --line-strong:rgba(15,23,42,.15);
+    --text:#0f172a; --text2:#334155; --muted:#475569;
+    --accent:#4f46e5; --accent-soft:rgba(79,70,229,.08); --accent-ink:#fff;
+    --ok:#10b981; --warn:#b45309; --danger:#dc2626;
+    --r:14px; --r-sm:10px;
+    --shadow:0 12px 32px -22px rgba(15,23,42,.28), 0 2px 8px -4px rgba(15,23,42,.12);
+    --font:'Inter','Segoe UI Variable','Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+    --mono:'Cascadia Code','Fira Code',Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:
+      radial-gradient(60% 50% at 12% 0%, rgba(99,102,241,.10), transparent 70%),
+      radial-gradient(50% 40% at 90% 8%, rgba(34,211,238,.07), transparent 72%),
+      var(--bg);
+    color:var(--text); font-family:var(--font); font-size:14px; line-height:1.55;
+  }
+  button{font:inherit; color:inherit}
+  .top{
+    max-width:1360px; margin:0 auto; padding:34px 28px 18px;
+    display:flex; align-items:flex-end; justify-content:space-between; gap:24px; flex-wrap:wrap;
+  }
+  .eyebrow{margin:0 0 6px; font-size:11px; font-weight:700; letter-spacing:.14em; color:var(--accent)}
+  h1{margin:0; font-size:30px; letter-spacing:-.025em; line-height:1.2}
+  .lede{margin:8px 0 0; max-width:720px; color:var(--muted); font-size:14px}
+  .legend{display:flex; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--muted)}
+  .legend span{border:1px solid var(--line); background:rgba(255,255,255,.7); border-radius:999px; padding:5px 10px}
+  .screens{
+    max-width:1360px; margin:0 auto; padding:0 28px;
+    display:flex; gap:6px; border-bottom:1px solid var(--line);
+  }
+  .screens button{
+    border:0; background:transparent; color:var(--muted); font-weight:600;
+    padding:11px 16px; border-bottom:2px solid transparent; cursor:pointer; border-radius:8px 8px 0 0;
+  }
+  .screens button:hover{background:var(--accent-soft); color:var(--accent)}
+  .screens button.on{color:var(--accent); border-bottom-color:var(--accent); background:var(--accent-soft)}
+  main{max-width:1360px; margin:0 auto; padding:22px 28px 60px}
+  .screen{display:none}
+  .screen.on{display:block}
+  .pair{display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start}
+  .frame{
+    background:var(--raised); border:1px solid var(--line-strong); border-radius:18px;
+    box-shadow:var(--shadow); overflow:hidden; min-width:0;
+  }
+  .frame-bar{
+    display:flex; align-items:center; gap:8px; padding:9px 13px;
+    border-bottom:1px solid var(--line); background:linear-gradient(180deg,#fff,#f7f9fc);
+    font-size:11px; color:var(--muted)
+  }
+  .dots{display:flex; gap:4px}
+  .dots i{width:7px; height:7px; border-radius:50%; background:var(--deep); display:block}
+  .frame-bar b{margin-left:auto; color:var(--text2); font-size:11px; font-weight:600}
+  .tag{font-size:10px; font-weight:700; letter-spacing:.06em; padding:2px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted)}
+  .tag.now{color:var(--muted)}
+  .tag.next{color:var(--accent); border-color:rgba(79,70,229,.3); background:var(--accent-soft)}
+  .app{display:flex; min-height:560px}
+  .rail{
+    flex:0 0 52px; border-right:1px solid var(--line); padding:10px 0;
+    display:flex; flex-direction:column; align-items:center; gap:7px;
+    background:rgba(252,253,255,.7);
+  }
+  .rail i{width:26px; height:26px; border-radius:8px; background:var(--panel); display:block}
+  .rail i.on{background:var(--accent-soft); box-shadow:inset 0 0 0 1px rgba(79,70,229,.28)}
+  .main{flex:1; min-width:0; padding:18px 18px 22px; background:rgba(248,249,251,.55)}
+  .mini-title{display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:12px}
+  .mini-title h2{margin:0; font-size:18px; letter-spacing:-.02em}
+  .mini-title p{margin:3px 0 0; color:var(--muted); font-size:11px}
+  .pill{
+    display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:7px 12px;
+    background:linear-gradient(180deg,#5f63ee,#4f46e5); color:#fff; font-size:11px; font-weight:650;
+    box-shadow:0 6px 14px -10px rgba(79,70,229,.7); white-space:nowrap;
+  }
+  .pill.ghost{background:var(--raised); color:var(--text2); border:1px solid var(--line-strong); box-shadow:none}
+  .sec-label{font-size:10px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:12px 0 7px}
+  .grid3{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px}
+  .card{background:rgba(255,255,255,.88); border:1px solid var(--line); border-radius:11px; padding:9px 10px; min-width:0}
+  .card b{display:block; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .card small{display:block; font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px}
+  .workbench{display:grid; grid-template-columns:1.1fr .9fr; gap:8px}
+  .kpi2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .kpi2 div{border:1px solid var(--line); border-radius:9px; padding:7px 8px; background:rgba(255,255,255,.7)}
+  .kpi2 b{font-size:18px; line-height:1.1}
+  .kpi2 small{display:block; color:var(--muted); font-size:9px; margin-top:1px}
+  .kpi-strip{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff}
+  .kpi-strip div{padding:8px 9px; border-right:1px solid var(--line)}
+  .kpi-strip div:last-child{border-right:0}
+  .kpi-strip b{display:block; font-size:17px; line-height:1.1}
+  .kpi-strip small{display:block; color:var(--muted); font-size:9px; margin-top:1px}
+  .todo{background:#fff; border:1px solid var(--line); border-radius:10px; padding:9px 10px; min-height:78px}
+  .todo p{margin:6px 0 0; color:var(--muted); font-size:10px; line-height:1.5}
+  .cal{border:1px solid var(--line); border-radius:12px; background:#fff; padding:10px; margin-top:8px}
+  .cal-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:7px}
+  .cal-head b{font-size:12px}
+  .cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:3px}
+  .cal-grid i{display:block; height:20px; border-radius:4px; background:var(--panel); border:1px solid rgba(15,23,42,.04)}
+  .cal-grid i.today{background:var(--accent-soft); border-color:rgba(79,70,229,.35)}
+  .week-strip{display:grid; grid-template-columns:repeat(7,1fr); gap:4px}
+  .week-strip div{border:1px solid var(--line); border-radius:7px; padding:6px 4px; text-align:center; background:#fff; font-size:9px; color:var(--muted)}
+  .week-strip b{display:block; font-size:11px; color:var(--text); margin-bottom:1px}
+  .below{opacity:.55; margin-top:8px}
+  .note-row{display:flex; gap:8px; align-items:center; justify-content:space-between; margin-top:7px; font-size:10px; color:var(--muted)}
+  .link{color:var(--accent); font-weight:600; text-decoration:none; font-size:10px}
+  .panel-head{display:flex; align-items:center; gap:7px; margin:-18px -18px 12px; padding:10px 14px; border-bottom:1px solid var(--line); background:#fff}
+  .panel-head b{font-size:13px; margin-right:auto}
+  .btn-xs{border:1px solid var(--line-strong); background:#fff; border-radius:7px; padding:4px 8px; font-size:10px; color:var(--text2); cursor:pointer}
+  .btn-xs.primary{background:var(--accent); color:#fff; border-color:var(--accent)}
+  .seg{display:flex; gap:2px; padding:3px; border:1px solid var(--line); background:var(--panel); border-radius:9px; margin-bottom:10px}
+  .seg span{flex:1; text-align:center; padding:5px 6px; border-radius:6px; font-size:10px; color:var(--muted)}
+  .seg span.on{background:#fff; color:var(--accent); font-weight:700; box-shadow:0 1px 3px rgba(15,23,42,.08)}
+  .filter{display:flex; gap:6px; align-items:center; margin-bottom:9px}
+  .filter span{flex:1; border:1px solid var(--line); background:#fff; border-radius:7px; padding:5px 7px; font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .progress{height:4px; border-radius:999px; background:var(--panel-deep, #e5eaf2); overflow:hidden; margin:7px 0 9px}
+  .progress i{display:block; width:35%; height:100%; background:var(--accent)}
+  .question{border:1px solid var(--line); border-radius:11px; background:#fff; padding:11px}
+  .qmeta{display:flex; gap:4px; flex-wrap:wrap; margin-bottom:6px}
+  .chip{font-size:9px; padding:2px 6px; border-radius:999px; background:var(--accent-soft); color:var(--accent)}
+  .qtitle{font-size:13px; font-weight:650; margin:0 0 8px; line-height:1.5}
+  .opt{display:flex; align-items:center; gap:7px; border:1px solid var(--line); border-radius:9px; padding:7px 8px; margin-bottom:5px; background:#fff; font-size:11px}
+  .opt em{width:18px; height:18px; border-radius:50%; display:grid; place-items:center; background:var(--panel); font-style:normal; font-size:9px; font-weight:700; color:var(--text2)}
+  .opt.on{border-color:rgba(79,70,229,.4); background:var(--accent-soft)}
+  .bottom-bar{position:sticky; bottom:0; display:flex; align-items:center; gap:8px; margin:12px -18px -22px; padding:9px 14px; background:linear-gradient(180deg,transparent,#fff 35%); border-top:1px solid var(--line)}
+  .bottom-bar .hint{font-size:9px; color:var(--muted)}
+  .bottom-bar .btn-xs{margin-left:auto}
+  .review-head{display:flex; align-items:center; gap:6px; margin:-18px -18px 12px; padding:9px 12px; border-bottom:1px solid var(--line); background:#fff; flex-wrap:wrap}
+  .review-head b{font-size:12px; margin-right:auto}
+  .review-card{max-width:430px; margin:8px auto 0; border:1px solid var(--line-strong); border-radius:14px; background:#fff; padding:14px; box-shadow:var(--shadow)}
+  .review-card .meta{font-size:10px; color:var(--muted); display:flex; justify-content:space-between; gap:8px}
+  .review-card h3{margin:10px 0 4px; font-size:22px; letter-spacing:-.02em; line-height:1.25}
+  .review-card .sub{font-size:10px; color:var(--muted)}
+  .review-actions{display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; padding-top:9px; border-top:1px dashed var(--line)}
+  .review-actions button,.review-actions span{border:0; background:transparent; color:var(--muted); font-size:10px; padding:3px 4px}
+  .rate-row{display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-top:12px}
+  .rate-row span{border:1px solid var(--line); border-radius:8px; background:#fff; padding:6px 4px; text-align:center; font-size:9px; color:var(--muted)}
+  .rate-row b{display:block; font-size:10px; color:var(--text)}
+  .callouts{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px}
+  .callout{border-left:3px solid var(--accent); background:rgba(255,255,255,.76); border-radius:0 8px 8px 0; padding:7px 10px; font-size:11px; color:var(--text2)}
+  .callout b{color:var(--text)}
+  .foot{margin-top:12px; font-size:11px; color:var(--muted)}
+  .metric{font-family:var(--mono); font-size:10px; color:var(--accent)}
+  .hidden{display:none !important}
+  @media (max-width:980px){
+    .pair{grid-template-columns:1fr}
+    .top{padding:24px 18px 14px} .screens{padding:0 18px} main{padding:16px 18px 44px}
+    .callouts{grid-template-columns:1fr}
+  }
+  @media (max-width:560px){
+    h1{font-size:24px}
+    .app{min-height:auto}
+    .rail{display:none}
+    .main{padding:14px 12px 18px}
+    .grid3{grid-template-columns:1fr 1fr}
+    .workbench{grid-template-columns:1fr}
+    .kpi-strip{grid-template-columns:1fr 1fr}
+    .kpi-strip div:nth-child(2){border-right:0}
+    .kpi-strip div:nth-child(-n+2){border-bottom:1px solid var(--line)}
+    .panel-head,.review-head,.bottom-bar{margin-left:-12px; margin-right:-12px}
+    .bottom-bar{margin-bottom:-18px}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div>
+    <p class="eyebrow">KNOWLATTICE · DESIGN PROPOSAL</p>
+    <h1>非配色设计提案</h1>
+    <p class="lede">不改主题、不改配色。只演示布局、信息层级与操作位置。左为现状，右为提案；数据均为示意。</p>
+  </div>
+  <div class="legend">
+    <span>沿用当前靛蓝主题</span>
+    <span>静态结构稿</span>
+    <span>1440 / 390 可看</span>
+  </div>
+</header>
+
+<nav class="screens" aria-label="设计提案分组">
+  <button class="on" data-screen="home">首页首屏</button>
+  <button data-screen="quiz">题库结构</button>
+  <button data-screen="review">复习任务</button>
+</nav>
+
+<main>
+  <!-- ================= 首页 ================= -->
+  <section class="screen on" id="home">
+    <div class="pair">
+      <article class="frame">
+        <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="tag now">现状</span><b>首页 · 1440</b></div>
+        <div class="app">
+          <aside class="rail"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></aside>
+          <div class="main">
+            <div class="mini-title">
+              <div><h2>你的知识库，从这里开始</h2><p>从上次停下的地方继续，或直接去一个功能。</p></div>
+              <span class="pill">搜索 Ctrl K</span>
+            </div>
+            <div class="sec-label">继续</div>
+            <div class="grid3">
+              <div class="card"><b>糖代谢总览</b><small>生化 / 糖代谢通路图</small></div>
+              <div class="card"><b>1.1 颈部疾病</b><small>外科学 / 普外</small></div>
+              <div class="card"><b>1.1 COPD</b><small>内科学 / 呼吸系统</small></div>
+            </div>
+            <div class="sec-label">工作台</div>
+            <div class="workbench">
+              <div class="card">
+                <b style="display:flex;justify-content:space-between">学习概览 <span class="link">学习报告</span></b>
+                <div class="kpi2" style="margin-top:7px">
+                  <div><b>0</b><small>连续打卡 · 天</small></div>
+                  <div><b>0</b><small>待复习</small></div>
+                  <div><b>0</b><small>未清错题</small></div>
+                  <div><b>0</b><small>今日学习</small></div>
+                </div>
+              </div>
+              <div class="todo">
+                <b style="display:flex;justify-content:space-between">今日待办 <span class="link">打开</span></b>
+                <p>今天没有到期的待办。去「工作台」加一条，或直接开始一轮专注。</p>
+              </div>
+            </div>
+            <div class="cal">
+              <div class="cal-head"><b>学习日历 · 2026 年 11 月</b><span class="link">完整日历</span></div>
+              <div class="cal-grid">
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i><i class="today"></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              </div>
+            </div>
+            <div class="below">
+              <div class="sec-label">最近使用（第二屏才出现）</div>
+              <div class="grid3"><div class="card"><b>课程工坊</b></div><div class="card"><b>导入</b></div><div class="card"><b>错题本</b></div></div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="frame">
+        <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="tag next">提案</span><b>首页 · 首屏重排</b></div>
+        <div class="app">
+          <aside class="rail"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></aside>
+          <div class="main">
+            <div class="mini-title">
+              <div><h2>你的知识库，从这里开始</h2><p>从上次停下的地方继续，或直接去一个功能。</p></div>
+              <span class="pill">搜索 Ctrl K</span>
+            </div>
+            <div class="sec-label">继续</div>
+            <div class="grid3">
+              <div class="card"><b>糖代谢总览</b><small>生化 / 糖代谢通路图</small></div>
+              <div class="card"><b>1.1 颈部疾病</b><small>外科学 / 普外</small></div>
+              <div class="card"><b>1.1 COPD</b><small>内科学 / 呼吸系统</small></div>
+            </div>
+            <div class="sec-label">今日概览</div>
+            <div class="kpi-strip">
+              <div><b>0</b><small>连续打卡</small></div>
+              <div><b>0</b><small>待复习</small></div>
+              <div><b>0</b><small>未清错题</small></div>
+              <div><b>0</b><small>今日学习</small></div>
+            </div>
+            <div class="workbench" style="margin-top:8px">
+              <div class="todo">
+                <b style="display:flex;justify-content:space-between">今日待办 <span class="link">打开工作台</span></b>
+                <p>今天没有到期的待办。去「工作台」加一条，或直接开始一轮专注。</p>
+              </div>
+              <div class="card">
+                <b style="display:flex;justify-content:space-between">快捷操作 <span class="link">更多</span></b>
+                <div class="grid3" style="grid-template-columns:1fr 1fr; margin-top:6px">
+                  <span class="btn-xs">新建笔记</span><span class="btn-xs">导入</span>
+                  <span class="btn-xs">视频笔记</span><span class="btn-xs">导师陪练</span>
+                </div>
+              </div>
+            </div>
+            <div class="sec-label" style="margin-top:12px">学习日历 · 本周</div>
+            <div class="cal" style="padding:9px">
+              <div class="cal-head"><b>11 月 2 日 – 8 日</b><span class="link">展开完整日历</span></div>
+              <div class="week-strip">
+                <div><b>一</b>2</div><div><b>二</b>3</div><div><b>三</b>4</div><div><b>四</b>5</div>
+                <div><b>五</b>6</div><div><b>六</b>7</div><div><b>日</b>8</div>
+              </div>
+            </div>
+            <div class="sec-label" style="margin-top:12px">最近使用</div>
+            <div class="grid3" style="grid-template-columns:repeat(4,1fr)">
+              <div class="card"><b>课程工坊</b></div><div class="card"><b>导入</b></div>
+              <div class="card"><b>错题本</b></div><div class="card"><b>AI 助手</b></div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+    <div class="callouts">
+      <div class="callout"><b>日历降级：</b>默认只显示本周条，完整月视图按需展开。当前日历 <span class="metric">472px</span>，提案约 <span class="metric">96px</span>。</div>
+      <div class="callout"><b>最近使用上移：</b>从第二屏移到首屏；它是高频导航，不该排在工作台之后。</div>
+      <div class="callout"><b>KPI 改横带：</b>2×2 网格改成 1×4，块间 1px 分隔，少一层卡片边框。</div>
+      <div class="callout"><b>不改数据：</b>仍用现有 streak / due / mistakes / today 四个口径，只改容器。</div>
+    </div>
+  </section>
+
+  <!-- ================= 题库 ================= -->
+  <section class="screen" id="quiz">
+    <div class="pair">
+      <article class="frame">
+        <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="tag now">现状</span><b>题库 · 入口层</b></div>
+        <div class="app">
+          <aside class="rail"><i></i><i class="on"></i><i></i><i></i><i></i><i></i></aside>
+          <div class="main">
+            <div class="panel-head"><b>题库练习</b><span class="btn-xs primary">导入题库</span><span class="btn-xs">说明</span><span class="btn-xs">关闭</span></div>
+            <div class="filter"><span>搜题：题干 / 考点 / 选项关键词</span><span class="btn-xs" style="flex:0 0 auto">清除</span></div>
+            <div class="card" style="margin-bottom:8px">
+              <b>今日知识点 · 内科学·泌尿系统</b>
+              <small>「26精编版·真题」68 题 · 掌握度 0% · 还没练过</small>
+              <div style="display:flex; gap:6px; margin-top:7px"><span class="btn-xs primary">练这 5 题</span><span class="btn-xs">今天看过了</span></div>
+            </div>
+            <div class="sec-label">1 个题库</div>
+            <div class="card">
+              <b style="display:flex; justify-content:space-between">26精编版·真题 <span class="link">操作</span></b>
+              <small>886 题 · 2026/9/18 导入</small>
+            </div>
+            <div class="foot">错题本 / 考试中心 / 题库统计在别的面板，需要关掉当前面板再打开。</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="frame">
+        <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="tag next">提案</span><b>题库 · 一级分段</b></div>
+        <div class="app">
+          <aside class="rail"><i></i><i class="on"></i><i></i><i></i><i></i><i></i></aside>
+          <div class="main">
+            <div class="panel-head"><b>题库练习</b><span class="btn-xs">更多</span><span class="btn-xs">关闭</span></div>
+            <div class="seg"><span class="on">练习</span><span>错题</span><span>考试</span><span>统计</span></div>
+            <div class="filter"><span>章节</span><span>标签</span><span>难度</span><span>搜题</span></div>
+            <div class="progress"><i></i></div>
+            <div class="question">
+              <div class="qmeta"><span class="chip">外科肿瘤</span><span class="chip">#外科学</span><span class="chip">#肿瘤</span></div>
+              <p class="qtitle">华支睾吸虫与下列哪种疾病有关？</p>
+              <div class="opt on"><em>A</em>与大肠癌有关</div>
+              <div class="opt"><em>B</em>与宫颈癌有关</div>
+              <div class="opt"><em>C</em>与肝癌有关</div>
+              <div class="opt"><em>D</em>与鼻咽癌有关</div>
+              <div class="opt"><em>E</em>与白血病有关</div>
+            </div>
+            <div class="bottom-bar"><span class="hint">1 / 22 · 上/下题</span><span class="btn-xs">上一题</span><span class="btn-xs primary">提交</span><span class="btn-xs">下一题</span></div>
+          </div>
+        </div>
+      </article>
+    </div>
+    <div class="callouts">
+      <div class="callout"><b>一级分段：</b>练习 / 错题 / 考试 / 统计同层切换；低频“导入”不再占头部主按钮。</div>
+      <div class="callout"><b>筛选收成一行：</b>章节、标签、难度、搜题贴着题目，不另起面板。</div>
+      <div class="callout"><b>底部固定操作：</b>上一题 / 提交 / 下一题始终在同一位置；题库已有 sticky 底栏，直接复用。</div>
+      <div class="callout"><b>保留现有答题卡：</b>选项行、进度条、题目标签都不改，只改外层导航与操作位置。</div>
+    </div>
+  </section>
+
+  <!-- ================= 复习 ================= -->
+  <section class="screen" id="review">
+    <div class="pair">
+      <article class="frame">
+        <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="tag now">现状</span><b>复习 · 头部</b></div>
+        <div class="app">
+          <aside class="rail"><i></i><i></i><i class="on"></i><i></i><i></i><i></i></aside>
+          <div class="main">
+            <div class="review-head">
+              <span class="btn-xs">← 返回</span><b>复习模式 · 队列剩 20 张</b>
+              <span class="btn-xs">已删卡片 (0)</span><span class="btn-xs">退出复习</span>
+              <span class="btn-xs">导出 Anki</span><span class="btn-xs">导出 .apkg</span>
+              <span class="btn-xs">导出复习数据</span><span class="btn-xs">导入复习数据</span>
+            </div>
+            <div class="review-card">
+              <div class="meta"><span>笔记 · 内科学呼吸系统</span><span>复习 0 次 · 间隔 0 天</span></div>
+              <h3>1.1 COPD</h3>
+              <div class="sub">先回忆这篇笔记的要点，再点「显示答案」。</div>
+              <div style="display:flex; justify-content:center; margin-top:10px"><span class="pill">显示答案（空格）</span></div>
+              <div class="rate-row"><span><b>重来</b>10 分</span><span><b>困难</b>1 天</span><span><b>良好</b>3 天</span><span><b>简单</b>7 天</span></div>
+            </div>
+            <div class="foot">导出/导入 4 个按钮占头部，主操作在卡片中部（y≈177）。</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="frame">
+        <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="tag next">提案</span><b>复习 · 任务聚焦</b></div>
+        <div class="app">
+          <aside class="rail"><i></i><i></i><i class="on"></i><i></i><i></i><i></i></aside>
+          <div class="main">
+            <div class="review-head">
+              <span class="btn-xs">← 返回</span><b>复习队列 · 剩 20 张</b>
+              <span class="btn-xs">更多</span><span class="btn-xs">退出</span>
+            </div>
+            <div class="seg" style="max-width:240px; margin:0 auto 10px"><span class="on">复习队列</span><span>卡片管理</span></div>
+            <div class="review-card">
+              <div class="meta"><span>内科学呼吸系统</span><span>间隔 0 天</span></div>
+              <h3>1.1 COPD</h3>
+              <div class="sub">先回忆这篇笔记的要点，再点「显示答案」。</div>
+              <div class="review-actions"><span>为什么是这张？</span><span>编辑</span><span>搁置</span><span>删除</span></div>
+            </div>
+            <div class="bottom-bar">
+              <span class="hint">空格翻面 · 1–4 评分</span>
+              <span class="btn-xs primary" style="margin-left:auto">显示答案</span>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+    <div class="callouts">
+      <div class="callout"><b>头部 6 → 2 + 更多：</b>导出 / 导入 / 已删卡片收进「更多」，头部只留返回、队列状态、退出。</div>
+      <div class="callout"><b>主操作贴底：</b>「显示答案」从卡片中部移到固定底栏；翻面后同一位置换四档评分。</div>
+      <div class="callout"><b>任务对象唯一：</b>一张卡、一个主操作；「为什么是这张」等辅助动作放在卡片底部，不抢主按钮。</div>
+      <div class="callout"><b>复用现有：</b>题库的 sticky 底栏（.quiz-footer）已经是这个模式，复习页对齐即可。</div>
+    </div>
+  </section>
+</main>
+
+<script>
+  const buttons = [...document.querySelectorAll('.screens button')];
+  const screens = [...document.querySelectorAll('.screen')];
+  for (const b of buttons) {
+    b.addEventListener('click', () => {
+      for (const x of buttons) x.classList.toggle('on', x === b);
+      for (const s of screens) s.classList.toggle('on', s.id === b.dataset.screen);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+</script>
+</body>
+</html>

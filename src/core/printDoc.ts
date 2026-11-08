@@ -9,6 +9,9 @@
  * 用 iframe 而不是 window.open：弹窗会被拦截，且会把当前编辑状态留在另一个窗口里。
  */
 import { renderMarkdown } from './markdown';
+import { escapeHtml } from './htmlEscape';
+
+export { escapeHtml };
 
 /** 打印样式：白底黑字、A4 页边距、图片不溢出、标题不孤儿、表格有边框 */
 const PRINT_CSS = `
@@ -37,15 +40,6 @@ const PRINT_CSS = `
   .print-foot { margin-top: 18px; border-top: 1px solid #ddd; padding-top: 6px; color: #888; font-size: 9pt; }
   @media print { a { color: inherit; text-decoration: none; } }
 `;
-
-/** HTML 转义（标题里可能出现 < > &） */
-export function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 export interface PrintableDoc {
   title: string;

@@ -11,9 +11,10 @@
  *   - 底部一行 = 编辑器里能用的键，属于说明，不是入口。
  */
 import { useMemo, useState, type ReactNode } from 'react';
-import { IconFolderIn, IconChart, IconPlus, IconSearch, IconTodo, IconVideo } from './icons';
+import { IconFolderIn, IconChart, IconPlus, IconSearch, IconTodo, IconVideo, IconAi, IconBook, IconTimer, IconQuiz, IconTarget } from './icons';
 import { completeTodo, dayKey, dueLabel, loadTodos, saveTodos, type Todo } from '../core/todos';
 import { last7, streak } from '../core/stats';
+import StudyCalendarCard from './StudyCalendarCard';
 
 export interface HomeFeature {
   /** 与 RailKey 同一个键，由 Rail 的 RAIL_INDEX 提供文案与图标 */
@@ -49,6 +50,8 @@ interface Props {
   onOpenTodos?: () => void;
   /** 工作台：打开学习报告 */
   onOpenReport?: () => void;
+  /** 一键导师：打开 AI 笔记面板并以导师模式直接开始（不用再点芯片、再打字） */
+  onStartTutor?: () => void;
 }
 
 export default function HomeView(p: Props) {
@@ -84,10 +87,13 @@ export default function HomeView(p: Props) {
       <header className="home-head" data-reveal>
         <div>
           <h1 className="home-title">你的知识库，从这里开始</h1>
-          <p className="home-sub">从上次停下的地方继续，或直接去一个功能。</p>
+          <p className="home-sub">
+            让知识彼此连接，让思考持续生长。
+            <span className="home-sub__en">KnowLattice · A Living Knowledge System</span>
+          </p>
         </div>
         <button className="btn-primary home-search" data-magnet onClick={p.onSearch}>
-          <IconSearch size={15} /> 搜索 <kbd>Ctrl K</kbd>
+          <IconSearch size={15} /> <span className="home-search__label">搜索笔记、知识点…</span> <kbd>Ctrl K</kbd>
         </button>
       </header>
 
@@ -97,8 +103,11 @@ export default function HomeView(p: Props) {
           <div className="home-recents__list">
             {p.recents.map((r) => (
               <button key={r.path} className="home-recent" onClick={() => p.onOpenRecent(r.path)}>
-                <span className="home-recent__title">{r.title}</span>
-                <span className="home-recent__path">{r.path.replace(/\.md$/, '')}</span>
+                <span className="home-recent__icon" aria-hidden="true"><IconBook size={16} /></span>
+                <span className="home-recent__body">
+                  <span className="home-recent__title">{r.title}</span>
+                  <span className="home-recent__path">{r.path.replace(/\.md$/, '')}</span>
+                </span>
               </button>
             ))}
           </div>
@@ -132,10 +141,10 @@ export default function HomeView(p: Props) {
               <button type="button" className="home-wb__link" onClick={p.onOpenReport}>学习报告</button>
             </div>
             <div className="home-wb__kpis">
-              <div className="home-wb__kpi"><b>{streakDays}</b><span>连续打卡 · 天</span></div>
-              <div className="home-wb__kpi"><b>{p.dueCount}</b><span>待复习</span></div>
-              <div className="home-wb__kpi"><b>{p.mistakeCount}</b><span>未清错题</span></div>
-              <div className="home-wb__kpi"><b>{todayLearned}</b><span>今日学习</span></div>
+              <div className="home-wb__kpi"><b><IconTimer size={13} /> {streakDays}</b><span>连续打卡 · 天</span></div>
+              <div className="home-wb__kpi"><b><IconQuiz size={13} /> {p.dueCount}</b><span>待复习</span></div>
+              <div className="home-wb__kpi"><b><IconTarget size={13} /> {p.mistakeCount}</b><span>未清错题</span></div>
+              <div className="home-wb__kpi"><b><IconBook size={13} /> {todayLearned}</b><span>今日学习</span></div>
             </div>
             <div className="home-wb__chart" role="img" aria-label={`近 7 天学习次数：${week.map((d) => `${d.day} ${d.count} 次`).join('，')}`}>
               {week.map((d) => (
@@ -170,7 +179,10 @@ export default function HomeView(p: Props) {
                 ))}
               </ul>
             ) : (
-              <p className="home-wb__empty">今天没有到期的待办。去「工作台」加一条，或直接开始一轮专注。</p>
+              <div className="home-wb__empty-state">
+                <span className="home-wb__empty-art" aria-hidden="true"><IconTodo size={30} /></span>
+                <p className="home-wb__empty">今天没有到期的待办。去「工作台」加一条，或直接开始一轮专注。</p>
+              </div>
             )}
           </section>
 
@@ -182,9 +194,24 @@ export default function HomeView(p: Props) {
               <button type="button" onClick={p.onNewNote}><IconPlus size={14} /> 新建笔记</button>
               <button type="button" onClick={p.onImport}><IconFolderIn size={14} /> 导入内容</button>
               <button type="button" onClick={p.onVideo}><IconVideo size={14} /> 视频笔记</button>
-              <button type="button" onClick={p.onOpenTodos}><IconTodo size={14} /> 待办工作台</button>
+              {p.onStartTutor && (
+                <button
+                  type="button"
+                  className="home-wb__tutor"
+                  onClick={p.onStartTutor}
+                  title="导师模式：一次只推进一个知识点，过了掌握度才放行；打开的是 AI 面板，但会标为「导师陪练」"
+                >
+                  <IconAi size={14} /> 导师陪练
+                </button>
+              )}
             </div>
+            <p className="home-wb__hint">
+              导师陪练：提问式推进 + 掌握度门禁；AI 笔记：写 / 改正文。同一个面板，按模式区分为不同标识。
+            </p>
           </section>
+
+          {/* 学习日历：整月铺开、只读；月份切换 / 当天小结 / 历史汇总在「学习报告」里 */}
+          <StudyCalendarCard onOpenReport={p.onOpenReport} />
         </div>
       </section>
 

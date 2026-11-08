@@ -113,6 +113,16 @@ export interface StudyReportInput {
   title?: string;
 }
 
+/** 结构化指标：面板顶部的数字卡从它渲染，与 Markdown 正文同一批变量，不另算一套 */
+export interface ReportMetric {
+  label: string;
+  value: string;
+  /** 口径/样本说明（小字） */
+  hint?: string;
+  /** 视觉语气：good 通过色 / warn 提醒 / bad 危险 / muted 无数据 */
+  tone?: 'good' | 'warn' | 'bad' | 'muted';
+}
+
 export interface StudyReportSection {
   heading: string;
   /** Markdown 片段（与 markdown 字段里的内容完全一致，单一来源） */
@@ -166,6 +176,8 @@ export interface StudyReportData {
 
 export interface StudyReport {
   title: string;
+  /** 顶部摘要卡（5 项），与 sections 正文同源 */
+  metrics: ReportMetric[];
   /** 可直接复制/下载的 Markdown 全文 */
   markdown: string;
   sections: StudyReportSection[];
@@ -570,5 +582,41 @@ export function buildStudyReport(input: StudyReportInput): StudyReport {
   ].join('\n').replace(/\n+$/, '\n');
 
   const sufficient = seen >= MASTERY_MIN_SEEN || learned > 0 || records.length > 0;
-  return { title, markdown, sections, highlights, sufficient, data };
+  // 顶部指标卡：数字全部来自上面同一批局部变量，口径与正文一致；
+  // 没有样本时 value 写「—」并标 muted，绝不用 0% 冒充结论。
+  const metrics: ReportMetric[] = [
+    {
+      label: '已作答',
+      value: questions ? `${fmtCount(seen)} / ${fmtCount(questions)}` : EMPTY,
+      hint: questions ? '题（按题计）' : '还没有题库',
+      tone: seen > 0 ? undefined : 'muted',
+    },
+    {
+      label: '正确率',
+      value: seen > 0 ? fmtPct(accuracy) : EMPTY,
+      hint: seen > 0 ? `按题 · ${fmtCount(seen)} 题样本` : '还没有作答记录',
+      tone: seen > 0
+        ? (accuracy !== null && accuracy < MASTERY_WEAK_ACCURACY ? 'bad' : 'good')
+        : 'muted',
+    },
+    {
+      label: '到期复习卡',
+      value: fmtCount(dueNow),
+      hint: `共 ${fmtCount(input.cards.length)} 张 · 已排程 ${fmtCount(learned)}`,
+      tone: dueNow > 0 ? 'warn' : 'muted',
+    },
+    {
+      label: '薄弱章节',
+      value: weak.length ? fmtCount(weak.length) : EMPTY,
+      hint: weak.length ? `样本 ≥ ${fmtCount(MASTERY_MIN_SEEN)} 题` : '暂无达阈值章节',
+      tone: weak.length ? 'warn' : 'muted',
+    },
+    {
+      label: '错题',
+      value: fmtCount(records.length),
+      hint: `累计失败 ${fmtCount(fails)} 次`,
+      tone: records.length ? 'warn' : 'muted',
+    },
+  ];
+  return { title, metrics, markdown, sections, highlights, sufficient, data };
 }

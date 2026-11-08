@@ -1,15 +1,21 @@
 /**
- * 主题：浅色（蓝白）/ 深色（暖灰）+ 持久记忆。
- * 通过 <html data-theme="light|dark"> 切换，CSS 变量据此生效，不覆盖原主题。
+ * 主题：浅色（蓝白）/ 深色（暖灰）/ 国风（宣纸 · 墨 · 花青）+ 持久记忆。
+ * 通过 <html data-theme="light|dark|guofeng"> 切换，CSS 变量据此生效，不覆盖原主题。
+ * guofeng 是独立的纸墨主题（见 23-guofeng-theme.css），不改变浅色 / 深色的任何令牌。
  */
 
 import { motionAllowed } from './motionPrefs';
+import { defineRawStore } from '../storage/kv';
 
-export type Theme = 'light' | 'dark';
+export type Theme = 'light' | 'dark' | 'guofeng';
+
+/** 主题 / 字体都是裸字符串（不是 JSON），走 defineRawStore 见 storage/kv */
+const THEME_STORE = defineRawStore('knowlattice-theme');
+const FONT_STORE = defineRawStore('knowlattice-font');
 
 export function currentTheme(): Theme {
   const t = document.documentElement.getAttribute('data-theme');
-  return t === 'dark' ? 'dark' : 'light';
+  return t === 'dark' || t === 'guofeng' ? t : 'light';
 }
 
 type ViewTransitionDocument = Document & {
@@ -25,7 +31,7 @@ export function applyTheme(t: Theme, origin?: { x: number; y: number }) {
   const root = document.documentElement;
   const commit = () => {
     root.setAttribute('data-theme', t);
-    localStorage.setItem('knowlattice-theme', t);
+    THEME_STORE.write(t);
   };
   const doc = document as ViewTransitionDocument;
   const canReveal =
@@ -58,8 +64,8 @@ export function applyTheme(t: Theme, origin?: { x: number; y: number }) {
 }
 
 export function initTheme() {
-  const saved = localStorage.getItem('knowlattice-theme');
-  applyTheme(saved === 'dark' ? 'dark' : 'light');
+  const saved = THEME_STORE.read();
+  applyTheme(saved === 'dark' || saved === 'guofeng' ? saved : 'light');
 }
 
 // ---------- 字体（与主题并列，存 localStorage） ----------
@@ -74,10 +80,10 @@ export function currentFont(): Font {
 
 export function applyFont(f: Font) {
   document.documentElement.setAttribute('data-font', f);
-  localStorage.setItem('knowlattice-font', f);
+  FONT_STORE.write(f);
 }
 
 export function initFont() {
-  const saved = localStorage.getItem('knowlattice-font');
+  const saved = FONT_STORE.read();
   applyFont(saved === 'serif' || saved === 'mono' ? saved : 'system');
 }

@@ -3,7 +3,7 @@
  *
  * 卡片是「点结构 → 直接看笔记」的一等入口，这两件事都必须可测：
  * - 一个结构可能被写成了英文名 / 中文名 / 结构 ID 三种标题，接回笔记要挨个试；
- * - 卡片浮在 3D 舞台上，点屏幕边缘时必须翻面并夹紧，不能半个卡片跑到视口外。
+ * - 卡片贴在 3D 舞台左边缘（模型居中，错开视野中心），纵向跟随点击点并夹紧。
  *
  * 纯函数，不碰 DOM（落位只吃矩形数值），由 views/AnatomyNoteCard 消费。
  */
@@ -27,10 +27,8 @@ export const CARD_ESTIMATE: CardSize = { width: 340, height: 300 };
 
 /** 卡片与舞台边缘的留白 */
 const PAD = 12;
-/** 卡片与点击点之间的偏移 */
-const CURSOR_GAP = 16;
-/** 没有点击点（从右侧结构列表选中）时的停靠位置：让开顶部的系统 chip 行 */
-const DOCK = { left: PAD, top: 56 };
+/** 默认停靠高度：让开顶部系统 chip 行；调用方会传入实测高度 */
+const DOCK_TOP = 56;
 
 /**
  * 结构 → 可用于接回笔记的名称，按优先级排列：
@@ -81,24 +79,20 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), M
 
 /**
  * 计算卡片相对舞台的落位（left/top，单位 px）。
- * - anchor 为 null（从结构列表选中）→ 停靠舞台左上角
- * - anchor 为点击点（视口坐标）→ 落在光标右下方；右侧/下方放不下就翻到另一侧，最后统一夹紧
+ *
+ * **固定贴左边缘停靠，不再跟着光标游走**：舞台中央是模型，卡片压在点击点旁
+ * 会把刚点的结构整个盖住（实测点胸口时 360×247 的卡片正好盖住右半身）。
+ * 现在只借用点击点的纵向位置，让卡片与所点结构大致同高；横向永远停在左边缘，
+ * 与居中的模型错开。`topInset` 由调用方按顶部 chip 行的实际高度传入。
  */
 export function placeCard(
   anchor: { x: number; y: number } | null,
   stage: CardStageRect,
-  card: CardSize
+  card: CardSize,
+  topInset: number = DOCK_TOP
 ): { left: number; top: number } {
-  if (!anchor) return { ...DOCK };
-  const cx = anchor.x - stage.left;
-  const cy = anchor.y - stage.top;
-  let left = cx + CURSOR_GAP;
-  let top = cy + CURSOR_GAP;
-  // 右/下越界 → 翻到光标另一侧（贴近屏幕边缘时优先保证卡片整体可见）
-  if (left + card.width > stage.width - PAD) left = cx - card.width - CURSOR_GAP;
-  if (top + card.height > stage.height - PAD) top = cy - card.height - CURSOR_GAP;
-  return {
-    left: clamp(left, PAD, stage.width - card.width - PAD),
-    top: clamp(top, PAD, stage.height - card.height - PAD),
-  };
+  const top = anchor
+    ? clamp(anchor.y - stage.top - card.height / 2, topInset, stage.height - card.height - PAD)
+    : topInset;
+  return { left: clamp(PAD, PAD, stage.width - card.width - PAD), top };
 }

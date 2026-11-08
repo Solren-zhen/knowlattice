@@ -26,6 +26,17 @@ function Harness({ k = 'test' }: { k?: string }) {
   );
 }
 
+/** 下方抓手：右侧功能栏的渲染顺序（面板在上、拖动条贴底） */
+function BottomHarness({ k = 'bottom' }: { k?: string }) {
+  const drag = usePanelDrag(k);
+  return (
+    <div data-testid="panel" data-panel-drag-root style={drag.style}>
+      <section data-testid="body" />
+      <div data-testid="foot" onPointerDown={drag.onHandlePointerDown} onDoubleClick={drag.reset} />
+    </div>
+  );
+}
+
 afterEach(() => {
   cleanup();
   localStorage.clear();
@@ -89,6 +100,11 @@ describe('usePanelDrag', () => {
     const panel = getByTestId('panel');
     const head = getByTestId('head');
     // 默认 left=500，加上已保存的 420 后，当前左边缘在 920；右侧只剩 80px 可见。
+    // 夹边量的是整块面板（抓手可能挂在底部），所以两处都要给真实矩形。
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({
+      left: 920, top: 400, width: 300, height: 200,
+      right: 1220, bottom: 600, x: 920, y: 400, toJSON: () => ({}),
+    } as DOMRect);
     vi.spyOn(head, 'getBoundingClientRect').mockReturnValue({
       left: 920, top: 400, width: 300, height: 200,
       right: 1220, bottom: 600, x: 920, y: 400, toJSON: () => ({}),
@@ -145,5 +161,41 @@ describe('usePanelDrag', () => {
   it('只让标题栏接管触摸拖动，不禁掉整个面板的滚动', () => {
     const { getByTestId } = render(<Harness k="p7" />);
     expect(getByTestId('panel').style.touchAction).toBe('');
+  });
+
+  it('抓下方拖条往上拖：夹边按整块面板算，整窗不会跑出屏幕顶', () => {
+    const { getByTestId } = render(<BottomHarness k="p8" />);
+    const panel = getByTestId('panel');
+    const foot = getByTestId('foot');
+    // 面板 top=400、高 200；下方抓手贴在面板底（top=576）。旧算法按抓手上沿算，
+    // 会把整窗往上多拖 176px —— 面板顶跑到 -176，标题栏那截直接看不见了。
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({
+      left: 500, top: 400, width: 300, height: 200,
+      right: 800, bottom: 600, x: 500, y: 400, toJSON: () => ({}),
+    } as DOMRect);
+    vi.spyOn(foot, 'getBoundingClientRect').mockReturnValue({
+      left: 500, top: 576, width: 300, height: 24,
+      right: 800, bottom: 600, x: 500, y: 576, toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.pointerDown(foot, { button: 0, clientX: 400, clientY: 590 });
+    fireEvent.pointerMove(window, { clientX: 400, clientY: -10000 });
+
+    const m = /translate\((-?\d+)px, (-?\d+)px\)/.exec(panel.style.transform);
+    expect(m).toBeTruthy();
+    const y = Number(m?.[2]);
+    // 面板顶正好贴在视口顶：400 + y = 0
+    expect(400 + y).toBe(0);
+    expect(y).not.toBe(-576);
+    fireEvent.pointerUp(window);
+  });
+
+  it('下方拖条同样能复位，且不清掉宽度等其它尺寸', () => {
+    localStorage.setItem('knowlattice-panel-pos:p9', JSON.stringify({ x: 20, y: -120 }));
+    const { getByTestId } = render(<BottomHarness k="p9" />);
+    expect(getByTestId('panel').style.transform).toBe('translate(20px, -120px)');
+    fireEvent.doubleClick(getByTestId('foot'));
+    expect(getByTestId('panel').style.transform).toBe('translate(0px, 0px)');
+    expect(localStorage.getItem('knowlattice-panel-pos:p9')).toBeNull();
   });
 });

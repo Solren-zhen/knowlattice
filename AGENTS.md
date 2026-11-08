@@ -11,19 +11,30 @@ TypeScript 前端 + Tauri 桌面壳的知识/笔记类应用。
 | `src/` | 前端源码（含 `views/`、`index.css`） |
 | `src-tauri/` | Tauri（Rust）侧 |
 | `public/` | 静态资源 |
-| `scripts/` | 构建辅助脚本（`clean-dist.mjs`、`copy-pdf-worker.mjs`、`assert-public-dist.mjs`、`pack.mjs`、`tauri.mjs`） |
+| `scripts/` | 构建辅助脚本（`clean-dist.mjs`、`copy-pdf-worker.mjs`、`assert-public-dist.mjs`、`verify-vendor.mjs`、`size-budget.mjs`、`hooks-order-check.mjs`、`pack.mjs`、`tauri.mjs`、`features-gen.mjs`、`ui-interact.mjs`） |
 | `docs/` | 文档 |
 | `vendor/` | 第三方（勿手改） |
 | `src/views/railCatalog.tsx` | **导航轨条目与分组的唯一清单**（`RailKey` 必须与 Workspace 的 `openFeature` 一一对应，漏一个编译不过） |
 | `src/views/Workspace.tsx` | **各面板开关的唯一出口**（`openFeature` / `railOrder` 高亮优先级 / `paletteCommands`） |
-| `src/index.css` | **布局与视觉的唯一出口**（无 CSS Modules、无 Tailwind；改样式只在这里） |
+| `src/index.css` | **样式入口**：只按顺序 `@import ./styles/*.css`（无 CSS Modules、无 Tailwind）。25 个 partial 的顺序就是级联，调换会让覆盖规则失效 |
+| `src/styles/*.css` | 样式本体：按段落拆分的 partial（`00-foundation` … `25-matgen`）。**改样式改对应 partial，不要回填入口** |
 | `src/views/useDockSplit.ts` | 右侧「视频+AI 笔记」那一栏的尺寸状态（宽度 + 视频块高度） |
 | `src/views/usePanelDrag.ts` | 其余浮窗的拖动/缩放位置与尺寸 |
 | `src/core/qbank.ts` · `src/storage/qbank.ts` | 题库领域逻辑 / IndexedDB 持久化（含 legacy 迁移标记 `legacy-banks-v1`） |
 | `src/__tests__/architecture.test.ts` | **架构不变量的可执行版本**（分层方向、console.log、Tauri 依赖），下面第三节就是它的文字版 |
+| `src/views/featureRouting.ts` | 功能路由的纯数据层：整屏面板互斥表 `RAIL_MODAL`（由注册表派生）、轨上高亮优先级 `buildRailOrder`、首页最近使用的 LRU（单测在 `__tests__/featureRouting.test.ts`） |
+| `src/views/panelRegistry.ts` | **面板注册表：加一个面板只改这一行**（`id` / 轨入口 `rail` / 是否模态 `modal` / 互斥组 `group`）。`MODAL_IDS` 与 `RAIL_MODAL` 都由它派生（单测在 `__tests__/panelRegistry.test.ts`） |
+| `src/views/usePanelState.ts` | 面板开关的唯一容器（`is / open / close / toggle`）。`open/close/toggle` 引用**永久稳定**，可安全入依赖数组；`is` 只用于渲染期求值 |
+| `src/views/PanelOverlay.tsx` | 全屏面板遮罩的唯一出口（`panel-backdrop` + 色调 + 点外部关闭）。别再手写 `.panel-backdrop` |
+| `src/storage/kv.ts` | 本地键值：`defineStore` / `defineRawStore` + 全部键的清单 `KV_KEYS` / `IDB_NAMES`（单测在 `storage/__tests__/kv.test.ts`） |
+| `src/views/agentChat.ts` | AI 助手的会话存储与聊天条目模型（迁移 / 过期提案 / 配额淘汰 / yolo 权限；单测在 `__tests__/agentChat.test.ts`） |
+| `src/views/mindmapModel.ts` | 思维导图的模型层：节点类型、主题（22 个 CSS 变量 + 四套预设）、Markdown 大纲互转（`parseOutline ∘ treeToMd` 必须恒等；单测在 `__tests__/mindmapModel.test.ts`） |
+| `src/views/AgentSettingsForm.tsx` | AI 设置表单（接口地址 / 密钥 / 本机教材库 / 等价词组） |
+| `e2e/` + `playwright.config.ts` | 真实浏览器冒烟：写盘后刷新仍在、整屏面板开关、懒加载面板能下载并挂载。**改数据落盘或面板路由时必须跑 `npm run test:e2e`** |
+| `scripts/verify-vendor.mjs` | `file:` 依赖（vendor tarball）的 sha256 校验，接在 `prebuild` 上；换包必须同时改 `PINNED` |
 | `vitest.config.ts` · `src/__tests__/setup.ts` | 测试预算：`testTimeout` 与 RTL `asyncUtilTimeout` **必须同步调**（单测预算要大于用例里所有等待之和） |
 
-命令（根目录）：`npm run dev`（vite） / `npm run build`（`tsc -b && vite build` + 产物断言） / `npm run lint`（oxlint） / `npm run test`（vitest run） / `npm run bench` / `npm run pack` / `npm run tauri`。
+命令（根目录）：`npm run dev`（vite） / `npm run build`（`tsc -b && vite build` + 产物断言） / `npm run lint`（oxlint） / `npm run test`（vitest run） / `npm run test:e2e`（Playwright） / `npm run bench` / `npm run pack` / `npm run tauri`。
 
 ## 二、本项目的硬约束
 
@@ -33,6 +44,7 @@ TypeScript 前端 + Tauri 桌面壳的知识/笔记类应用。
 4. 不要手改 `vendor/` 与 `node_modules/`。
 5. 依赖版本保持不动，除非用户明确要求升级。
 6. 涉及 Tauri 侧改动时，先确认前端与 Rust 两侧的接口契约，再改任一侧。
+7. **面板与持久化的单一出口**：新增面板只改 `panelRegistry.ts`（不要在 Workspace 里再加 `useState` + `openFeature` + 渲染分支三件套）；遮罩一律用 `PanelOverlay`；新增 `localStorage` 键必须登记 `KV_KEYS`，`medvault-*` 只许出现在 `core/migrate.ts`（两条都有测试守）。
 
 ## 三、布局与层级（硬约束，对应 `src/__tests__/architecture.test.ts`）
 

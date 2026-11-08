@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>内分泌系统 · 定位示意图（方案 C 试点）</title>
+<style>
+  :root {
+    --bg: #F6F8FA;
+    --surface: #FFFFFF;
+    --line: #E3E8EE;
+    --text: #1B2430;
+    --muted: #6B7785;
+    --faint: #9AA5B1;
+    --accent: #0F766E;
+    --accent-soft: #E6F4F1;
+    --accent-line: #B7DED7;
+    --body-fill: #EDF2F5;
+    --body-line: #C2CDD6;
+    --ref: #D5DEE5;
+    --hit: #B91C1C;
+    --radius: 12px;
+    --font: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--font); font-size: 14px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1160px; margin: 0 auto; padding: 34px 28px 56px; }
+
+  header { display: flex; align-items: center; gap: 10px; }
+  h1 { font-size: 19px; font-weight: 600; margin: 0; }
+  .tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid var(--accent-line); font-weight: 500;
+  }
+  .sub { color: var(--muted); font-size: 12.5px; margin: 3px 0 22px; }
+
+  .layout { display: grid; grid-template-columns: 440px minmax(0, 1fr); gap: 20px; align-items: start; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 12px;
+  }
+  .figure svg { display: block; width: 100%; height: auto; }
+
+  .body { fill: var(--body-fill); stroke: var(--body-line); stroke-width: 1.3; stroke-linejoin: round; }
+  .body-line { fill: none; stroke: var(--body-line); stroke-width: .9; stroke-dasharray: 3 4; opacity: .8; }
+  .head-inner { fill: none; stroke: var(--body-line); stroke-width: .9; opacity: .55; }
+
+  .organ { fill: var(--accent); transition: fill .15s; pointer-events: none; }
+  .organ.ref { fill: var(--ref); }
+  .group { cursor: pointer; }
+  .group .halo {
+    fill: none; stroke: var(--hit); stroke-width: 1.4; opacity: 0;
+    transition: opacity .15s; pointer-events: none;
+  }
+  .group:hover .halo { opacity: .3; }
+  .group:hover .organ:not(.ref) { fill: #0B5F58; }
+  .group.active .organ:not(.ref) { fill: var(--hit); }
+  .group.active .halo { opacity: .85; }
+  .group-hit { fill: transparent; }
+
+  .badge circle { fill: var(--surface); stroke: var(--accent-line); stroke-width: 1; }
+  .badge text { font-size: 9.5px; font-weight: 600; fill: var(--accent);
+                text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+  .group.active ~ .badge circle { stroke: var(--hit); }
+  .leader { stroke: var(--body-line); stroke-width: .9; fill: none; }
+  .caption { font-size: 9.5px; fill: var(--faint); }
+
+  .panel-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 2px 4px 10px; border-bottom: 1px solid var(--line);
+  }
+  .panel-head h2 { font-size: 13px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+  .count { font-size: 11.5px; color: var(--faint); }
+
+  ul.organs { list-style: none; margin: 0; padding: 4px 0; }
+  ul.organs li + li { border-top: 1px solid #F1F4F7; }
+  button.row {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    padding: 10px 8px; background: none; border: 0; border-radius: 8px;
+    font-family: inherit; font-size: 13.5px; color: var(--text);
+    text-align: left; cursor: pointer; transition: background .12s;
+  }
+  button.row:hover { background: #F5F8FA; }
+  button.row.active { background: var(--accent-soft); }
+  button.row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .idx {
+    flex: none; width: 21px; height: 21px; border-radius: 6px;
+    display: grid; place-items: center; font-size: 11px; font-weight: 600;
+    background: #EFF3F6; color: var(--muted);
+  }
+  button.row.active .idx { background: var(--accent); color: #fff; }
+  .row-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+  .row-name { font-weight: 500; flex: none; }
+  .row-latin { font-size: 11.5px; color: var(--faint); font-style: italic;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-count { flex: none; font-size: 11px; color: var(--faint); }
+  .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  button.row.active .dot { background: var(--hit); }
+
+  .detail {
+    margin-top: 10px; padding: 14px; border-radius: 10px;
+    background: #FAFBFC; border: 1px solid var(--line);
+    display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 16px;
+  }
+  .detail .art { width: 118px; }
+  .detail .art svg { width: 118px; height: 118px; display: block; }
+  .detail h3 { margin: 0; font-size: 15px; font-weight: 600; }
+  .detail .latin { font-size: 11.5px; color: var(--faint); font-style: italic; margin: 1px 0 9px; }
+  .detail dl { margin: 0; display: grid; grid-template-columns: 42px minmax(0,1fr); gap: 4px 10px; font-size: 12.5px; }
+  .detail dt { color: var(--faint); }
+  .detail dd { margin: 0; }
+  .keys {
+    margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--line);
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 11px; color: var(--muted); line-height: 1.75;
+    word-break: break-all;
+  }
+  .keys b { font-family: var(--font); font-weight: 500; color: var(--faint);
+            display: block; margin-bottom: 2px; font-size: 10.5px; }
+
+  .foot {
+    margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line);
+    font-size: 11.5px; color: var(--faint); display: flex; gap: 14px; flex-wrap: wrap;
+  }
+  .foot b { color: var(--muted); font-weight: 500; }
+  @media (max-width: 920px) { .layout { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>内分泌系统 · 定位示意图</h1>
+    <span class="tag">方案 C 试点</span>
+  </header>
+  <p class="sub">10 个结构 · 5 组 · 示意非等比 · 点图中色块或右侧条目</p>
+
+  <div class="layout">
+    <div class="card figure">
+      <svg viewBox="0 0 400 560" role="img" aria-label="内分泌器官在人体中的位置示意图">
+        <title>内分泌器官定位</title>
+        <desc>标注垂体、松果体、甲状腺、甲状旁腺、肾上腺五组共十个结构；肾脏为参照。</desc>
+
+        <!-- 头 -->
+        <ellipse class="body" cx="200" cy="50" rx="34" ry="41"/>
+        <path class="head-inner" d="M172 44 C180 32 220 32 228 44"/>
+        <!-- 颈 -->
+        <path class="body" d="M184 86 C186 99 187 108 188 117 L212 117 C213 108 214 99 216 86 Z"/>
+        <!-- 躯干：肩 → 胸 → 腰 → 胯 -->
+        <path class="body" d="M188 117 C156 125 132 146 129 178
+                              C126 240 138 292 135 352
+                              C133 404 131 436 130 462
+                              Q200 484 270 462
+                              C269 436 267 404 265 352
+                              C262 292 274 240 271 178
+                              C268 146 244 125 212 117 Z"/>
+        <!-- 锁骨 -->
+        <path class="body-line" d="M188 132 Q168 138 152 148"/>
+        <path class="body-line" d="M212 132 Q232 138 248 148"/>
+        <!-- 肋弓 -->
+        <path class="body-line" d="M140 300 Q200 322 260 300"/>
+        <!-- 骨盆 -->
+        <path class="body-line" d="M137 432 Q200 450 263 432"/>
+
+        <!-- 参照：双肾 -->
+        <ellipse class="organ ref" cx="174" cy="330" rx="13" ry="21" transform="rotate(-7 174 330)"/>
+        <ellipse class="organ ref" cx="226" cy="330" rx="13" ry="21" transform="rotate(7 226 330)"/>
+
+        <!-- ① 垂体 -->
+        <g class="group" data-key="pituitary">
+          <circle class="halo" cx="200" cy="80" r="16"/>
+          <ellipse class="organ" cx="199" cy="77" rx="9" ry="5.6"/>
+          <ellipse class="organ" cx="200" cy="85" rx="7" ry="4.6"/>
+          <circle class="group-hit" cx="200" cy="80" r="17"/>
+        </g>
+        <g class="badge"><circle cx="240" cy="80" r="8"/><text x="240" y="80">1</text></g>
+        <path class="leader" d="M210 80 L231 80"/>
+
+        <!-- ② 松果体 -->
+        <g class="group" data-key="pineal">
+          <circle class="halo" cx="200" cy="66" r="12"/>
+          <circle class="organ" cx="200" cy="66" r="4.6"/>
+          <circle class="group-hit" cx="200" cy="66" r="13"/>
+        </g>
+        <g class="badge"><circle cx="160" cy="60" r="8"/><text x="160" y="60">2</text></g>
+        <path class="leader" d="M190 64 L169 60"/>
+
+        <!-- ③ 甲状腺 -->
+        <g class="group" data-key="thyroid">
+          <circle class="halo" cx="200" cy="152" r="21"/>
+          <ellipse class="organ" cx="190" cy="151" rx="10" ry="16"/>
+          <ellipse class="organ" cx="210" cy="151" rx="10" ry="16"/>
+          <rect class="organ" x="195" y="153" width="10" height="7" rx="2.5"/>
+          <circle class="group-hit" cx="200" cy="151" r="22"/>
+        </g>
+        <g class="badge"><circle cx="252" cy="150" r="8"/><text x="252" y="150">3</text></g>
+        <path class="leader" d="M220 151 L243 150"/>
+
+        <!-- ④ 甲状旁腺 -->
+        <g class="group" data-key="parathyroid">
+          <circle class="halo" cx="200" cy="151" r="26"/>
+          <circle class="organ" cx="183" cy="142" r="3.2"/>
+          <circle class="organ" cx="217" cy="142" r="3.2"/>
+          <circle class="organ" cx="183" cy="160" r="3.2"/>
+          <circle class="organ" cx="217" cy="160" r="3.2"/>
+          <circle class="group-hit" cx="200" cy="151" r="28"/>
+        </g>
+        <g class="badge"><circle cx="148" cy="186" r="8"/><text x="148" y="186">4</text></g>
+        <path class="leader" d="M178 170 L154 181"/>
+
+        <!-- ⑤ 肾上腺 -->
+        <g class="group" data-key="adrenal">
+          <circle class="halo" cx="200" cy="304" r="50"/>
+          <path class="organ" d="M164 304 L182 304 L174 290 Z"/>
+          <path class="organ" d="M236 304 L218 304 L226 290 Z"/>
+          <circle class="group-hit" cx="200" cy="304" r="52"/>
+        </g>
+        <g class="badge"><circle cx="256" cy="282" r="8"/><text x="256" y="282">5</text></g>
+        <path class="leader" d="M234 297 L247 287"/>
+
+        <text class="caption" x="200" y="512" text-anchor="middle">浅灰为肾脏（参照，非内分泌器官）</text>
+      </svg>
+    </div>
+
+    <div class="card">
+      <div class="panel-head">
+        <h2>内分泌系统</h2>
+        <span class="count">5 组 · 10 个结构</span>
+      </div>
+
+      <ul class="organs" id="list"></ul>
+
+      <div class="detail" id="detail"></div>
+
+      <div class="foot">
+        <span><b>示意非等比</b></span>
+        <span>数据：本项目 manifest（12 系统 / 3478 结构）</span>
+        <span>体积：约 26 KB · 3D 版全量 38 MB</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* 五组数据。organIds 与 public/anatomy/manifest.json 的 organ_id 严格对齐。 */
+const GROUPS = [
+  {
+    key: 'pituitary', idx: 1, name: '垂体', latin: 'Hypophysis', count: 2,
+    where: '颅底蝶鞍', member: '腺垂体 · 神经垂体',
+    organIds: ['adenohypophysis', 'neurohypophysis'],
+    note: '腺垂体分泌生长激素、促甲状腺激素等；神经垂体储存并释放抗利尿激素与催产素。',
+    art: `<ellipse cx="59" cy="44" rx="32" ry="17" fill="#0F766E"/>
+          <ellipse cx="59" cy="60" rx="24" ry="14" fill="#4E9E97"/>
+          <path d="M59 24 L59 14" stroke="#B7DED7" stroke-width="3.5" stroke-linecap="round"/>`,
+  },
+  {
+    key: 'pineal', idx: 2, name: '松果体', latin: 'Glandula pinealis', count: 1,
+    where: '间脑后上方，第三脑室顶', member: '单发',
+    organIds: ['pineal_gland'],
+    note: '分泌褪黑素，参与昼夜节律与睡眠调节。',
+    art: `<circle cx="59" cy="58" r="26" fill="#0F766E"/>
+          <circle cx="59" cy="58" r="10" fill="#E6F4F1"/>
+          <path d="M59 32 L59 24" stroke="#B7DED7" stroke-width="3" stroke-linecap="round"/>`,
+  },
+  {
+    key: 'thyroid', idx: 3, name: '甲状腺', latin: 'Glandula thyreoidea', count: 1,
+    where: '颈前，第 2–4 气管软骨环前方', member: '左叶 · 右叶 · 峡部',
+    organIds: ['thyroid_gland'],
+    note: '分泌甲状腺激素（T3 / T4），调节基础代谢率与产热。',
+    art: `<ellipse cx="38" cy="58" rx="17" ry="30" fill="#0F766E"/>
+          <ellipse cx="80" cy="58" rx="17" ry="30" fill="#0F766E"/>
+          <rect x="45" y="62" width="28" height="13" rx="5" fill="#0F766E"/>`,
+  },
+  {
+    key: 'parathyroid', idx: 4, name: '甲状旁腺', latin: 'Glandula parathyreoidea', count: 4,
+    where: '甲状腺后缘，上下各一对', member: '上左 · 上右 · 下左 · 下右',
+    organIds: ['superior_parathyroid_gland_l', 'superior_parathyroid_gland_r',
+               'inferior_parathyroid_gland_l', 'inferior_parathyroid_gland_r'],
+    note: '分泌甲状旁腺激素（PTH）升高血钙；甲状腺手术中最易受损。',
+    art: `<ellipse cx="38" cy="58" rx="17" ry="30" fill="#D5DEE5"/>
+          <ellipse cx="80" cy="58" rx="17" ry="30" fill="#D5DEE5"/>
+          <circle cx="33" cy="42" r="7" fill="#0F766E"/>
+          <circle cx="85" cy="42" r="7" fill="#0F766E"/>
+          <circle cx="33" cy="74" r="7" fill="#0F766E"/>
+          <circle cx="85" cy="74" r="7" fill="#0F766E"/>`,
+  },
+  {
+    key: 'adrenal', idx: 5, name: '肾上腺', latin: 'Glandula suprarenalis', count: 2,
+    where: '双侧肾上极内上方', member: '左侧 · 右侧',
+    organIds: ['suprarenal_gland_l', 'suprarenal_gland_r'],
+    note: '皮质分泌糖皮质激素与盐皮质激素；髓质分泌儿茶酚胺。',
+    art: `<ellipse cx="40" cy="66" rx="17" ry="30" fill="#D5DEE5"/>
+          <ellipse cx="78" cy="66" rx="17" ry="30" fill="#D5DEE5"/>
+          <path d="M21 36 L49 36 L35 14 Z" fill="#0F766E"/>
+          <path d="M97 36 L69 36 L83 14 Z" fill="#0F766E"/>`,
+  },
+];
+
+const list = document.getElementById('list');
+const detail = document.getElementById('detail');
+const groupEls = [...document.querySelectorAll('.group')];
+
+function render(i) {
+  const g = GROUPS[i];
+
+  list.innerHTML = GROUPS.map((it, n) => `
+    <li>
+      <button class="row${n === i ? ' active' : ''}" data-i="${n}" aria-pressed="${n === i}">
+        <span class="idx">${it.idx}</span>
+        <span class="row-main">
+          <span class="row-name">${it.name}</span>
+          <span class="row-latin">${it.latin}</span>
+        </span>
+        <span class="row-count">${it.count} 个</span>
+        <span class="dot"></span>
+      </button>
+    </li>`).join('');
+
+  detail.innerHTML = `
+    <div class="art"><svg viewBox="0 0 118 118" aria-hidden="true">${g.art}</svg></div>
+    <div>
+      <h3>${g.name}</h3>
+      <div class="latin">${g.latin}</div>
+      <dl>
+        <dt>位置</dt><dd>${g.where}</dd>
+        <dt>组成</dt><dd>${g.member}</dd>
+        <dt>功能</dt><dd>${g.note}</dd>
+      </dl>
+      <div class="keys"><b>关联键（organ_id）</b>${g.organIds.join('<br>')}</div>
+    </div>`;
+
+  groupEls.forEach((el) => el.classList.toggle('active', el.dataset.key === g.key));
+}
+
+list.addEventListener('click', (e) => {
+  const btn = e.target.closest('button.row');
+  if (btn) render(Number(btn.dataset.i));
+});
+
+groupEls.forEach((el) => el.addEventListener('click', () => {
+  const i = GROUPS.findIndex((g) => g.key === el.dataset.key);
+  if (i >= 0) render(i);
+}));
+
+render(0);
+</script>
+</body>
+</html>

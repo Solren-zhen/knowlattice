@@ -8,6 +8,9 @@
  *
  * pickCharParts is pure (unit-tested); selectByGeometry / clearHighlights are
  * the DOM glue used by PdfSplitView.
+ *
+ * 跨行拖动的段落保护：行距明显变大或遇到标题行时只保留起点所在段落，
+ * 避免按住鼠标向下滑过整页就把整页文字框进选区。
  */
 import { groupLines, isDragGesture, joinOrderedText, type TextBox } from './pdfSelect';
 
@@ -27,6 +30,46 @@ function bandsOf(lines: number[][], boxes: TextBox[]): Array<{ top: number; bott
     }
     return { top, bottom };
   });
+}
+
+/**
+ * 段落切分：行距明显变大、或某行字号明显偏大（标题行）就断开。
+ * PDF 文字层没有段落概念，这里只用几何线索——不猜语义，宁可少切。
+ */
+export function paragraphRanges(
+  bands: Array<{ top: number; bottom: number }>,
+): Array<[number, number]> {
+  if (bands.length === 0) return [];
+  const heights = bands
+    .map((b) => Math.max(1, b.bottom - b.top))
+    .sort((a, b) => a - b);
+  const median = heights[Math.floor(heights.length / 2)];
+  const gapLimit = Math.max(6, median * 0.8);
+  const isHeading = (h: number) => h > median * 1.35;
+  const out: Array<[number, number]> = [];
+  let start = 0;
+  for (let i = 1; i < bands.length; i++) {
+    const prev = bands[i - 1], cur = bands[i];
+    const prevH = Math.max(1, prev.bottom - prev.top);
+    const curH = Math.max(1, cur.bottom - cur.top);
+    if (cur.top - prev.bottom > gapLimit || isHeading(prevH) || isHeading(curH)) {
+      out.push([start, i - 1]);
+      start = i;
+    }
+  }
+  out.push([start, bands.length - 1]);
+  return out;
+}
+
+/** 包含某一行的段落行范围（找不到时退化为该行本身）。 */
+export function paragraphOfLine(
+  bands: Array<{ top: number; bottom: number }>,
+  line: number,
+): [number, number] {
+  for (const [start, end] of paragraphRanges(bands)) {
+    if (line >= start && line <= end) return [start, end];
+  }
+  return [line, line];
 }
 
 /** Pick the line containing y (small tolerance), else the nearest one. */
@@ -83,10 +126,15 @@ export function pickCharParts(
   // Across lines: trim start/end line to the anchor/focus character, keep the
   // lines in between whole so a vertical drag never drops a row.
   const forward = al < fl;
-  const startLine = forward ? al : fl;
-  const endLine = forward ? fl : al;
+  const rangeStart = forward ? al : fl;
+  const rangeEnd = forward ? fl : al;
   const startX = forward ? anchor.x : focus.x;
   const endX = forward ? focus.x : anchor.x;
+  // 跨过空行/标题行时，只保留起点所在段落：避免一次长拖把整页框进选区。
+  // 起点是用户按下鼠标的位置，比终点更接近「我想选这里」的意图。
+  const [paraStart, paraEnd] = paragraphOfLine(bands, al);
+  const startLine = Math.max(rangeStart, paraStart);
+  const endLine = Math.min(rangeEnd, paraEnd);
   for (let li = startLine; li <= endLine; li++) {
     for (const i of lines[li]) {
       const b = boxes[i];
@@ -98,8 +146,12 @@ export function pickCharParts(
         if (mid < px || mid > qx) continue;
       }
       const full = items[i].text.length;
-      const start = li === startLine && b.left < startX ? at(i, startX) : 0;
-      const end = li === endLine && b.right > endX ? at(i, endX) : full;
+      const start = li === startLine && startLine === rangeStart && b.left < startX
+        ? at(i, startX)
+        : 0;
+      const end = li === endLine && endLine === rangeEnd && b.right > endX
+        ? at(i, endX)
+        : full;
       push(i, start, end);
     }
   }
@@ -108,7 +160,9 @@ export function pickCharParts(
 
 /* ---------------- DOM glue ---------------- */
 
-const TEXT_SPAN_SELECTOR = '.rpv-core__text-layer-text';
+// PDF.js 的文本层用无 class 的叶子 span 承载每个文本片段；markedContent
+// 只是结构包装，不能参与几何选字，否则同一段会被重复计算。
+const TEXT_SPAN_SELECTOR = '.textLayer span:not(.markedContent)';
 const HIGHLIGHT_CLASS = 'pdf-geo-hl';
 const WRAP_ATTR = 'data-pdf-hl-wrap';
 
@@ -128,7 +182,7 @@ export function endGeometrySelection() {
 
 function collectSpans(pane: HTMLElement): SpanInfo[] {
   return Array.from(pane.querySelectorAll<HTMLElement>(TEXT_SPAN_SELECTOR))
-    .filter((s) => (s.textContent ?? '').trim().length > 0)
+    .filter((s) => s.children.length === 0 && (s.textContent ?? '').trim().length > 0)
     .map((el) => {
       const r = el.getBoundingClientRect();
       return {

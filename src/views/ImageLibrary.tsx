@@ -20,6 +20,7 @@ import { filterImages, imageLibSummary, imageMarkdown, type ImageEntry } from '.
 import { escThenClose, useEsc } from './useEsc';
 import { copyText } from './clipboard';
 import { IconClose } from './icons';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   entries: ImageEntry[];
@@ -89,7 +90,7 @@ export default function ImageLibrary({ entries, resolveAsset, onInsert, onClose 
   };
 
   return (
-    <div className="panel-backdrop" onClick={onClose}>
+    <PanelOverlay tone="plain" onClose={onClose}>
       <div
         className="panel panel--full img-lib"
         role="dialog"
@@ -197,6 +198,6 @@ export default function ImageLibrary({ entries, resolveAsset, onInsert, onClose 
           </div>
         )}
       </div>
-    </div>
+    </PanelOverlay>
   );
 }

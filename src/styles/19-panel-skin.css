@@ -1,0 +1,142 @@
+/* ============================================================
+   面板统一皮肤（Panel skin）
+
+   问题：外壳（导航轨/首页卡片）是「玻璃 + 16px 圆角 + 1px 内高光」，
+   但各功能面板内部的卡片各自写成「纯白底 + 10~12px 圆角 + 无阴影」，
+   点进去就像换了一个应用；整屏面板又用 88% 不透明的底色把极光背景压掉。
+
+   做法：只在 .panel 作用域内把容器类收敛到与 .card 同一套材质与圆角，
+   不改任何面板的布局、尺寸与滚动链。删除本文件的 @import 即可整体回退。
+   新增面板只要复用下面列出的容器类，就自动获得同一材质。
+   ============================================================ */
+
+/* ---- 面板内的「卡片级」容器：与 .card 同一套材质 ---- */
+.panel .cw-card,
+.panel .wd-card,
+.panel .wb-card,
+.panel .wb-stat,
+.panel .dash-card,
+.panel .report-sec,
+.panel .quiz-chapter,
+.panel .bank-item,
+.panel .quiz-search-item,
+.panel .review-card,
+.panel .compose-picked,
+.panel .quiz-gate,
+.panel .quiz-resume,
+.panel .quiz-reflect,
+.panel .mv-confirm,
+.panel .card-edit {
+  background-color: var(--lg-frost);
+  background-image: var(--lg-tint-image);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  border: 1px solid var(--lg-edge);
+  border-radius: var(--r-card);
+  box-shadow: var(--lg-shadow-soft), var(--lg-inset-highlight);
+  transition:
+    box-shadow var(--t-med) var(--ease),
+    border-color var(--t-med) var(--ease);
+}
+
+/* 可点的卡片才给悬停抬升；静态容器保持安静 */
+.panel .cw-card:hover,
+.panel .wd-card:hover,
+.panel .wb-card:hover,
+.panel .dash-card:hover,
+.panel .quiz-chapter:hover,
+.panel .bank-item:hover,
+.panel .quiz-search-item:hover {
+  box-shadow: var(--lg-shadow), var(--lg-inset-highlight);
+  border-color: var(--lg-edge-cool);
+}
+
+/* ---- 统一空状态：图标 + 主句 + 次句。各面板的空态逐步迁到这个类上，
+   新面板不要再各写一套 .xx-empty（现有面板的旧类不强行替换，视觉等价时才迁） ---- */
+.panel-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-8) var(--sp-5);
+  text-align: center;
+  color: var(--muted);
+}
+.panel-empty .panel-empty__title { font-size: var(--fs-title); font-weight: 600; color: var(--text-2); }
+.panel-empty .panel-empty__hint { font-size: var(--fs-caption); }
+
+/* ---- 面板内的输入控件：统一圆角、实底与聚焦环 ----
+   实底是必要的：输入框要能盖住玻璃纹理，否则长文输入时字会压到环境光上。 */
+.panel .cw-input,
+.panel .cw-textarea,
+.panel .wd-input,
+.panel .wd-select,
+.panel .wb-select,
+.panel .todo-search,
+.panel .todo-edit,
+.panel .card-edit-input,
+.panel .todo-date,
+.panel .todo-select,
+.panel .todo-note-input,
+.panel .wb-field input[type='number'] {
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--text);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+.panel .cw-input:focus-visible,
+.panel .cw-textarea:focus-visible,
+.panel .wd-input:focus-visible,
+.panel .wb-select:focus-visible,
+.panel .todo-search:focus-visible,
+.panel .todo-edit:focus-visible,
+.panel .card-edit-input:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+  border-color: var(--border-accent);
+}
+
+/* ---- 面板正文的分节标题：与首页卡片的标题层级对齐 ----
+   原来各面板自己散写 13/14/15px，同一屏里出现三种「小节标题」 */
+.panel__head + .panel__body h2,
+.panel h2 {
+  font-size: var(--fs-lead);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* ---- 整屏面板：让外壳的极光透一点上来 ----
+   88% → 84%：仍能盖住长文与表格，但不再是「一块灰板」；PDF/图谱的画布本身是实底，
+   不受影响。层叠位置与圆角仍由 16-liquid-glass 决定。 */
+.panel.panel--full {
+  background-color: color-mix(in srgb, var(--bg) 84%, transparent);
+}
+
+/* ---- 面板内的空状态：统一成同一种「安静提示」 ---- */
+.panel .cw-hint,
+.panel .wd-idle__tip,
+.panel .wd-idle__list {
+  color: var(--muted);
+}
+
+/* ---- 面板内的小控件：与玻璃卡片同一材质 ----
+   实测断层：面板容器与卡片已统一玻璃（--lg-frost 0.62 + blur），但按钮/输入框
+   还是 --bg-raised 纯白实底，一屏里「玻璃上浮着白瓷粒」。这里只在面板作用域内
+   把小控件改成首页按钮同款半透白玻璃（rgba(255,255,255,0.86) + 白边 + 内高光），
+   不动布局与字号；深色/国风主题各有一套覆盖，不受影响。
+   输入框保留实底要求（长文输入不能压环境光），只调白度：0.86 半透仍可盖住纹理。 */
+html[data-theme='light'] .panel .btn-small,
+html[data-theme='light'] .panel .btn-icon {
+  background: rgba(255, 255, 255, 0.86);
+  border-color: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 1px 0 #fff, var(--shadow-xs);
+}
+html[data-theme='light'] .panel .btn-small:hover,
+html[data-theme='light'] .panel .btn-icon:hover {
+  background: #fff;
+  border-color: var(--border-accent);
+}
+html[data-theme='light'] .panel .btn-small:disabled,
+html[data-theme='light'] .panel .btn-icon:disabled {
+  background: rgba(255, 255, 255, 0.55);
+  border-color: var(--border);
+}

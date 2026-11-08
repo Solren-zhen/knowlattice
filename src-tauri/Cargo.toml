@@ -1,6 +1,6 @@
 [package]
 name = "knowlattice"
-version = "0.2.2"
+version = "0.2.3"
 description = "晶格 · KnowLattice - 本地优先个人知识笔记"
 authors = ["jophy"]
 edition = "2021"
@@ -20,3 +20,20 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 桌面版 B 站代理：reqwest 负责带 Referer / Cookie 的转发，hyper 负责回环 HTTP 服务。
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
+http-body-util = "0.1"
+futures-util = "0.3"
+tokio = { version = "1", features = ["net", "rt-multi-thread"] }
+bytes = "1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "4.2.0", default-features = false, features = ["v1", "windows-native-keyring-store"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "4.2.0", default-features = false, features = ["v1", "apple-native-keyring-store"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "4.2.0", default-features = false, features = ["v1", "zbus-secret-service-keyring-store"] }

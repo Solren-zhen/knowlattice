@@ -7,12 +7,16 @@
  * 属性键加粗与 wikilink 通过「占位标记 → 渲染后替换」实现，点击走事件委托，
  * 不注入内联 onclick 和 window 全局函数。
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { renderMarkdown } from '../core/markdown';
+import { sanitizeRenderedHtml } from '../core/domSanitize';
+import { escapeHtml } from '../core/htmlEscape';
 import { isImagePath, parseEmbedSpec, type EmbedSpec } from '../core/imageRef';
 import { calloutLabel, isKnownCalloutType } from '../core/callout';
 import { splitBlockTarget } from '../core/blockAnchor';
 import { notesMarkdown, splitFootnotes } from '../core/footnote';
+import { parseAnchorHref } from '../core/videoNotes';
+import { parseCourseAnchorHref, type CourseVideoRef } from '../core/courseNotes';
 import { IconSearch } from './icons';
 
 /** 块锚点占位符：渲染后换成不可见锚点，正文里不出现 `^id` 尾巴（规则见 core/blockAnchor.ts） */
@@ -20,10 +24,6 @@ const BLK_OPEN = '\uE010';
 const BLK_CLOSE = '\uE011';
 
 /** markdown-it 实例已移至 core/markdown.ts 懒加载（首屏入口包不含它） */
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
 
 /**
  * 属性键的内部占位符用私有区字符（U+E000 / U+E001）。
@@ -174,6 +174,10 @@ interface Props {
   /** 解析链接名 → vault 路径（null 表示未创建） */
   resolve?: (name: string) => string | null;
   onOpenLink?: (name: string) => void;
+  /** 预览里点 `#vn=秒`：交给播放器 seek（与编辑器活预览同一套） */
+  onJumpAnchor?: (seconds: number) => boolean;
+  /** 预览里点 `#cw=...`：交给 Workspace 打开课程分P */
+  onJumpCourse?: (ref: CourseVideoRef) => boolean;
   /** vault 相对路径 → 文件内容，用于图片渲染 */
   readFile?: (path: string) => string | undefined;
   /** 空状态 Hero 主 CTA */
@@ -188,9 +192,24 @@ interface Props {
   onRendered?: () => void;
   /** 渲染完成后滚动到某个块并闪一下（点 `[[笔记#^id]]` 跳过来时用） */
   focusBlock?: string | null;
+  /** 背诵模式：把 `{{挖空}}` 盖住，点一下揭开。只影响渲染结果，不改正文 */
+  recite?: boolean;
+  /**
+   * 已揭开的挖空序号（从 0 开始，按 DOM 顺序）。
+   * 由宿主持有状态：全屏背诵要支持空格逐条揭，直接改 DOM 属性会在下一次
+   * React 重渲染时被重置 effect 清掉——状态必须单一来源。
+   */
+  revealed?: readonly number[];
+  /** 点击某条挖空：交给宿主翻转，宿主再把 `revealed` 传回来 */
+  onToggleCloze?: (index: number) => void;
+  /** 挖空进度变化（已揭开 / 总数）：背诵留痕与全屏背诵的进度条都靠它，不各自去读 DOM */
+  onReciteChange?: (revealed: number, total: number) => void;
 }
 
-export default function Preview({ content, resolve, onOpenLink, readFile, onSearch, onGraph, onRendered, focusBlock }: Props) {
+/** 稳定空数组：默认值每次新建会让重置 effect 每帧重跑 */
+const NO_REVEALED: readonly number[] = [];
+
+export default function Preview({ content, resolve, onOpenLink, onJumpAnchor, onJumpCourse, readFile, onSearch, onGraph, onRendered, focusBlock, recite = false, revealed = NO_REVEALED, onToggleCloze, onReciteChange }: Props) {
   // markdown-it 懒加载 → 异步渲染。保持上一份 html 直到新结果就绪（alive 守卫防竞态），
   // 避免切笔记时闪空白；content 为 null 时走 placeholder 分支，不消费 html
   const [html, setHtml] = useState('');
@@ -245,7 +264,7 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
       .then((raw) => {
         if (!alive) return;
         pendingNotifyRef.current = true;
-        setHtml(postprocess(raw, resolve ?? (() => null), readFile));
+        setHtml(sanitizeRenderedHtml(postprocess(raw, resolve ?? (() => null), readFile)));
       })
       .catch((e: unknown) => {
         if (!alive) return;
@@ -278,12 +297,47 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
   // 事件委托：折叠提示块标题 → 切换开合；点击 wikilink 锚点 → onOpenLink(目标名)
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const el = e.target as HTMLElement;
+    // 背诵模式：点挖空只做「揭开/重新盖住」，不进链接分支（挖空里可能带双链）
+    const blank = el.closest?.<HTMLElement>('.cloze-blank');
+    if (blank && recite) {
+      e.preventDefault();
+      if (onToggleCloze) {
+        // 状态由宿主持有：这里只报「点了第几条」，属性由重置 effect 统一落
+        const all = [...(rootRef.current?.querySelectorAll<HTMLElement>('.cloze-blank') ?? [])];
+        onToggleCloze(all.indexOf(blank));
+        return;
+      }
+      if (blank.hasAttribute('data-revealed')) {
+        blank.removeAttribute('data-revealed');
+        blank.setAttribute('aria-label', '挖空，按 Enter 揭晓');
+      } else {
+        blank.setAttribute('data-revealed', '1');
+        blank.removeAttribute('aria-label');
+      }
+      reportRecite();
+      return;
+    }
     // 折叠只在标题上生效：点正文里的链接不该顺手把块收起来
     const title = el.closest?.<HTMLElement>('.mv-callout--fold > .mv-callout-title');
     if (title) {
       e.preventDefault();
       toggleFold(title);
       return;
+    }
+    // 视频 / 课程锚点：`#vn=秒`、`#cw=BV...:pN[:t秒]`，不按普通链接处理
+    const link = el.closest?.<HTMLAnchorElement>('a[href]');
+    if (link) {
+      const href = link.getAttribute('href');
+      const course = onJumpCourse ? parseCourseAnchorHref(href) : null;
+      if (course && onJumpCourse?.(course)) {
+        e.preventDefault();
+        return;
+      }
+      const at = onJumpAnchor ? parseAnchorHref(href) : null;
+      if (at != null && onJumpAnchor?.(at)) {
+        e.preventDefault();
+        return;
+      }
     }
     if (!onOpenLink) return;
     const anchor = el.closest?.('a[data-mv-target]');
@@ -308,6 +362,54 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
     toggleFold(title);
   };
 
+  /**
+   * 挖空进度上报。
+   * 回调走 ref：宿主每次渲染都会传新闭包，直接进依赖会让 effect 反复触发。
+   * 计数从 DOM 读（`data-revealed` 是唯一事实），且只在数字变化时上报——
+   * 这个 effect 每次提交都跑，不设闸门会变成 setState 循环。
+   */
+  const reciteCbRef = useRef(onReciteChange);
+  useEffect(() => {
+    reciteCbRef.current = onReciteChange;
+  });
+  const lastReportRef = useRef('');
+  const reportRecite = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const total = root.querySelectorAll('.cloze-blank').length;
+    const revealedCount = root.querySelectorAll('.cloze-blank[data-revealed]').length;
+    const key = `${revealedCount}/${total}`;
+    if (key === lastReportRef.current) return;
+    lastReportRef.current = key;
+    reciteCbRef.current?.(revealedCount, total);
+  }, []);
+
+  /**
+   * 把「揭开清单」落到 DOM —— **每次提交后都要重放**。
+   *
+   * 正文是 `dangerouslySetInnerHTML`：宿主每重渲染一次，React 就按 html 重写一次
+   * innerHTML，之前手工挂的 `data-revealed` 会连同旧节点一起消失（实测节点被替换、
+   * 重置 effect 却因为依赖没变而不重跑）。所以这里不依赖任何依赖数组，靠幂等重放保证
+   * 「状态 → 属性」永远成立；上报有去重，不会形成循环。
+   */
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const all = root.querySelectorAll<HTMLElement>('.cloze-blank');
+    const open = new Set(revealed);
+    all.forEach((el, i) => {
+      if (recite && open.has(i)) {
+        el.setAttribute('data-revealed', '1');
+        el.removeAttribute('aria-label');
+      } else {
+        el.removeAttribute('data-revealed');
+        if (recite) el.setAttribute('aria-label', '挖空，按 Enter 揭晓');
+        else el.removeAttribute('aria-label');
+      }
+    });
+    reportRecite();
+  });
+
   if (content === null) {
     // 兜底空态：正式首页由 HomeView 承担，这里只在单独使用 Preview 时兜底。
     // 保持最小结构，避免把「首页该放什么」再复制一份。
@@ -330,7 +432,7 @@ export default function Preview({ content, resolve, onOpenLink, readFile, onSear
     );
   }
   return (
-    <div className="preview markdown-body" ref={rootRef} onClick={handleClick} onKeyDown={handleKeyDown}
+    <div className={`preview markdown-body${recite ? ' md-recite' : ''}`} ref={rootRef} onClick={handleClick} onKeyDown={handleKeyDown}
       dangerouslySetInnerHTML={{ __html: html }} />
   );
 }

@@ -13,6 +13,10 @@
  *     优先级、「短语法」快速输入、键盘优先。
  * 这里只做纯函数（解析/分组/排序/统计/完成态迁移），视图只管画——所以能一条条单测。
  */
+import { dayKey } from './dateKey';
+
+export { dayKey };
+
 export type TodoPriority = 1 | 2 | 3; // 1 高 / 2 中 / 3 低
 /**
  * 重复规则：`daily` 每天 · `weekdays` 每个工作日（周一到周五）· `weekly` 每周 ·
@@ -53,12 +57,6 @@ export interface Todo {
 const KEY = 'knowlattice-todos';
 
 // ---------- 日期 ----------
-
-/** 本地时区的 `YYYY-MM-DD`。不要用 toISOString()：那是 UTC，晚上八点后日期会差一天 */
-export function dayKey(d: Date | number = Date.now()): string {
-  const x = typeof d === 'number' ? new Date(d) : d;
-  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
-}
 
 /** `YYYY-MM-DD` 加 n 天（用本地构造避免夏令时/时区偏移） */
 export function addDays(key: string, n: number): string {

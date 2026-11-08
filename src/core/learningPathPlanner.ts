@@ -138,7 +138,8 @@ export function generateLearningPath(
       });
       accumulatedMinutes += 30;
     } else {
-      // 初学者，建议学习新内容
+      // 初学者，建议学习新内容（只给一条：以前会重复塞到时间用完）
+      if (steps.some((step) => step.description === '学习新笔记')) break;
       steps.push({
         step: currentStep++,
         type: 'study',
@@ -251,7 +252,7 @@ function determinePathGoal(report: WeeklyReport): string {
     goals.push(`完成 ${report.dueCards} 张到期复习`);
   }
 
-  if (report.masteryStats.quizAccuracy < 0.7) {
+  if (report.masteryStats.quizCount > 0 && report.masteryStats.quizAccuracy < 0.7) {
     goals.push(`提升做题正确率至 70% 以上`);
   }
 

@@ -112,13 +112,24 @@ function pass(req: IncomingMessage, res: ServerResponse, host: string, path: str
     (r) => {
     // 逐跳/安全头不转发：content-encoding 已由 node 解压语义决定，传输编码由本层决定
     const out: Record<string, string | string[]> = {}
+    const setCookies: string[] = []
     for (const [k, v] of Object.entries(r.headers)) {
       if (v == null) continue
-      if (['connection', 'transfer-encoding', 'content-encoding', 'set-cookie'].includes(k)) continue
+      // set-cookie 不能原样回给浏览器（会把 B 站 cookie 种到 localhost 上），
+      // 但扫码登录成功后 B 站可能只通过它下发 SESSDATA，所以改名为自定义头带给前端。
+      if (k === 'set-cookie') {
+        setCookies.push(...(Array.isArray(v) ? v : [v]))
+        continue
+      }
+      if (['connection', 'transfer-encoding', 'content-encoding'].includes(k)) continue
       out[k] = v as string | string[]
     }
     // 让浏览器愿意把这段响应当作媒体/接口数据
     out['access-control-allow-origin'] = '*'
+    if (setCookies.length) {
+      out['x-bili-set-cookie'] = setCookies.join('|||')
+      out['access-control-expose-headers'] = 'x-bili-set-cookie'
+    }
     if (ctMark) out['content-type'] = ctMark === 'audio' ? 'audio/mp4' : 'video/mp4'
     res.writeHead(r.statusCode ?? 502, out)
     // playurl 的响应要留一遍：里面的媒体主机是后续 <video>/<audio> 请求的通行证

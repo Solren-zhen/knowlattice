@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEsc } from './useEsc';
 import { useDialogDrag } from './usePanelDrag';
 import { matchCommands, type CommandDef } from '../core/commands';
+import PanelOverlay from './PanelOverlay';
 
 export interface PaletteCommand extends CommandDef {
   run: () => void;
@@ -51,7 +52,7 @@ export default function CommandPalette({ commands, onClose }: Props) {
   };
 
   return (
-    <div className="panel-backdrop qs-overlay" onClick={onClose}>
+    <PanelOverlay tone="search" onClose={onClose}>
       <div
         ref={panelRef}
         className="panel qs-modal"
@@ -98,6 +99,6 @@ export default function CommandPalette({ commands, onClose }: Props) {
           ))}
         </div>
       </div>
-    </div>
+    </PanelOverlay>
   );
 }

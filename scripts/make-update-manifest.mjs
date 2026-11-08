@@ -74,6 +74,19 @@ const darwinPlatform = (triple) =>
 const signedIn = (dir, re) =>
   existsSync(dir) ? readdirSync(dir).filter((n) => re.test(n) && existsSync(join(dir, `${n}.sig`))) : [];
 
+// 签名文件里带 `version:X.Y.Z`（tauri 生成）。文件名可能不带版本号（macOS 的 KnowLattice.app.tar.gz），
+// 单看目录名会把上一代的跨平台构建产物当成当次的，写进清单就是指向不存在的 Release 资产。
+// 这里按签名内的版本再筛一遍：读不出或对不上都视为过期，宁缺勿错。
+const signatureVersion = (dir, name) => {
+  try {
+    const raw = readFileSync(join(dir, `${name}.sig`), 'utf8').trim();
+    const text = Buffer.from(raw, 'base64').toString('utf8');
+    return /(?:^|\s)version:(\S+)/.exec(text)?.[1] ?? '';
+  } catch {
+    return '';
+  }
+};
+
 const candidates = [
   ...bundleDirs('nsis').map(({ dir }) => ({ platform: 'windows-x86_64', dir, re: /-setup\.exe$/i })),
   ...bundleDirs('macos').map(({ dir, triple }) => {
@@ -97,7 +110,7 @@ const outDirs = [];
 const ignored = [];
 for (const { platform, dir, re } of candidates) {
   if (platforms[platform]) continue; // 同一平台出现多个目录时只取第一个
-  const found = signedIn(dir, re);
+  const found = signedIn(dir, re).filter((n) => signatureVersion(dir, n) === version);
   const current = found.filter((n) => {
     const v = versionOf(n);
     return !v || v === version;

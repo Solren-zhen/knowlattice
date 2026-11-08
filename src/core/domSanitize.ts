@@ -9,6 +9,9 @@
 
 /** 允许出现在 a[href] 里的协议；其余（javascript:/data:/file:/vbscript:…）一律摘除 */
 const SAFE_HREF_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
+const SAFE_RENDERED_HREF_PROTOCOLS = new Set([...SAFE_HREF_PROTOCOLS, 'mv-wikilink:']);
+const SAFE_RESOURCE_PROTOCOLS = new Set(['http:', 'https:', 'blob:', 'asset:', 'mv-image:']);
+const BLOCKED_TAGS = new Set(['script', 'iframe', 'object', 'embed', 'form', 'base', 'meta', 'link']);
 
 /** 判断 href 是否安全；空 href（a 无 href 属性）也按安全处理（无可执行面） */
 export function isSafeHref(href: string | null): boolean {
@@ -60,4 +63,49 @@ export function sanitizeRenderedHyperlinks(root: Element | null | undefined): nu
     a.setAttribute('rel', 'noreferrer noopener');
   });
   return cleaned;
+}
+
+function safeRenderedUrl(raw: string | null, kind: 'href' | 'resource'): boolean {
+  if (raw === null || raw.trim() === '') return true;
+  const value = raw.trim();
+  if (kind === 'resource' && /^data:image\//i.test(value)) return true;
+  try {
+    const protocol = new URL(value, 'https://knowlattice.invalid/').protocol;
+    return kind === 'href'
+      ? SAFE_RENDERED_HREF_PROTOCOLS.has(protocol)
+      : SAFE_RESOURCE_PROTOCOLS.has(protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 清洗完整 HTML 字符串，作为所有 dangerouslySetInnerHTML 渲染前的统一闸门。
+ * 在 Node（无 DOM）中原样返回，浏览器和 jsdom 中通过惰性 template 解析并剥离危险节点/属性。
+ */
+export function sanitizeRenderedHtml(html: string): string {
+  if (!html || typeof document === 'undefined') return html;
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const root = template.content;
+
+  root.querySelectorAll([...BLOCKED_TAGS].join(',')).forEach((element) => element.remove());
+  root.querySelectorAll('*').forEach((element) => {
+    for (const attribute of [...element.attributes]) {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith('on') || name === 'srcdoc' || name === 'formaction') {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+      if (name === 'href' && !safeRenderedUrl(attribute.value, 'href')) {
+        element.removeAttribute(attribute.name);
+        element.setAttribute('title', '链接已禁用：使用了不允许的协议');
+      }
+      if ((name === 'src' || name === 'poster') && !safeRenderedUrl(attribute.value, 'resource')) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+    if (element.tagName.toLowerCase() === 'a') element.setAttribute('rel', 'noreferrer noopener');
+  });
+  return template.innerHTML;
 }

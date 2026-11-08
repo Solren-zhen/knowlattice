@@ -9,33 +9,35 @@
  *   下的笔记，$ARGUMENTS 传参）、AGENT.md 自定义指南（对应 CLAUDE.md）、
  *   运行中消息排队、推理模型思考过程展示
  * - 模型走 OpenAI 兼容协议，地址 / Key / 模型名由用户配置（小米 MiMo / DeepSeek /
- *   智谱 / Kimi / OpenRouter / Ollama 均可），配置与会话只存本机 localStorage
+ *   智谱 / Kimi / OpenRouter / Ollama 均可），配置只存本机；桌面版 API Key 进系统凭据库
  */
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   agentNetHint, buildHistoryMessages, buildNoteSystemPrompt, detectMention, expandCommand, extractMentionedNotes, formatNoteList,
-  isAbortError, isAllowedAgentBaseUrl, listCommands, MEDBOOK_TOOLS, NOTE_AGENT_TOOLS, readNoteSlice, runAgent, searchNotes, truncateForModel,
+  isAbortError, listCommands, MEDBOOK_TOOLS, NOTE_AGENT_TOOLS, readNoteSlice, runAgent, searchNotes, truncateForModel,
   type AgentSettings, type MentionHit, type RunAgentOptions, type TokenUsage, type WireMessage,
 } from '../core/aiAgent';
 import { capToolResult } from '../core/aiBudget';
 import {
-  citeKeyOf, formatMedBooks, formatMedHits, medBookFullText, medBookPage, medBookRecords, medBookRemove, medBooksList,
+  citeKeyOf, formatMedBooks, formatMedHits, medBookFullText, medBookPage, medBooksList,
   medBooksSearch, verifyQuotesAgainstBooks,
-  type MedBookHit, type MedBookMeta,
+  type MedBookHit,
 } from '../core/medBooks';
 import { PiUnavailableError, runPiAgent } from '../core/piAgent';
 import { collapseDiff, diffLines } from '../core/aiDiff';
 import { LEARNING_TOOLS, quizProgressReport, reviewDueReport, reviewPlanPrompt, studySummaryReport, weakChaptersReport } from '../core/aiLearning';
+import {
+  applyMastery, clampLevel, loadMastery, MASTERY_LABELS, masteryReport, nextStepHint, saveMastery,
+  TUTOR_TOOLS, type MasteryMap,
+} from '../core/tutor';
 import { appendStudyLogEntry, studyLogEntryFromArgs, studyLogPath } from '../core/aiStudyLog';
 import { appendBankQuestions, loadBanks } from '../core/qbank';
 import { containsQuestions, importAiQuestions } from '../core/aiQuestionImport';
 import { initializeStats } from '../core/qbankStats';
 import { renderMarkdown } from '../core/markdown';
 import { CITE_LABEL, CITE_MARK, CITE_RANK, lookupQuote, verifyCitations, verifyQuote, type CiteStatus } from '../core/citeVerify';
-import { parseSynonymLines, setUserSynonymGroups, USER_SYNONYMS_KEY } from '../core/medSynonyms';
-import { setMedBookPageOffset } from '../storage/medStore';
-import { safeVaultPath } from '../core/vault';
-import { structureLossWarnings, type StructureWarning } from '../core/aiPatch';
+import { safeVaultPath, BACKUP_RESTORED_EVENT } from '../core/vault';
+import { structureLossWarnings } from '../core/aiPatch';
 import { applyNotePatch, cleanCardKeys, insertCardHints } from '../core/aiTools';
 import { AGENT_TOOL_NAMES, AGENT_TOOL_REGISTRY, createAgentRuntime, makeWriteVerifier } from '../core/agentRuntime';
 import {
@@ -50,6 +52,21 @@ import { bumpRecallHits, lookupRecall, saveRecall, type RecallEntry } from '../c
 import { useEsc, escThenClose } from './useEsc';
 import { IconClose, IconLattice, IconTrash } from './icons';
 import Preview from './Preview';
+import { loadAgentSettings } from '../core/agentSettings';
+import SettingsForm from './AgentSettingsForm';
+import {
+  fmtAgo,
+  fmtTokens,
+  freshSession,
+  loadPrefs,
+  loadSessions,
+  persistSessions,
+  savePrefs,
+  type AgentPrefs,
+  type AgentSession,
+  type ChatItem,
+  type QuoteSelection,
+} from './agentChat';
 
 interface Props {
   onClose: () => void;
@@ -69,28 +86,14 @@ interface Props {
   quote?: QuoteSelection | null;
   /** 引用卡消费完毕（Workspace 据此清桥接状态） */
   onQuoteConsumed?: () => void;
+  /** 一键导师的开场白（Workspace 桥接）：面板消费一次后由 onSeedConsumed 清空 */
+  seed?: { text?: string; tutor: boolean } | null;
+  onSeedConsumed?: () => void;
 }
 
 /** 常见 OpenAI 兼容入口；模型名以服务商控制台为准，可改 */
-const PRESETS = [
-  { name: '小米 MiMo', baseUrl: 'https://api.xiaomimimo.com/v1', model: '', hint: '每日有免费 token 额度；模型名以 mimo.mi.com 文档/控制台为准' },
-  { name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.6', hint: '' },
-  { name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', hint: '' },
-  { name: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k2', hint: '' },
-  { name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: '', hint: '可访问 Claude 等海外模型，模型名填 provider/model' },
-  { name: 'Ollama 本地', baseUrl: 'http://localhost:11434/v1', model: '', hint: '无需 Key；需以 OLLAMA_ORIGINS=* 启动以放行跨域' },
-  { name: '自定义中转', baseUrl: '', model: '', hint: '填中转站给的接口地址，通常以 /v1 结尾；粘贴后先点「测试连接」' },
-];
 
-const SETTINGS_KEY = 'knowlattice-ai-agent-settings';
-const SESSIONS_KEY = 'knowlattice-ai-agent-sessions';
-const PREFS_KEY = 'knowlattice-ai-agent-prefs';
-/** 旧版单线程对话的存储键：首次加载时迁移进会话列表 */
-const OLD_CHAT_KEY = 'knowlattice-ai-agent-chat';
-const SESSIONS_LIMIT = 20;
-/** 持久化总体积上限：超了从最旧会话开始丢（当前会话保底不动） */
-const SESSIONS_STORE_LIMIT = 600_000;
-const PERSIST_CONTENT_LIMIT = 4_000;
+
 /** 斜杠命令与 AGENT.md 的约定位置 */
 const CMD_DIR = 'AI命令/';
 const AGENT_MD = 'AGENT.md';
@@ -99,16 +102,7 @@ const MENTION_CONTENT_LIMIT = 8_000;
 
 type Decision = 'applied' | 'rejected';
 
-/** 从别处「问 AI」带进来的上下文：发送时附进消息上下文，气泡里展示引用卡。
- *  - 编辑器右键选段：只有 text + path
- *  - 复习卡 / 错题本 / 题库：额外带 ask（预填一句话，用户可改再发）
- *  ask 只预填、不自动发送 —— 与「先预览后写入」同一条原则：AI 动手前先让用户过一眼。 */
-export type QuoteSelection = {
-  text: string;
-  path: string | null;
-  /** 预填到输入框的建议问法（输入框已有内容时不覆盖） */
-  ask?: string;
-};
+
 
 /** 流式正文也吃 markdown 排版：防抖 250ms 渲染（markdown-it 懒加载，首条消息后常驻内存） */
 function useDeferredMarkdown(text: string): string {
@@ -266,194 +260,23 @@ function ImportQuestionsRow({ text, notePath }: { text: string; notePath?: strin
   );
 }
 
-type ChatItem =
-  | {
-      kind: 'msg'; id: number; role: 'user' | 'assistant'; text: string; quote?: QuoteSelection;
-      /** 用户中途停止（或流中途出错）时留下的未写完回答 */
-      partial?: boolean;
-    }
-  /** 已完成的只读工具：一行摘要 + 可展开的原始结果 */
-  | { kind: 'tool'; id: number; name: string; summary: string; detail: string }
-  /** 推理模型的思考过程（折叠展示，不回传给模型） */
-  | { kind: 'thinking'; id: number; text: string }
-  /** 写入提案：diff + 应用 / 拒绝；drifted = 笔记在提案后被用户改过，应用需二次确认 */
-  | {
-      kind: 'proposal'; id: number; path: string; old: string; next: string;
-      isNew: boolean;
-      status: 'pending' | 'applied' | 'rejected' | 'stale' | 'failed';
-      /** yolo 静默落盘（未漂移） */
-      autoApplied?: boolean;
-      drifted?: boolean;
-      /** 整篇重写的结构丢失提醒（frontmatter 键 / 双链 / 大段缩水） */
-      warnings?: StructureWarning[];
-      /** 目标是助手自己的指令文件（AGENT.md / AI命令/）：任何模式下都要人工确认 */
-      configGuard?: boolean;
-      /** status = failed 时的写入错误信息 */
-      error?: string;
-    }
-  | { kind: 'error'; id: number; text: string };
-
-interface SessionUsage { promptTokens: number; completionTokens: number; estimated: boolean }
-
-/** 只有一个开关：yolo=true 时所有写入提案免确认直接落盘（漂移确认保留）；
- *  缺省即 read——写入先出 diff 卡片等用户点「应用」。两档工具集相同，
- *  差别只在落盘要不要等确认，所以一个布尔就够；用枚举会多一层无用的互斥判断。 */
-interface AgentPrefs { yolo: boolean }
-
-interface AgentSession {
-  id: string;
-  title: string;
-  updatedAt: number;
-  usage: SessionUsage;
-  items: ChatItem[];
-  /** 陪练模式：会话级开关。开着的会话在系统提示里加陪练契约（先测后讲、一次一题） */
-  coach?: boolean;
-}
-
-const ZERO_USAGE: SessionUsage = { promptTokens: 0, completionTokens: 0, estimated: false };
-const DEFAULT_PREFS: AgentPrefs = { yolo: false };
 /** 停顿看门狗阈值：这么久没有任何流事件就认为连接卡死（模型思考会走 thinking 增量） */
 const STALL_IDLE_MS = 120_000;
 
 /** 全部工具＝笔记工具＋学习状态工具。两档模式都给同一套工具：
  *  差别只在「写入要不要等用户点应用」，而不是「能不能写」——read 档若拿掉写入工具，
  *  diff 预览＋人工确认这条主写入路径就整个消失了，那是砍功能，不是简化界面。 */
-const ALL_AGENT_TOOLS = [...NOTE_AGENT_TOOLS, ...MEDBOOK_TOOLS, ...LEARNING_TOOLS];
+const ALL_AGENT_TOOLS = [...NOTE_AGENT_TOOLS, ...MEDBOOK_TOOLS, ...LEARNING_TOOLS, ...TUTOR_TOOLS];
 
-function freshSession(): AgentSession {
-  return {
-    id: `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-    title: '新对话',
-    updatedAt: Date.now(),
-    usage: { ...ZERO_USAGE },
-    items: [],
-  };
-}
-
-/** 上次会话遗留的待确认提案无法兑现（审批 promise 不持久化），标记过期 */
-function markStale(items: ChatItem[]): ChatItem[] {
-  return items.map((i) => (i.kind === 'proposal' && i.status === 'pending' ? { ...i, status: 'stale' as const } : i));
-}
-
-function firstUserTitle(items: ChatItem[]): string | null {
-  const first = items.find((i): i is Extract<ChatItem, { kind: 'msg' }> => i.kind === 'msg' && i.role === 'user');
-  return first ? first.text.slice(0, 24) : null;
-}
-
-function loadSessions(): AgentSession[] {
-  try {
-    const raw = localStorage.getItem(SESSIONS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as AgentSession[];
-      if (Array.isArray(parsed) && parsed.length
-        && parsed.every((s) => s && typeof s.id === 'string' && Array.isArray(s.items))) {
-        return parsed.map((s) => ({ ...s, usage: s.usage ?? { ...ZERO_USAGE }, items: markStale(s.items) }));
-      }
-    }
-  } catch { /* 损坏则走迁移/新建 */ }
-  try {
-    const old = localStorage.getItem(OLD_CHAT_KEY);
-    if (old) {
-      const items = JSON.parse(old) as ChatItem[];
-      if (Array.isArray(items) && items.length) {
-        return [{
-          id: 's-migrated',
-          title: firstUserTitle(items) ?? '旧对话',
-          updatedAt: Date.now(),
-          usage: { ...ZERO_USAGE },
-          items: markStale(items),
-        }];
-      }
-    }
-  } catch { /* ignore */ }
-  return [];
-}
-
-function persistSessions(sessions: AgentSession[], activeId: string): boolean {
-  // 提案卡里的全文截断后保存（持久化只为回看，diff 渲染容忍截断）
-  const slim = sessions.map((s) => ({
-    ...s,
-    items: s.items.map((i) => (i.kind === 'proposal'
-      ? { ...i, old: i.old.slice(0, PERSIST_CONTENT_LIMIT), next: i.next.slice(0, PERSIST_CONTENT_LIMIT) }
-      : i)),
-  }));
-  let list = slim;
-  const oldestOther = () => [...list]
-    .filter((s) => s.id !== activeId)
-    .sort((a, b) => a.updatedAt - b.updatedAt)[0];
-  while (list.length > SESSIONS_LIMIT) {
-    const victim = oldestOther();
-    if (!victim) break;
-    list = list.filter((s) => s.id !== victim.id);
-  }
-  let json = JSON.stringify(list);
-  while (json.length > SESSIONS_STORE_LIMIT) {
-    const victim = oldestOther();
-    if (!victim) break;
-    list = list.filter((s) => s.id !== victim.id);
-    json = JSON.stringify(list);
-  }
-  try {
-    localStorage.setItem(SESSIONS_KEY, json);
-    return true;
-  } catch {
-    // 配额满：会话只是不再持久化。但必须回一个 false 让调用方提示——
-    // 静默失败会让用户以为「关掉面板还能回来」，实际整段对话已经丢了。
-    return false;
-  }
-}
-
-function loadPrefs(): AgentPrefs {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return { ...DEFAULT_PREFS };
-    // 旧版本存的是 { readonly, autoApply, autonomous } 三档。只把 autonomous 迁到 yolo：
-    // 老的 autoApply（仅 patch 免确认、整篇重写仍问）语义已不存在，把它当 yolo 会悄悄
-    // 放宽权限，宁可退回默认的 read 让用户自己重开一次。
-    const p = JSON.parse(raw) as Partial<AgentPrefs> & { autonomous?: boolean };
-    return { yolo: p.yolo === true || p.autonomous === true };
-  } catch {
-    return { ...DEFAULT_PREFS };
-  }
-}
-
-function loadSettings(): AgentSettings | null {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw) as AgentSettings;
-    if (typeof s.baseUrl !== 'string' || !isAllowedAgentBaseUrl(s.baseUrl)) return null;
-    if (typeof s.model !== 'string' || !s.model.trim()) return null;
-    return {
-      baseUrl: s.baseUrl,
-      apiKey: typeof s.apiKey === 'string' ? s.apiKey : '',
-      model: s.model,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function fmtTokens(n: number): string {
-  return n < 1000 ? String(n) : `${(n / 1000).toFixed(1)}k`;
-}
-
-/** 相对时间（会话列表用）：分钟内「刚刚」，当天按小时，其余按天 */
-function fmtAgo(ts: number, now = Date.now()): string {
-  const min = Math.floor((now - ts) / 60_000);
-  if (min < 1) return '刚刚';
-  if (min < 60) return `${min} 分钟前`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h} 小时前`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d} 天前`;
-  return new Date(ts).toLocaleDateString();
+/** seed 的去重键：同一次点击只发一次；没有 text 的一键导师用固定键 */
+function seedKey(seed: { text?: string; tutor: boolean }): string {
+  return seed.text ?? (seed.tutor ? 'tutor' : 'plain');
 }
 
 export default function AiAgentPanel({
   onClose, docs, onSave, onOpenPath, currentPath, resolveLink, quote, onQuoteConsumed, onSwitchToAi,
-}: Props) {
-  /** 会话切换弹层开着时 Esc 只关弹层，不把整块面板带走（ref 供栈顶闭包读最新值） */
+  seed, onSeedConsumed,
+}: Props) {  /** 会话切换弹层开着时 Esc 只关弹层，不把整块面板带走（ref 供栈顶闭包读最新值） */
   const switcherOpenRef = useRef(false);
   useEsc((e) => {
     if (switcherOpenRef.current) {
@@ -463,8 +286,9 @@ export default function AiAgentPanel({
     }
     escThenClose(onClose)(e);
   });
-  const [settings, setSettings] = useState<AgentSettings | null>(loadSettings);
-  const [settingsOpen, setSettingsOpen] = useState(() => !loadSettings());
+  const [initialSettings] = useState<AgentSettings | null>(loadAgentSettings);
+  const [settings, setSettings] = useState<AgentSettings | null>(initialSettings);
+  const [settingsOpen, setSettingsOpen] = useState(() => !initialSettings);
   const [sessions, setSessions] = useState<AgentSession[]>(() => {
     const loaded = loadSessions();
     return loaded.length ? loaded : [freshSession()];
@@ -550,6 +374,37 @@ export default function AiAgentPanel({
   /** 活跃会话的陪练开关（排队续跑等异步路径里读最新值） */
   const coachRef = useRef(false);
   useEffect(() => { coachRef.current = !!active?.coach; });
+  /** 导师模式开关：与 coach 一样走 ref，异步续跑读最新值 */
+  const tutorRef = useRef(false);
+  useEffect(() => { tutorRef.current = !!active?.tutor; });
+  /** 掌握度台账快照：set_mastery 写入后同步更新，让顶部台账条立刻重绘 */
+  const [mastery, setMastery] = useState<MasteryMap>(() => loadMastery());
+  /** 一键导师：同一段开场白只发一次（面板可能因引用/切换重挂载） */
+  const seedSentRef = useRef('');
+  /** 开场白在这里拼：reviewPlanPrompt 已在本面板的懒加载链里，放 Workspace 会把学习聚合拖进主包 */
+  const buildTutorKickoff = () =>
+    `用导师模式开始今天的学习。${reviewPlanPrompt([...docsRef.current.keys()], docsRef.current)}`;
+  /* 每轮把最新闭包挂到 ref：seed 的 effect 只按 seed 触发，
+     不因 sendText / updateActive / 回调每轮重建而反复执行（否则会重复发送）。 */
+  const seedApiRef = useRef<(text: string, tutor: boolean) => void>(() => {});
+  const onSeedConsumedRef = useRef(onSeedConsumed);
+  useEffect(() => {
+    seedApiRef.current = (text, tutor) => {
+      if (tutor) {
+        tutorRef.current = true;
+        coachRef.current = true;
+        updateActive((s) => ({ ...s, tutor: true, coach: true }));
+      }
+      void sendText(text);
+    };
+    onSeedConsumedRef.current = onSeedConsumed;
+  });
+  useEffect(() => {
+    if (!seed || seedSentRef.current === seedKey(seed)) return;
+    seedSentRef.current = seedKey(seed);
+    onSeedConsumedRef.current?.();
+    seedApiRef.current(seed.text ?? buildTutorKickoff(), seed.tutor);
+  }, [seed]);
   const runningRef = useRef(false);
   /* 面板尺寸可拖（左边缘改宽、上边缘改高）。宽度要同步写 .app 的 --side-w：
      主区靠这个变量让位，只改面板宽度会让它压住笔记。 */
@@ -643,6 +498,20 @@ export default function AiAgentPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+  // 备份恢复会直接改写会话/偏好的存储键：面板的内存态不重读的话，下一次持久化会把恢复内容整体覆盖回去。
+  // 回答进行中不换底（避免打断流式写入）；这种情况下恢复内容会在本轮结束后被覆盖，属已知取舍。
+  useEffect(() => {
+    if (running) return;
+    const reload = () => {
+      const loaded = loadSessions();
+      const list = loaded.length ? loaded : [freshSession()];
+      setSessions(list);
+      setActiveId((cur) => (list.some((s) => s.id === cur) ? cur : list[0].id));
+      setPrefs(loadPrefs());
+    };
+    window.addEventListener(BACKUP_RESTORED_EVENT, reload);
+    return () => window.removeEventListener(BACKUP_RESTORED_EVENT, reload);
+  }, [running]);
   /** 持久化失败只提示一次：每条新消息都会重试写一次，反复弹窗比丢会话更烦人 */
   const persistWarnedRef = useRef(false);
   useEffect(() => {
@@ -652,9 +521,7 @@ export default function AiAgentPanel({
     toast('对话太长，没能存进本机存储：关掉面板后这段对话会丢。可先删掉几个旧会话再继续。', 'err', 9000);
   }, [sessions, activeId]);
   useEffect(() => {
-    try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-    } catch { /* 忽略 */ }
+    savePrefs(prefs);
   }, [prefs]);
   // 新消息/流式输出时滚到底部；用户上翻查看时不打扰（pinnedRef 由 onScroll 维护：
   // 只在本来就贴底时跟随，否则流式 token 会把正在回看的视口一直拽回底部）
@@ -946,6 +813,26 @@ export default function AiAgentPanel({
       }
     }
 
+    if (name === 'get_mastery') {
+      const result = masteryReport(loadMastery());
+      push({ kind: 'tool', id: idRef.current++, name, summary: '掌握度台账', detail: result });
+      return result;
+    }
+    if (name === 'set_mastery') {
+      const topic = String(args.topic ?? '').trim();
+      if (!topic) return '错误：需要 topic（知识点名称）。';
+      const level = clampLevel(args.level);
+      const evidence = String(args.evidence ?? '').trim();
+      const next = applyMastery(loadMastery(), topic, level, evidence);
+      saveMastery(next);
+      // 面板里的台账条用的是内存快照：写盘后同步，避免要等下次重开面板才更新
+      setMastery(next);
+      const result = `已记录「${topic}」= ${MASTERY_LABELS[level]}（${level}/3）`
+        + `${evidence ? `；依据：${evidence}` : ''}。${nextStepHint(level)}`;
+      push({ kind: 'tool', id: idRef.current++, name, summary: `${topic} · ${MASTERY_LABELS[level]}`, detail: result });
+      return result;
+    }
+
     if (name === 'propose_note_edit' || name === 'propose_note_patch' || name === 'propose_note_create' || name === 'propose_card_hints' || name === 'propose_study_log') {
       // 学习日志的路径与内容由代码定位/组装（今天哪篇、追加成什么样），模型只给条目字段
       const isLog = name === 'propose_study_log';
@@ -966,7 +853,10 @@ export default function AiAgentPanel({
       // patch：锚文本唯一性校验后算出新正文；hints：小节定位后插属性键骨架；log：追加小节；edit/create 直接用模型给的整篇
       let next: string;
       if (isLog) {
-        const entry = studyLogEntryFromArgs(args);
+        // 落盘前做 grounding：weak_points 里的 [[双链]] 必须解析到真实笔记，否则回填错误让模型改
+        const entry = studyLogEntryFromArgs(args, {
+          resolve: resolveLink ? (target) => resolveLink(target) !== null : undefined,
+        });
         if (typeof entry === 'string') return entry;
         next = appendStudyLogEntry(old, entry, new Date());
       } else if (name === 'propose_card_hints') {
@@ -1114,11 +1004,23 @@ export default function AiAgentPanel({
     updateActive((s) => ({ ...s, coach: next }));
   };
 
+  /** 导师模式开关（会话级）：比陪练多一层掌握度门禁；开启时自动进入陪练 */
+  const toggleTutor = () => {
+    const next = !active.tutor;
+    tutorRef.current = next;
+    if (next) {
+      coachRef.current = true;
+      setMastery(loadMastery());
+    }
+    updateActive((s) => ({ ...s, tutor: next, coach: next ? true : s.coach }));
+  };
+
   /** 结束陪练：让模型把薄弱点写进学习日志再收尾，然后自动退出陪练模式 */
   const endCoach = () => {
     if (runningRef.current) return;
     coachRef.current = false;
-    updateActive((s) => ({ ...s, coach: false }));
+    tutorRef.current = false;
+    updateActive((s) => ({ ...s, coach: false, tutor: false }));
     void sendText('结束本次陪练：先总结这次暴露的薄弱点（带 [[双链]]），再用 propose_study_log 写进今天的学习日志，最后用一句话收尾。');
   };
 
@@ -1157,9 +1059,12 @@ export default function AiAgentPanel({
       updatedAt: Date.now(),
       items: [...s.items, userItem],
       // 发送 /陪练 即进入陪练模式（会话级，界面亮起陪练条；发 /陪练 之外的消息不退出）
-      coach: text.trimStart().startsWith('/陪练') ? true : s.coach,
+      coach: text.trimStart().startsWith('/陪练') || text.trimStart().startsWith('/导师') ? true : s.coach,
+      // /导师 在陪练之上再打开掌握度门禁（发送其它消息不会退出，保持会话级）
+      tutor: text.trimStart().startsWith('/导师') ? true : s.tutor,
     }));
     if (text.trimStart().startsWith('/陪练')) coachRef.current = true;
+    if (text.trimStart().startsWith('/导师')) { coachRef.current = true; tutorRef.current = true; }
     runningRef.current = true;
     setRunning(true);
     streamRef.current = '';
@@ -1211,7 +1116,16 @@ export default function AiAgentPanel({
     const skillCatalog = formatSkillCatalog(skillCards);
     // 人格卡与技能卡同目录族但语义不同：它常驻、只取一张；没有卡就是空串，保持默认口吻。
     const soulPrefix = formatSoulPrefix(collectSouls(docsRef.current));
-    const sys = buildNoteSystemPrompt(currentPath, agentMd ? truncateForModel(agentMd, 4_000) : null, coachRef.current, medBookCount, skillCatalog, soulPrefix)
+    const sys = buildNoteSystemPrompt(
+      currentPath,
+      agentMd ? truncateForModel(agentMd, 4_000) : null,
+      coachRef.current,
+      medBookCount,
+      skillCatalog,
+      soulPrefix,
+      tutorRef.current,
+      tutorRef.current ? masteryReport(loadMastery()) : '',
+    )
       + (prefsRef.current.yolo
         ? '\nyolo 模式：写入操作免确认直接生效（自动存历史版本，可回溯）。仍必须先 read_note 拿最新原文再动手；'
           + '发现笔记被用户改过会停下询问；改动保持最小，删除或整篇重写要格外谨慎。'
@@ -1474,12 +1388,24 @@ export default function AiAgentPanel({
 
   const settingsValid = !!settings;
   const usage = active.usage;
+  /** 面板标识随模式切换：同一个面板，但「导师陪练 / 陪练 / AI 笔记」必须一眼能分清 */
+  const panelMode: 'tutor' | 'coach' | 'note' = active.tutor ? 'tutor' : active.coach ? 'coach' : 'note';
+  const panelBrand = panelMode === 'tutor' ? '导师陪练' : panelMode === 'coach' ? '陪练' : 'AI 笔记';
+  /** 输入框无障碍名：普通模式必须保持「对 AI 笔记说点什么」（既有 DOM 测试按这个名字取元素） */
+  const composerLabel =
+    panelMode === 'tutor' ? '对导师陪练说点什么' : panelMode === 'coach' ? '对陪练说点什么' : '对 AI 笔记说点什么';
+  const composerHint =
+    panelMode === 'tutor'
+      ? '向导师提问，或复述你学到的内容…（@ 引用笔记）'
+      : panelMode === 'coach'
+        ? '开始陪练：说一个想练的主题…（/导师 开启掌握度门禁）'
+        : '问点什么…（@ 引用笔记，/ 用命令）';
   const usageText = usage.promptTokens + usage.completionTokens > 0
     ? `tokens ↑${fmtTokens(usage.promptTokens)} ↓${fmtTokens(usage.completionTokens)}${usage.estimated ? ' ≈' : ''}`
     : '';
 
   return (
-    <div className={`agent-panel${pendingQuote ? ' has-quote' : ''}`} ref={panelRef}>
+    <div className={`agent-panel${pendingQuote ? ' has-quote' : ''}`} data-mode={panelMode} ref={panelRef}>
       {/* 左边缘拖宽、上边缘拖高。pointer capture 挂在把手上，拖出面板外也不丢事件。 */}
       <div
         className="agent-panel-grip agent-panel-grip-w"
@@ -1494,7 +1420,7 @@ export default function AiAgentPanel({
       <div className="ai-header agent-header">
         <div className="agent-brand">
           <span className="agent-brand-mark" aria-hidden="true"><IconLattice size={15} /></span>
-          <span className="agent-brand-name">AI 笔记</span>
+          <span className="agent-brand-name" data-mode={panelMode}>{panelBrand}</span>
         </div>
         <button
           type="button"
@@ -1538,7 +1464,12 @@ export default function AiAgentPanel({
                         >
                           <span className="agent-session-title">{s.title}</span>
                           <span className="agent-session-meta">
-                            {s.coach ? '陪练 · ' : ''}{s.items.filter((i) => i.kind === 'msg').length} 条 · {fmtAgo(s.updatedAt)}
+                            {(s.tutor || s.coach) && (
+                              <span className="agent-session-badge" data-mode={s.tutor ? 'tutor' : 'coach'}>
+                                {s.tutor ? '导师陪练' : '陪练'}
+                              </span>
+                            )}
+                            {s.items.filter((i) => i.kind === 'msg').length} 条 · {fmtAgo(s.updatedAt)}
                           </span>
                         </button>
                         <button
@@ -1592,11 +1523,41 @@ export default function AiAgentPanel({
         <div className="agent-coach" role="status">
           <span className="agent-coach-dot" aria-hidden="true" />
           <span className="agent-coach-text">
-            <strong>陪练中</strong>一次一题 · 答错先给提示 · 讲完必验证
+            {active.tutor
+              ? <><strong>导师中</strong>掌握度门禁 · 一次一个台阶 · 未过门槛不推进</>
+              : <><strong>陪练中</strong>一次一题 · 答错先给提示 · 讲完必验证</>}
           </span>
           <button type="button" className="agent-coach-end" onClick={endCoach} disabled={running}>
             结束并写日志
           </button>
+        </div>
+      )}
+
+      {active.tutor && (
+        <div className="agent-mastery" role="status" aria-label="掌握度台账">
+          <span className="agent-mastery__label">掌握度</span>
+          {Object.keys(mastery).length === 0 ? (
+            <span className="agent-mastery__empty">还没有判定记录，先来一道诊断题</span>
+          ) : (
+            Object.entries(mastery)
+              .sort((a, b) => a[1].level - b[1].level || b[1].updatedAt - a[1].updatedAt)
+              .slice(0, 4)
+              .map(([topic, entry]) => (
+                <span
+                  key={topic}
+                  className={`agent-mastery__item lv-${entry.level}`}
+                  title={`${MASTERY_LABELS[entry.level]}${entry.evidence ? ` · ${entry.evidence}` : ''}`}
+                >
+                  {topic}
+                  <i className="agent-mastery__dots" aria-label={`${entry.level}/3`}>
+                    {[1, 2, 3].map((dot) => <b key={dot} className={dot <= entry.level ? 'on' : ''} />)}
+                  </i>
+                </span>
+              ))
+          )}
+          {Object.keys(mastery).length > 4 && (
+            <span className="agent-mastery__more">+{Object.keys(mastery).length - 4}</span>
+          )}
         </div>
       )}
 
@@ -1618,7 +1579,7 @@ export default function AiAgentPanel({
           role="log"
           aria-live="polite"
           aria-busy={running}
-          aria-label="AI 笔记对话"
+          aria-label={panelMode === 'note' ? 'AI 笔记对话' : `${panelBrand}对话`}
           onScroll={(e) => {
             const el = e.currentTarget;
             const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
@@ -1937,9 +1898,9 @@ export default function AiAgentPanel({
                 submit();
               }
             }}
-            placeholder={settingsValid ? '问点什么…（@ 引用笔记，/ 用命令）' : '先在「设置」里配置模型服务…'}
+            placeholder={settingsValid ? composerHint : '先在「设置」里配置模型服务…'}
             rows={1}
-            aria-label="对 AI 笔记说点什么"
+            aria-label={composerLabel}
           />
           <div className="agent-composer-foot">
             {activeTool && (
@@ -1965,6 +1926,14 @@ export default function AiAgentPanel({
           title="陪练模式：先测后讲、一次只问一题、答错先给提示；顶部会出现陪练条，学完一键结束并写学习日志"
         >
           陪练
+        </button>
+        <button
+          className={`pref-chip ${active.tutor ? 'on' : ''}`}
+          onClick={toggleTutor}
+          aria-pressed={!!active.tutor}
+          title="导师模式：在陪练之上加掌握度门禁（0 未测 / 1 有印象 / 2 能复述 / 3 能应用），未过门槛不进入下一个知识点；顶部会显示台账"
+        >
+          导师
         </button>
         {/* 两档模式：read 是默认态，yolo 要显式点开并确认一次。
             用两个互斥 chip 而不是下拉或开关，是因为「当前在哪一档」必须一眼可见——
@@ -2007,325 +1976,6 @@ export default function AiAgentPanel({
           </span>
         )}
       </div>
-    </div>
-  );
-}
-
-
-/* ------------------------------------------------------------ 设置表单 */
-
-function SettingsForm({ initial, onSaved, onCancel }: {
-  initial: AgentSettings | null;
-  onSaved: (s: AgentSettings) => void;
-  onCancel: () => void;
-}) {
-  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '');
-  const [apiKey, setApiKey] = useState(initial?.apiKey ?? '');
-  const [model, setModel] = useState(initial?.model ?? '');
-  const [hint, setHint] = useState('');
-  const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
-  const [models, setModels] = useState<string[]>([]);
-  /** 是否把密钥写进本机存储（默认保存，关掉则只本次会话有效） */
-  const [rememberKey, setRememberKey] = useState(true);
-
-  // 医学教材库：本机索引的管理（导入 / 清单 / 删除 / 页码偏移）
-  const [medBooks, setMedBooks] = useState<MedBookMeta[]>([]);
-  const [importing, setImporting] = useState(false);
-  const [importMsg, setImportMsg] = useState('');
-  const medFileRef = useRef<HTMLInputElement>(null);
-  /** 文本层抽取失败的书（多为扫描版）：留着手柄供「OCR 重新导入」 */
-  const failedFilesRef = useRef<File[]>([]);
-  const [canOcr, setCanOcr] = useState(false);
-  // 用户自定义等价词组：设置页编辑，blur 时生效并持久化
-  const [synText, setSynText] = useState(() => {
-    try { return localStorage.getItem(USER_SYNONYMS_KEY) ?? ''; } catch { return ''; }
-  });
-
-  const refreshMedBooks = async () => setMedBooks(await medBookRecords());
-  useEffect(() => {
-    let alive = true;
-    void medBookRecords().then((rows) => { if (alive) setMedBooks(rows); });
-    return () => { alive = false; };
-  }, []);
-
-  /** 导入教材 PDF：convert/pdf.js 体量大，动态引入；逐个解析并入库，扫描件在 ocr 开启时走 OCR 回退 */
-  const importMedBooks = async (files: File[], ocr = false) => {
-    if (!files.length || importing) return;
-    setImporting(true);
-    setImportMsg('');
-    try {
-      const { importMedPdfFiles } = await import('../core/medImport');
-      const res = await importMedPdfFiles(files, (p) => setImportMsg(`${p.label}（${p.done}/${p.total}）`), { ocr });
-      const failedFiles = res.failed
-        .map((f) => files.find((x) => x.name === f.name))
-        .filter((x): x is File => !!x);
-      failedFilesRef.current = failedFiles;
-      setCanOcr(failedFiles.length > 0);
-      const parts = [`已导入 ${res.imported.length} 本`];
-      if (res.overwritten.length) {
-        parts.push(`覆盖同名 ${res.overwritten.length} 本：${res.overwritten.join('、')}`);
-      }
-      if (res.failed.length) {
-        parts.push(`${res.failed.length} 本失败：${res.failed.map((f) => f.name).join('、')}`);
-      }
-      for (const w of res.warnings) parts.push(w);
-      setImportMsg(parts.join('；'));
-      await refreshMedBooks();
-    } catch (e) {
-      setImportMsg(`导入失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  /** 页码偏移 = PDF 物理页 − 印刷页（前言/目录的页数）；留空按 0。检索结果据此直接报印刷页码 */
-  const commitOffset = async (name: string, raw: string) => {
-    const v = raw.trim();
-    const n = v === '' ? 0 : Math.floor(Number(v));
-    if (!Number.isFinite(n) || n < 0) return;
-    try {
-      await setMedBookPageOffset(name, n);
-      await refreshMedBooks();
-    } catch { /* 教材可能刚被删除 */ }
-  };
-
-  const deleteMedBook = async (name: string) => {
-    if (!window.confirm(`删除教材「${name}」的本地索引？删除后需重新导入 PDF 才能恢复。`)) return;
-    await medBookRemove(name);
-    await refreshMedBooks();
-  };
-
-  const valid = isAllowedAgentBaseUrl(baseUrl) && !!model.trim();
-
-  /** 连通性测试：真实发一条短请求；成功后顺手拉 /models 做模型名候选。
-   *  中转站友好：404 且地址没带 /vN 版本段时自动补 /v1 重试一次并回填输入框。 */
-  const test = async () => {
-    const orig = baseUrl.trim().replace(/\/+$/, '');
-    if (!isAllowedAgentBaseUrl(orig) || !model.trim()) {
-      setResult({ ok: false, text: '先填好接口地址与模型名' });
-      return;
-    }
-    setTesting(true);
-    setResult(null);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15_000);
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
-    };
-    const body = JSON.stringify({ model: model.trim(), messages: [{ role: 'user', content: 'ping' }], max_tokens: 16, stream: false });
-    try {
-      let base = orig;
-      let res = await fetch(`${base}/chat/completions`, { method: 'POST', signal: ctrl.signal, headers, body });
-      if (res.status === 404 && !/\/v\d+[a-z]*$/i.test(base)) {
-        base = `${orig}/v1`;
-        res = await fetch(`${base}/chat/completions`, { method: 'POST', signal: ctrl.signal, headers, body });
-        if (res.ok) setBaseUrl(base);
-      }
-      if (res.ok) {
-        try {
-          const mres = await fetch(`${base}/models`, { signal: ctrl.signal, headers });
-          if (mres.ok) {
-            const data = await mres.json() as { data?: Array<{ id?: string }> };
-            setModels((data.data ?? []).map((m) => String(m.id ?? '')).filter(Boolean).slice(0, 100));
-          }
-        } catch { /* /models 可选，失败不影响连接结果 */ }
-        setResult({ ok: true, text: base === orig ? '连接成功' : `连接成功（地址已自动补全为 ${base}）` });
-      } else {
-        const t = await res.text().catch(() => '');
-        const hint = res.status === 404 ? '。404：确认地址是否要以 /v1 结尾，或查看中转站的接口路径说明' : '';
-        setResult({ ok: false, text: `${res.status}：${t.slice(0, 160) || res.statusText}${hint}` });
-      }
-    } catch (e) {
-      setResult({ ok: false, text: isAbortError(e) ? '连接超时' : agentNetHint(e) });
-    } finally {
-      clearTimeout(timer);
-      setTesting(false);
-    }
-  };
-
-  return (
-    <div className="agent-settings">
-      <div className="agent-settings-presets">
-        {PRESETS.map((p) => (
-          <button
-            key={p.name}
-            className={`type-chip ${baseUrl === p.baseUrl ? 'on' : ''}`}
-            onClick={() => {
-              if (p.baseUrl) setBaseUrl(p.baseUrl);
-              if (p.model) setModel(p.model);
-              setHint(p.hint);
-            }}
-          >
-            {p.name}
-          </button>
-        ))}
-      </div>
-      <label className="agent-field">
-        <span>接口地址（OpenAI 兼容）</span>
-        <input
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder="https://api.xiaomimimo.com/v1"
-          spellCheck={false}
-        />
-      </label>
-      {baseUrl.trim().startsWith('http://') && !isAllowedAgentBaseUrl(baseUrl) && (
-        <p className="agent-settings-hint muted">
-          远程地址必须使用 https://；HTTP 只允许 localhost、127.0.0.1 和 [::1]，避免 API Key 明文传输。
-        </p>
-      )}
-      <label className="agent-field">
-        <span>API Key{baseUrl.includes('localhost') ? '（本地服务可留空）' : ''}</span>
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          placeholder="sk-…"
-          autoComplete="off"
-        />
-      </label>
-      {/* 共用设备 / 不想把密钥留在磁盘上的用户：关掉即只在本次会话内有效（不写 localStorage）。
-          桌面端更彻底的做法是交给系统凭据存储，那需要 Tauri 侧改动，见设置页末尾的说明。 */}
-      <label className="agent-field agent-remember-key">
-        <span>
-          <input
-            type="checkbox"
-            checked={rememberKey}
-            onChange={(e) => setRememberKey(e.target.checked)}
-          />
-          {' '}把密钥保存在本机
-        </span>
-        <span className="muted">
-          关掉后密钥只在本次会话内有效，刷新或重开应用需要重新填写；
-          密钥不会随备份导出，但会以明文存在本机浏览器存储里，共用设备建议关掉。
-        </span>
-      </label>
-      <label className="agent-field">
-        <span>模型名{models.length ? `（${models.length} 个候选，输入时下拉）` : ''}</span>
-        <input
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="如 deepseek-chat / glm-4.6 / kimi-k2"
-          spellCheck={false}
-          list="agent-model-candidates"
-        />
-        <datalist id="agent-model-candidates">
-          {models.map((m) => <option key={m} value={m} />)}
-        </datalist>
-      </label>
-      <div className="agent-field">
-        <span>医学教材库（本机索引）</span>
-        <div className="agent-medbooks-actions">
-          <button
-            className="btn-small"
-            disabled={importing}
-            onClick={() => medFileRef.current?.click()}
-          >
-            {importing ? '导入中…' : '导入教材 PDF'}
-          </button>
-          {canOcr && !importing && (
-            <button
-              className="btn-small"
-              onClick={() => void importMedBooks(failedFilesRef.current, true)}
-              title="扫描版 PDF 没有文字层，走本地 OCR（每页约 2~5 秒，单次上限 30 页）"
-            >
-              用 OCR 导入失败的书
-            </button>
-          )}
-          <span className="muted">{medBooks.length ? `已导入 ${medBooks.length} 本` : '尚未导入'}</span>
-          <input
-            ref={medFileRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            multiple
-            hidden
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              e.target.value = '';
-              void importMedBooks(files);
-            }}
-          />
-        </div>
-        {medBooks.length > 0 && (
-          <ul className="agent-medbooks-list">
-            {medBooks.map((b) => (
-              <li key={b.name}>
-                <span className="agent-medbooks-name" title={`${b.chars.toLocaleString()} 字`}>{b.name}</span>
-                <span className="muted">{b.pages} 页</span>
-                <label className="agent-medbooks-offset" title="页码偏移 = PDF 物理页 − 原书印刷页（即前言/目录的页数）。填好后检索结果直接报印刷页码，引用更准确。">
-                  偏移
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    defaultValue={b.pageOffset ?? 0}
-                    onBlur={(e) => void commitOffset(b.name, e.target.value)}
-                  />
-                </label>
-                <button
-                  className="agent-medbooks-del"
-                  title="删除这本教材索引"
-                  onClick={() => void deleteMedBook(b.name)}
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      <label className="agent-field">
-        <span>自定义等价词组（可选，每行一组、组内词用空格分隔，搜索与教材检索通用）</span>
-        <textarea
-          value={synText}
-          rows={3}
-          spellCheck={false}
-          placeholder={'如：\n支扩 支气管扩张\nRTA 肾小管酸中毒'}
-          onChange={(e) => setSynText(e.target.value)}
-          onBlur={() => {
-            const groups = parseSynonymLines(synText);
-            setUserSynonymGroups(groups);
-            try { localStorage.setItem(USER_SYNONYMS_KEY, JSON.stringify(groups)); } catch { /* 存储不可用忽略 */ }
-          }}
-        />
-      </label>
-      <p className="agent-settings-hint muted">
-        导入的教材只存在本机（浏览器 IndexedDB），助手用 list_medical_books / search_medical_books / read_med_book_page 查阅。
-        页码默认按 PDF 物理页计（从封面第 1 页数起），在上面的「偏移」里填前言/目录页数即可换成原书印刷页码。
-        扫描版 PDF（无文字层）普通导入会失败，可用「用 OCR 导入失败的书」走本地识别（较慢）。
-      </p>
-      {importMsg && <p className="agent-settings-hint muted">{importMsg}</p>}
-      {hint && <p className="agent-settings-hint muted">{hint}</p>}
-      {/* 合规提示从对话区底部移到这里：它是「关于这个助手怎么工作」的说明，
-          每次打开面板都占一行是白占地方，放在设置里按需查阅即可。 */}
-      <p className="agent-settings-hint muted">
-        写入默认需你确认（yolo 模式除外），自动存入历史版本；会话与配置只保存在本机。
-        注意：对话内容、助手检索到的笔记正文与教材原文都会随请求发给你配置的模型服务商，
-        请勿包含患者信息等敏感数据；不用时可在下方关闭密钥保存或直接清空密钥。
-      </p>
-      <div className="agent-settings-actions">
-        <button className="btn-small" onClick={() => void test()} disabled={testing || !valid}>
-          {testing ? '测试中…' : '测试连接'}
-        </button>
-        <button
-          className="btn-primary"
-          disabled={!valid}
-          onClick={() => {
-            const s: AgentSettings = { baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), model: model.trim() };
-            try {
-              // 不勾「保存在本机」时不落盘密钥（空串），本次会话仍用内存里这份
-              localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...s, apiKey: rememberKey ? s.apiKey : '' }));
-            } catch { /* 忽略 */ }
-            onSaved(s);
-          }}
-        >
-          保存
-        </button>
-        {initial && <button className="btn-small" onClick={onCancel}>取消</button>}
-      </div>
-      {result && <p className={`agent-test-result ${result.ok ? 'ok' : 'bad'}`}>{result.text}</p>}
     </div>
   );
 }

@@ -15,6 +15,7 @@
  */
 import { chaptersOf, type QuizBank } from './qbank';
 import { isDue, statOf, type StatsMap } from './qbankStats';
+import { todayKey } from './dateKey';
 
 export interface KnowledgePick {
   /** 本地日期 YYYY-MM-DD：判断「今天看过没有」的口径 */
@@ -33,12 +34,6 @@ export interface KnowledgePick {
 
 /** 太少的章节不进候选：一题一章练不出掌握度 */
 const MIN_COUNT = 3;
-
-function todayKey(now: number): string {
-  const d = new Date(now);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 /**
  * 挑今天该看的知识点。没有可用题库/章节时返回 null（面板据此不显示这条）。

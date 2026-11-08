@@ -15,15 +15,21 @@ import { useEsc, isEditable } from './useEsc';
 import { applyReview, dueQueue, loadCards, srsStats, scheduleOf, exportSrsJson, importSrsFromJson, type Rating } from '../core/srs';
 import { buildCards, type ReviewCard } from '../core/srsCards';
 import { applyCardEdits, deleteCard, deletedKeys, loadCardEdits, restoreCard, saveCardEdit, type CardEditMap } from '../core/cardEdits';
+import { loadGeneratedCards } from '../core/generatedCards';
 import { toast, confirmBox } from '../core/feedback';
 import { markStudy } from '../core/stats';
+import { recordReview } from '../core/studyLog';
 import { parseFrontmatterCached } from '../core/parser';
 import { advanceMistake, dueMistakes, recordMistake } from '../core/mistakes';
 import { notesToAnki, exportApkg, downloadFile } from '../core/anki';
 import { countCloze, maskCloze, revealCloze } from '../core/cloze';
 import { applyDailyCap, effectiveDailyCap, loadPlan } from '../core/reviewPlan';
+import { loadBanks, type QuizQuestion } from '../core/qbank';
+import { findRelatedQuizzes } from '../core/cardRelatedQuizzes';
 import Preview from './Preview';
-import type { QuoteSelection } from './AiAgentPanel';
+import type { QuoteSelection } from './agentChat';
+import type { ImageEntry } from '../core/imageLib';
+import ImagePickerSheet from './ImagePickerSheet';
 
 interface Props {
   paths: string[];
@@ -36,6 +42,12 @@ interface Props {
   onOpenPath: (path: string) => void;
   /** 与 AI 笔记联动：把这张复习卡交给 AI 讲透；不传则不显示入口 */
   onAskAi?: (quote: QuoteSelection) => void;
+  /** 复习卡 → 相关题目：点「去题库」直接打开题库；不传则只展示题目预览 */
+  onOpenQuiz?: () => void;
+  /** 图片来源：vault 附件图片条目；与 resolveAsset 同时存在时才在编辑卡背面显示「插图」 */
+  imageEntries?: ImageEntry[];
+  /** 附件路径 → 可显示的 URL（vault.readFile 结果）；与 imageEntries 配套 */
+  resolveAsset?: (path: string) => string | undefined;
 }
 
 /** 评分快捷键：A 忘了 / S 困难 / D 良好 / F 简单（左手基准位，与格式键同一思路） */
@@ -60,6 +72,19 @@ function appendDueMistakes(queue: ReviewCard[], all: ReviewCard[]): ReviewCard[]
   return out;
 }
 
+/**
+ * 生成一次复习顺序：到期卡 → 新卡（受每日新学上限约束）→ 每日总量上限 → 到期错题。
+ *
+ * 顺序不能反：新学上限必须在 `dueQueue` 里生效，否则到期卡会把队列占满，
+ * 后面的总量截断只会把新卡再砍一遍，看起来"新卡永远出不来"。
+ */
+function buildReviewOrder(all: ReviewCard[]): string[] {
+  const plan = loadPlan();
+  const queue = dueQueue(all, Date.now(), plan.newLimit);
+  const cap = effectiveDailyCap(plan, queue.length);
+  return appendDueMistakes(applyDailyCap(queue, cap), all).map((c) => c.key);
+}
+
 function keyLabel(key: string, docs: Map<string, string>): string {
   const i = key.indexOf('#');
   const path = i < 0 ? key : key.slice(0, i);
@@ -69,28 +94,99 @@ function keyLabel(key: string, docs: Map<string, string>): string {
   return head ? `${name} · ${head}` : name;
 }
 
-export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile, onClose, onOpenPath, onAskAi }: Props) {
-  // 全库建卡（纯函数，一篇笔记可能出多张）→ 套上自定义正/背面、剔除已删的卡
+/**
+ * 复习范围：按笔记或所在目录筛选，不新增任何存储——
+ * 卡键和笔记路径都已在卡片上，切换范围只是重建一次队列。
+ * 没有笔记路径的错题卡（`path: ''`）单独一组，否则会被任何范围静默漏掉。
+ */
+function dirOf(path: string): string {
+  const i = path.lastIndexOf('/');
+  return i < 0 ? '根目录' : path.slice(0, i);
+}
+
+function inScope(card: ReviewCard, scope: string): boolean {
+  if (scope === 'all') return true;
+  if (scope === 'detached') return !card.path;
+  if (!card.path) return false;
+  if (scope.startsWith('note:')) return card.path === scope.slice(5);
+  if (scope.startsWith('dir:')) return dirOf(card.path) === scope.slice(4);
+  return true;
+}
+
+export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile, onClose, onOpenPath, onAskAi, onOpenQuiz, imageEntries, resolveAsset }: Props) {
+  // 全库建卡（纯函数，一篇笔记可能出多张）→ 合并「错题生成卡」→ 套上自定义正/背面、剔除已删的卡
   const [edits, setEdits] = useState<CardEditMap>(() => loadCardEdits());
-  const cards = useMemo(() => applyCardEdits(buildCards(paths, docs), edits), [paths, docs, edits]);
+  const cards = useMemo(
+    () => applyCardEdits([...buildCards(paths, docs), ...loadGeneratedCards()], edits),
+    [paths, docs, edits],
+  );
   const cardMap = useMemo(() => new Map(cards.map((c) => [c.key, c])), [cards]);
+  // 复习范围（本次会话内有效）：切换时只重排队列，不改卡片本身
+  const [scope, setScope] = useState('all');
+  const scopedCards = useMemo(() => cards.filter((c) => inScope(c, scope)), [cards, scope]);
   // 队列只存卡键：编辑/删除后卡对象会变（甚至消失），键是稳定的
   // 每日复习上限：默认 0 = 不限制，由「学习统计」面板里的复习计划显式开启（见 core/reviewPlan.ts）
-  const [order, setOrder] = useState<string[]>(() => {
-    const queue = dueQueue(cards);
-    const cap = effectiveDailyCap(loadPlan(), queue.length);
-    return appendDueMistakes(applyDailyCap(queue, cap), cards).map((c) => c.key);
-  });
+  const [order, setOrder] = useState<string[]>(() => buildReviewOrder(cards));
   const srsImportRef = useRef<HTMLInputElement>(null);
   const [revealed, setRevealed] = useState(false);
   const [done, setDone] = useState(0);
   const [editing, setEditing] = useState<{ front: string; back: string } | null>(null);
+  /** 编辑卡背面的「插图」：内嵌图片选择器开关（题库边刷边记同款交互） */
+  const [cardPickerOpen, setCardPickerOpen] = useState(false);
+  // 退出编辑态（保存/取消/切卡/Esc）时选择器必须跟着收起，不然下次进编辑会直接弹开
+  useEffect(() => { if (!editing) setCardPickerOpen(false); }, [editing]);
   const [showDeleted, setShowDeleted] = useState(false);
+
+  // 切范围即重建队列；已复习次数属于本次会话，不跟着清零
+  const changeScope = (next: string) => {
+    setScope(next);
+    setOrder(buildReviewOrder(next === 'all' ? cards : cards.filter((c) => inScope(c, next))));
+    setRevealed(false);
+    setEditing(null);
+  };
+
+  // 范围清单：笔记按目录分组；错题卡没有路径，单独一组
+  const scopeOptions = useMemo(() => {
+    const notes = new Map<string, { title: string; dir: string; count: number }>();
+    let detached = 0;
+    for (const c of cards) {
+      if (!c.path) { detached++; continue; }
+      const hit = notes.get(c.path);
+      if (hit) { hit.count++; continue; }
+      const title = parseFrontmatterCached(c.path, docs.get(c.path) ?? '').title;
+      const name = (title || c.path.replace(/\.md$/, '').split('/').pop() || c.path).trim();
+      notes.set(c.path, { title: name, dir: dirOf(c.path), count: 1 });
+    }
+    const dirCount = new Map<string, number>();
+    for (const n of notes.values()) dirCount.set(n.dir, (dirCount.get(n.dir) ?? 0) + n.count);
+    return {
+      dirs: [...dirCount].sort((a, b) => a[0].localeCompare(b[0], 'zh')),
+      notes: [...notes].sort((a, b) => a[1].dir.localeCompare(b[1].dir, 'zh') || a[1].title.localeCompare(b[1].title, 'zh')),
+      detached,
+    };
+  }, [cards, docs]);
 
   // 已删除的卡键仍在队列里，取卡时自动跳过
   const remaining = useMemo(() => order.filter((k) => cardMap.has(k)), [order, cardMap]);
   const card: ReviewCard | null = remaining.length ? cardMap.get(remaining[0])! : null;
   const removed = useMemo(() => deletedKeys(edits), [edits]);
+
+  // 复习卡 → 相关题目：题库只在面板打开时读一次，命中规则见 core/cardRelatedQuizzes。
+  const [allQuestions, setAllQuestions] = useState<Map<string, QuizQuestion>>(() => new Map());
+  useEffect(() => {
+    let active = true;
+    void loadBanks().then((banks) => {
+      if (!active) return;
+      const map = new Map<string, QuizQuestion>();
+      for (const bank of banks) for (const q of bank.questions) map.set(q.id, q);
+      setAllQuestions(map);
+    }).catch(() => { /* 题库读不出来只是没有推荐，不影响复习 */ });
+    return () => { active = false; };
+  }, []);
+  const relatedQuizzes = useMemo(
+    () => (card ? findRelatedQuizzes(card, allQuestions, 3) : []),
+    [card, allQuestions],
+  );
 
   // Esc 分层：编辑器开着先关编辑器，再按一次才退出复习（输入框里先退出输入框）
   useEsc((e) => {
@@ -138,12 +234,14 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
   const rate = (r: Rating) => {
     if (!card) return;
     applyReview(card, r);
+    recordReview(r); // 每日学习流水：周报的时间投入与复习正确率靠它
     markStudy(); // 打卡
     // M7：点「忘了」自动收录进错题本（薄弱点统计）。存整篇：错题本按笔记展示，
     // 只存小节会把那篇的错题内容截断成片段。
-    if (r === 'again') {
+    // 错题卡（path 为空）没有对应笔记，不能写进按路径组织的错题本。
+    if (card.path && r === 'again') {
       recordMistake(card.path, docs.get(card.path) ?? card.body);
-    } else {
+    } else if (card.path) {
       // 门控推进：这篇若是错题，答对推进一格（同一天只认第一次，见 core/mistakes.ts）
       advanceMistake(card.path);
     }
@@ -268,7 +366,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
               reader.onload = async () => {
                 try {
                   const n = importSrsFromJson(reader.result as string);
-                  setOrder(appendDueMistakes(dueQueue(cards), cards).map((c) => c.key)); // 刷新队列（含到期错题）
+                  setOrder(buildReviewOrder(scopedCards)); // 刷新队列（含新学上限与到期错题）
                   toast(`已导入 ${n} 条复习数据`, 'ok');
                 } catch (err) {
                   toast(`导入失败：${(err as Error).message}`, 'err');
@@ -279,6 +377,36 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
             e.target.value = '';
           }}
         />
+      </div>
+
+      <div className="review-scope">
+        <label htmlFor="review-scope-select">复习范围</label>
+        <select
+          id="review-scope-select"
+          value={scope}
+          onChange={(e) => changeScope(e.target.value)}
+          title="只复习选中的笔记或目录；不改变任何卡片与进度"
+        >
+          <option value="all">全部卡片（{cards.length}）</option>
+          {scopeOptions.dirs.length > 1 && (
+            <optgroup label="按目录">
+              {scopeOptions.dirs.map(([dir, count]) => (
+                <option key={`dir:${dir}`} value={`dir:${dir}`}>{dir}（{count}）</option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label="按笔记">
+            {scopeOptions.notes.map(([path, n]) => (
+              <option key={`note:${path}`} value={`note:${path}`}>{n.title}（{n.count}）</option>
+            ))}
+          </optgroup>
+          {scopeOptions.detached > 0 && (
+            <optgroup label="无笔记">
+              <option value="detached">错题卡（{scopeOptions.detached}）</option>
+            </optgroup>
+          )}
+        </select>
+        {scope !== 'all' && <span className="muted">本范围 {scopedCards.length} 张卡</span>}
       </div>
 
       {showDeleted && removed.length > 0 && (
@@ -303,9 +431,11 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
 
       {!card ? (
         <div className="review-card done">
-          <h2>今日队列已完成！</h2>
+          <h2>{scope !== 'all' ? '该范围今天没有到期卡片' : '今日队列已完成！'}</h2>
           <p className="muted">
-            共复习 {done} 次。新笔记加入后自动进入复习队列。
+            {scope !== 'all'
+              ? `本范围共 ${scopedCards.length} 张卡；换一个范围，或等它们到期。`
+              : `共复习 ${done} 次。新笔记加入后自动进入复习队列。`}
             {removed.length > 0 ? `（另有 ${removed.length} 张卡片被你删除，可在顶部「已删卡片」恢复）` : ''}
           </p>
         </div>
@@ -328,14 +458,27 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
             className="card-edit-input"
             rows={10}
             value={editing.back}
-            placeholder="留空 = 用笔记原文"
+            placeholder="留空 = 用笔记原文（支持 Markdown，可插图）"
             onChange={(e) => setEditing({ ...editing, back: e.target.value })}
           />
           <div className="card-edit-actions">
+            {imageEntries && resolveAsset && (
+              <button className="btn-small" onClick={() => setCardPickerOpen(true)} title="从图片库选一张图插入背面（背面用 Markdown 渲染，图片会显示）">
+                插图
+              </button>
+            )}
             <button className="btn-primary" onClick={saveEdit}>保存</button>
             <button className="btn-small" onClick={() => setEditing(null)}>取消</button>
             <button className="btn-small" onClick={clearEdit} disabled={!card.front && !card.back}>恢复笔记原文</button>
           </div>
+          {cardPickerOpen && imageEntries && resolveAsset && (
+            <ImagePickerSheet
+              entries={imageEntries}
+              resolveAsset={resolveAsset}
+              onPick={(md) => setEditing((ed) => (ed ? { ...ed, back: `${ed.back}\n\n${md}\n` } : ed))}
+              onClose={() => setCardPickerOpen(false)}
+            />
+          )}
           <details className="card-edit-orig">
             <summary>看笔记原文（只读）</summary>
             <div className="review-back">
@@ -434,7 +577,7 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
                   ? `已复习 ${cardCount.reps} 次 · 间隔 ${cardCount.scheduled_days} 天 · 难度 ${cardCount.difficulty.toFixed(2)}${cardCount.lapses ? ` · 忘过 ${cardCount.lapses} 次` : ''}`
                   : '新卡片'}
                 {'　'}
-                <button className="btn-small" onClick={() => onOpenPath(card.path)}>打开笔记</button>
+                <button className="btn-small" onClick={() => { if (card.path) onOpenPath(card.path); }} disabled={!card.path}>打开笔记</button>
                 <button
                   className="btn-small"
                   title="改写这张卡的正/背面（不影响笔记文件）"
@@ -470,6 +613,25 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
                   </button>
                 )}
               </div>
+              {relatedQuizzes.length > 0 && (
+                <div className="review-related" aria-label="相关练习">
+                  <div className="review-related-head">
+                    <strong>相关练习 {relatedQuizzes.length}</strong>
+                    <span className="muted">按章节与关键词匹配</span>
+                    {onOpenQuiz && (
+                      <button type="button" className="btn-small" onClick={onOpenQuiz}>去题库</button>
+                    )}
+                  </div>
+                  <ul>
+                    {relatedQuizzes.map((r) => (
+                      <li key={r.qid}>
+                        <span className="review-related-stem">{r.preview}</span>
+                        <span className="review-related-reason muted">{r.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="rating-row">
                 <button className="rate again" onClick={() => rate('again')}>忘了<br /><small><kbd>A</kbd> &lt;10分钟</small></button>
                 <button className="rate hard" onClick={() => rate('hard')}>困难<br /><small><kbd>S</kbd> ~1天</small></button>

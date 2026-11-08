@@ -65,3 +65,23 @@ if (typeof globalThis.URL.createObjectURL !== 'function') {
  * 注意与 vitest.config.ts 的 testTimeout 保持匹配（单测预算要大于用例里等待之和）。
  */
 configure({ asyncUtilTimeout: 5000 });
+
+/**
+ * jsdom 没有布局引擎：Range/Element 的 getClientRects 一律返回空列表，
+ * CodeMirror 测量行高时会调用，不打桩就在渲染帧里抛未捕获异常。
+ * 以前只有三个测试文件各自打桩，新增编辑器用例还会再踩一次；放全局一份。
+ */
+const emptyRect = {
+  x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0,
+  toJSON() { return {}; },
+} as DOMRect;
+if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => emptyRect;
+}
+if (typeof Element !== 'undefined' && !Element.prototype.getClientRects) {
+  Element.prototype.getClientRects = () => [] as unknown as DOMRectList;
+}
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = () => {};
+}

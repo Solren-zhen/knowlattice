@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Rail from '../Rail';
-import type { RailKey } from '../railCatalog';
+import { RAIL_GROUPS, type RailKey } from '../railCatalog';
 
 let narrowViewport = true;
 
@@ -11,9 +11,9 @@ function railProps(): ComponentProps<typeof Rail> {
   const actions = {
     tree: vi.fn(), search: vi.fn(), quiz: vi.fn(), review: vi.fn(), mistakes: vi.fn(),
     report: vi.fn(), todos: vi.fn(), graph: vi.fn(), anatomy: vi.fn(), brain: vi.fn(),
-    mind: vi.fn(), pathway: vi.fn(), tags: vi.fn(), medref: vi.fn(), import: vi.fn(),
+    mind: vi.fn(), tags: vi.fn(), medref: vi.fn(), import: vi.fn(),
     pdf: vi.fn(), convert: vi.fn(), history: vi.fn(), notice: vi.fn(), ai: vi.fn(),
-    video: vi.fn(), settings: vi.fn(),
+    video: vi.fn(), settings: vi.fn(), course: vi.fn(), words: vi.fn(), matgen: vi.fn(),
   } satisfies Record<RailKey, () => void>;
   return { activeItem: null, treeOpen: false, onHome: vi.fn(), actions };
 }
@@ -97,7 +97,7 @@ describe('响应式导航抽屉', () => {
     fireEvent.click(screen.getByRole('button', { name: '学习' }));
     expect(container.querySelector('.rail-branch')).toBeNull();
     const inlineLabels = () => Array.from(container.querySelectorAll('.rail-inline .rail-btn')).map((el) => el.getAttribute('aria-label'));
-    expect(inlineLabels()).toEqual(['目录', '搜索', '题库练习', '间隔复习', 'AI 助手', '视频笔记', '错题本', '学习报告', '待办']);
+    expect(inlineLabels()).toEqual(['目录', '搜索', '题库练习', '间隔复习', 'AI 助手', '视频笔记', '课程工坊', '资料生成', '单词工坊', '错题本', '学习报告', '待办']);
     expect(props.actions.todos).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '待办' }));
     expect(props.actions.todos).toHaveBeenCalledOnce();
@@ -111,9 +111,10 @@ describe('响应式导航抽屉', () => {
     expect(inlineLabels()).not.toContain('设置');
     expect(inlineLabels()).toContain('目录');
 
-    // 已下架的两项不再占轨道（仍能用命令面板/笔记工具条打开）
+    // 已下架的「思维导图」不再占轨道；PDF 对照已回到「工具」组
     expect(container.textContent).not.toContain('思维导图');
-    expect(container.textContent).not.toContain('PDF 拆分');
+    fireEvent.click(screen.getByRole('button', { name: '工具' }));
+    expect(inlineLabels()).toContain('PDF 对照');
   });
 
   it('母主题自带状态：收起态报组内位置，展开态摊开当前组，键盘能走进去', async () => {
@@ -122,20 +123,21 @@ describe('响应式导航抽屉', () => {
     const props = { ...railProps(), activeItem: 'quiz' as RailKey };
     const { container } = render(<Rail {...props} />);
 
-    // 收起态：学习组的 7 个条目压成 7 个点，当前那一项是一小段横线
+    // 收起态：组内条目数由目录表推导，不写死——加一个入口不该让这条测试变红
+    const learnGroup = RAIL_GROUPS.find((g) => g.title === '学习')!;
     const learn = screen.getByRole('button', { name: '学习' });
-    expect(learn.querySelectorAll('.rail-group-dots i')).toHaveLength(7);
+    expect(learn.querySelectorAll('.rail-group-dots i')).toHaveLength(learnGroup.entries.length);
     expect(learn.querySelector('.rail-group-dots i.on')).toBeTruthy();
     // 没在当前组的母主题也报得出条目数（只是没有实心点）
     const system = screen.getByRole('button', { name: '系统' });
     expect(system.querySelectorAll('.rail-group-dots i')).toHaveLength(2);
     expect(system.querySelector('.rail-group-dots i.on')).toBeNull();
 
-    // 展开态：当前所在的「学习」组直接把 6 个条目摊在轨上——要用的东西不用先悬停才出现
+    // 展开态：当前所在的「学习」组直接把整组条目摊在轨上——要用的东西不用先悬停才出现
     fireEvent.click(screen.getByRole('button', { name: '展开导航标签' }));
     const inline = container.querySelector('.rail-inline')!;
     expect(Array.from(inline.querySelectorAll('.rail-btn')).map((el) => el.textContent))
-      .toEqual(['题库练习', '间隔复习', 'AI 助手', '视频笔记', '错题本', '学习报告', '待办']);
+      .toEqual(learnGroup.entries.map((e) => e.label));
     expect(inline.querySelector('.rail-btn.on')?.textContent).toBe('题库练习');
 
     // 再点母主题是收起这一组（不再有「已经在眼前就不浮层」的特例，开合完全由用户决定）

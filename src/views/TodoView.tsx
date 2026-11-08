@@ -43,6 +43,7 @@ import {
   toggleSubtask, updateTodo,
   type SmartList, type SortMode, type Todo, type TodoPriority, type TodoRepeat,
 } from '../core/todos';
+import PanelOverlay from './PanelOverlay';
 
 type View = SmartList | 'notes';
 
@@ -237,6 +238,12 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
     listRef.current = list;
     commitRef.current = commit;
   });
+
+  const subjectOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of records) if (r.subject) set.add(r.subject);
+    return [...set].slice(0, 12);
+  }, [records]);
 
   const applyTimer = (next: PomodoroState) => {
     timerRef.current = next;
@@ -502,7 +509,7 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
   const maxTrend = Math.max(1, ...trend.map((d) => d.done));
 
   return (
-    <div className="panel-backdrop mistake-overlay" onClick={onClose}>
+    <PanelOverlay tone="mistakes" onClose={onClose}>
       <DialogSurface className="panel mistake-panel todo-panel" label="工作台" onClick={(e) => e.stopPropagation()}>
         <header className="panel__head">
           <span className="panel__title">
@@ -996,6 +1003,8 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
             onReset={resetTimer}
             onSkip={skipTimer}
             onPickTask={pickTask}
+            onPickSubject={(subject) => applyTimer({ ...timerRef.current, subject })}
+            subjects={subjectOptions}
             onChangeConfig={changeConfig}
           />
         )}
@@ -1010,6 +1019,6 @@ export default function TodoView({ onClose, docs, onOpenPath, onSaveNote }: {
           />
         )}
       </DialogSurface>
-    </div>
+    </PanelOverlay>
   );
 }

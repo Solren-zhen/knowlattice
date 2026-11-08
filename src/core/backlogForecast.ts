@@ -10,6 +10,7 @@
  * 纯函数，只读错题记录，不写存储。
  */
 import { isArchived, loadMistakes, type MistakeMap } from './mistakes';
+import { dayKey } from './dateKey';
 
 /** 往回看多少天算净速率 */
 export const HISTORY_DAYS = 14;
@@ -20,13 +21,6 @@ function startOfLocalDay(now: number): number {
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
-}
-
-function dayKey(ts: number): string {
-  const d = new Date(ts);
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return d.getFullYear() + '-' + m + '-' + day;
 }
 
 export interface DailyNet {

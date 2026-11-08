@@ -1,0 +1,147 @@
+/* ============================================================
+   内嵌图片选择器（ImagePickerSheet）
+   - 挂在题库边刷边记抽屉 / 思维导图大纲等编辑场景里，
+     从库内选图直接插入 Markdown，不切到整屏图片库。
+   - 复用 img-lib 的设计语言（缩略图墙 + lightbox），但体量更轻。
+   ============================================================ */
+
+.img-picker {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.32);
+  backdrop-filter: blur(2px);
+  animation: fade-in var(--t-med) var(--ease);
+}
+.img-picker__card {
+  width: min(560px, 92%);
+  max-height: 78%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  animation: pop-in var(--t-med) var(--ease-back);
+}
+.img-picker__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.img-picker__title {
+  font-size: var(--fs-caption);
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+}
+.img-picker__search {
+  flex: 1 1 150px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-caption);
+}
+.img-picker__search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.img-picker__empty {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  font-size: var(--fs-caption);
+}
+.img-picker__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+.img-picker__item {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.img-picker__thumb {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--panel-deep);
+  overflow: hidden;
+  cursor: zoom-in;
+  display: grid;
+  place-items: center;
+}
+.img-picker__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.img-picker__cap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.img-picker__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.img-picker__cap .btn-small { flex: none; padding: 1px 8px; }
+
+.img-picker__lightbox {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.6);
+}
+.img-picker__lightbox-body {
+  max-width: 84%;
+  max-height: 88%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-raised);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-modal);
+}
+.img-picker__lightbox-body img {
+  max-width: 100%;
+  max-height: 64vh;
+  border-radius: var(--r-sm);
+  object-fit: contain;
+}
+.img-picker__lightbox-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

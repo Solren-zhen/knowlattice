@@ -41,17 +41,6 @@ export const IconTree = ({ size = 15 }: P) => (
   </svg>
 );
 
-/** 医学通路：节点与连接箭头，作为通路绘图工具的导航入口图标 */
-export const IconPathway = ({ size = 15 }: P) => (
-  <svg {...base(size)}>
-    <path d="M6.4 8.6 11 12M13.2 12l4.4-3.4M11 14.2l-2.8 4" strokeWidth={1.5} opacity="0.62" />
-    <circle cx="5.1" cy="7.6" r="2.5" {...wash} />
-    <circle cx="12" cy="13.1" r="2.5" {...wash} />
-    <circle cx="18.9" cy="7.6" r="2.5" {...wash} />
-    <path d="m16.9 5.9 2.1 1.7-2.1 1.7" strokeWidth={1.55} />
-  </svg>
-);
-
 /** 搜索：放大镜（不填色，镜片留白才干净） */
 export const IconSearch = ({ size = 15 }: P) => (
   <svg {...base(size)}>
@@ -61,6 +50,14 @@ export const IconSearch = ({ size = 15 }: P) => (
 );
 
 /** 历史版本：时钟 + 回溯箭头（一圈完整的钟面 + 一只回撇，不再用两只角钩） */
+export const IconCalendar = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <rect x="3.6" y="5.4" width="16.8" height="15" rx="2.4" />
+    <path d="M3.6 10h16.8M8.2 3.4v3.6M15.8 3.4v3.6" strokeWidth={1.7} />
+    <path d="M7.6 13.4h3M7.6 16.8h6.4" strokeWidth={1.5} />
+  </svg>
+);
+
 export const IconHistory = ({ size = 15 }: P) => (
   <svg {...base(size)}>
     <path d="M3.8 12a8.2 8.2 0 1 0 2.4-5.8" />
@@ -161,6 +158,24 @@ export const IconVideo = ({ size = 15 }: P) => (
 );
 
 /** 标签：吊牌 */
+/** 资料生成：多页素材叠 + 拼合箭头（与「课程工坊」的单页讲义区分） */
+export const IconMatGen = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <path d="M7.4 6.4h6.8l3.4 3.4v9.8H7.4z" {...wash} fillOpacity={0.1} />
+    <path d="M14.2 6.4v3.4h3.4" />
+    <path d="M4.2 9.2v10.4" />
+    <path d="M10.4 14.2h4.4M12.6 12l2.2 2.2-2.2 2.2" strokeWidth={1.6} />
+  </svg>
+);
+/** 课程工坊：讲义页 + 播放三角（与「视频笔记」的屏幕轮廓区分开） */
+export const IconCourse = ({ size = 15 }: P) => (
+  <svg {...base(size)}>
+    <path d="M6.2 3.8h7.6l3.6 3.6v12.8H6.2z" {...wash} fillOpacity={0.1} />
+    <path d="M13.8 3.8v3.6h3.6" />
+    <path d="M10.6 11.2v4.4l3.8-2.2z" {...solid} />
+  </svg>
+);
+
 export const IconTag = ({ size = 15 }: P) => (
   <svg {...base(size)}>
     <path
@@ -353,34 +368,18 @@ export const IconBatch = ({ size = 15 }: P) => (
   </svg>
 );
 
-/** 品牌标：晶体网格（晶格 · KnowLattice）—— 深色圆角砖 + 发光节点与连线 */
-export const IconLogo = ({ size = 24 }: P) => {
-  const id = 'lg';
-  return (
-    <svg {...base(size)} stroke="none" fill="none">
-      <defs>
-        <linearGradient id={`${id}-g`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#4b3fd8" />
-          <stop offset="1" stopColor="#8a6bff" />
-        </linearGradient>
-      </defs>
-      {/* 深色圆角底 */}
-      <rect x="1.4" y="1.4" width="21.2" height="21.2" rx="6.2" fill="#0c0c20" />
-      {/* 晶体便签（两条渲染面） */}
-      <path d="M7 9h7v2.2H7zM7 12.4h5v2.2H7zM7 15.8h6v2.2H7z" fill={`url(#${id}-g)`} opacity="0.5" />
-      <path d="M11 6.2L17.6 9.2 15.6 18 10 15.6Z" fill="rgba(140,120,255,0.20)" stroke="rgba(160,140,255,0.5)" strokeWidth="0.8" />
-      {/* 网格连线 */}
-      <g stroke="rgba(175,164,255,0.55)" strokeWidth="0.8">
-        <path d="M15.2 9.4L11.4 12.4M15.2 9.4L14.8 15.6M11.4 12.4L14.8 15.6M14.8 15.6L18 17.4" />
-      </g>
-      {/* 发光节点 */}
-      <circle cx="15.2" cy="9.4" r="2.1" fill="#a98bff" />
-      <circle cx="11.4" cy="12.4" r="2.5" fill="#7db6ff" />
-      <circle cx="14.8" cy="15.6" r="2.3" fill="#b39bff" />
-      <circle cx="18" cy="17.4" r="1.5" fill="#8b7bff" />
-    </svg>
-  );
-};
+/** 品牌标：与应用图标同源（public/brand-mark.png 是 icon.png 整幅缩略，保留完整构图）。
+    小尺寸下不要再裁切，否则球体被切断会像残片。 */
+export const IconLogo = ({ size = 24 }: P) => (
+  <img
+    className="rail-brand-mark"
+    src={`${import.meta.env.BASE_URL}brand-mark.png`}
+    width={size}
+    height={size}
+    alt=""
+    draggable={false}
+  />
+);
 
 /** 晶格标（首屏徽标 / 面板品牌行）：六边形晶胞 + 三根向外的键 + 三个节点。
     与 IconLogo（深色砖 + 发光节点的品牌砖）分工不同：这个是纯 currentColor

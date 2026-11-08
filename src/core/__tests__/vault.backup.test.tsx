@@ -18,6 +18,7 @@ import { getAllQuestionStats, resetQbankStorageForTests } from '../../storage/qb
 import { initializeStats, recordAnswer, resetQbankStatsForTests, statOf } from '../qbankStats';
 import { getPdfBook, putPdfBook, removePdfBook, savePdfPage } from '../pdfLib';
 import type { ImportResult } from '../vault';
+import { makeStoryArchiveEntry } from '../wordStory';
 
 const h = vi.hoisted(() => ({
   readAll: (async () => new Map<string, string>()) as () => Promise<Map<string, string>>,
@@ -132,7 +133,7 @@ describe('整包备份：PDF 书架随备份走', () => {
     await waitFor(() => expect(captured).not.toBeNull());
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
-    expect(payload.version).toBe(15);
+    expect(payload.version).toBe(18);
     expect(payload.pdfBooks).toEqual([
       expect.objectContaining({ name: '备份书.pdf', page: 17, data: expect.any(String) }),
     ]);
@@ -168,7 +169,7 @@ describe('整包备份：专注记录不丢', () => {
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
     expect(payload.app).toBe('knowlattice');
-    expect(payload.version).toBe(15);
+    expect(payload.version).toBe(18);
     expect(payload).toHaveProperty('stars'); // v11：收藏/重点题随备份走
     expect(payload.qbankStats).toMatchObject({ '备份题库': { 'q-1': { wrong: 1 } } });
     expect(payload.pomodoros).toEqual([
@@ -360,7 +361,7 @@ describe('旧备份兼容（缺字段照旧恢复）', () => {
     await waitFor(() => expect(captured).not.toBeNull());
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
-    expect(payload.version).toBe(15);
+    expect(payload.version).toBe(18);
     expect(payload.noteMedia).toEqual({
       '呼吸音笔记.md': { audio: '_attachments/呼吸音.mp3', subtitle: '_attachments/呼吸音.srt' },
     });
@@ -406,7 +407,7 @@ describe('v12：导图偏好（布局/主题/视图/连线/编号）随备份走
     await waitFor(() => expect(captured).not.toBeNull());
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
-    expect(payload.version).toBe(15);
+    expect(payload.version).toBe(18);
     expect(payload.mindmapPrefs).toEqual({ '呼吸音笔记.md': { direction: 'down', theme: 'warm' } });
 
     localStorage.removeItem('knowlattice-mindmap-prefs');
@@ -448,7 +449,7 @@ describe('v14：视频片段收藏随备份走', () => {
     await waitFor(() => expect(captured).not.toBeNull());
 
     const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
-    expect(payload.version).toBe(15);
+    expect(payload.version).toBe(18);
     expect(payload.videoClips).toEqual(CLIPS);
 
     localStorage.removeItem('knowlattice-video-clips');
@@ -490,5 +491,56 @@ describe('v14：视频片段收藏随备份走', () => {
     expect(r.failed).toBe(0);
     expect(r.storeMerges?.some((s) => s.name === '视频片段')).toBeFalsy();
     expect(store('knowlattice-video-clips')).toEqual(CLIPS);
+  });
+});
+
+describe('整包备份：单词工坊历史短文', () => {
+  it('导出携带短文历史，清空后能恢复；重复导入只计保留不覆盖', async () => {
+    const entry = makeStoryArchiveEntry({
+      createdAt: 1_700_000_000_000,
+      bankName: 'CET-6',
+      words: [],
+      story: {
+        title: 'Backup Story',
+        titleZh: '备份短文',
+        sentences: [{ en: 'Keep going.', zh: '继续走。' }],
+      },
+      analysis: null,
+      pinned: true,
+    });
+    localStorage.setItem('knowlattice-word-drill-stories', JSON.stringify([entry]));
+
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    fireEvent.click(screen.getByText('导出'));
+    await waitFor(() => expect(captured).not.toBeNull());
+    const payload = JSON.parse(await captured!.text()) as {
+      version: number;
+      wordStories?: Array<{ id: string; pinned?: boolean }>;
+    };
+    expect(payload.version).toBe(18);
+    expect(payload.wordStories).toHaveLength(1);
+    expect(payload.wordStories?.[0]).toEqual(expect.objectContaining({ id: entry.id, pinned: true }));
+
+    localStorage.removeItem('knowlattice-word-drill-stories');
+    backupText = JSON.stringify(payload);
+    const first = await importOnce();
+    expect(first.failed).toBe(0);
+    expect(first.storeMerges?.find((s) => s.name === '单词工坊短文')).toEqual({
+      name: '单词工坊短文',
+      added: 1,
+      kept: 0,
+    });
+    const restored = store('knowlattice-word-drill-stories') as Array<{ id: string; pinned?: boolean }>;
+    expect(restored).toHaveLength(1);
+    expect(restored[0]).toEqual(expect.objectContaining({ id: entry.id, pinned: true }));
+
+    const second = await importOnce();
+    expect(second.storeMerges?.find((s) => s.name === '单词工坊短文')).toEqual({
+      name: '单词工坊短文',
+      added: 0,
+      kept: 1,
+    });
+    expect(store('knowlattice-word-drill-stories')).toHaveLength(1);
   });
 });

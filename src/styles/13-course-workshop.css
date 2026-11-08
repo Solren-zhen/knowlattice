@@ -1,0 +1,471 @@
+/* ============================================================
+   课程工坊（Course Workshop）— 第 14 个 partial
+
+   为什么单独一个 partial：这里有一条独立的滚动链（面板 → 两栏 → 分P 列表 / 讲义预览），
+   而且讲义预览用的是等宽正文，混进通用 partial 后任何一条 `.panel pre` 规则都可能把它改掉。
+
+   命名：所有类名 `cw-` 前缀。
+   布局：左栏固定 380px（输入 + 分P 勾选，宽度决定「P12 + 标题」是否能一眼读完），
+        右栏 flex（讲义预览 + 人格卡）。窄屏 <1100px 纵向堆叠，见文件末尾。
+
+   滚动链（每层都要 min-height: 0，少一层就是「分P 列表把面板顶爆、预览永远看不到底」）：
+     .cw-panel → .cw-body → .cw-col → .cw-card → .cw-parts / .cw-preview
+   ============================================================ */
+
+.cw-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* ---- 标题栏 ----
+   中段说明文字会随抓取进度变化；必须能收缩，否则按钮会被长标题挤出去 */
+.cw-head {
+  gap: var(--sp-3);
+  padding-right: var(--sp-3);
+}
+.cw-head__meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
+/* ---- 两栏 ----
+   左栏是「选什么」，右栏是「生成了什么」。两者同时可见，才不用来回切面板 */
+.cw-body {
+  display: flex;
+  flex: 1;
+  gap: var(--sp-4);
+  min-height: 0;
+  padding: var(--sp-4) var(--sp-5);
+  overflow: hidden;
+}
+.cw-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+}
+.cw-col--left {
+  flex: 0 0 380px;
+}
+.cw-col--right {
+  flex: 1;
+}
+
+/* ---- 卡片 ----
+   一块面板里最多两层容器：卡片 + 滚动区，不再套「卡片里的卡片」 */
+.cw-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-raised);
+}
+.cw-card--grow {
+  flex: 1;
+}
+
+/* ---- 表单 ----
+   标签在上、控件在下：常用「B 站链接 / 笔记标题」都不需要横向找标签 */
+.cw-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.cw-field__label {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--muted);
+}
+.cw-input,
+.cw-textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+.cw-input:focus-visible,
+.cw-textarea:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+  border-color: var(--border-accent);
+}
+.cw-textarea {
+  min-height: 96px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+}
+/* 原生 select 在深色/浅色下默认外观不一致；高度与 .cw-input 对齐即可 */
+.cw-select {
+  height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  cursor: pointer;
+}
+
+/* ---- 行与状态 ----
+   状态用「实心小标签」，不用彩色整块背景：面板里已有大量浅色底，再铺一层会糊 */
+.cw-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cw-row--between {
+  justify-content: space-between;
+}
+/* 全局 .btn-primary 是「整行宽、12px 纵向内边距」的表单主按钮；
+   工坊里的主按钮都是行内动作，收回到与 .btn-small 同一套尺寸 */
+.cw-panel .btn-primary {
+  display: inline-flex;
+  width: auto;
+  padding: 5px 12px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-control);
+  font-weight: var(--fw-control);
+  line-height: var(--lh-control);
+  box-shadow: var(--shadow-xs), var(--glass-shine);
+}
+.cw-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.cw-chip[data-state='ok'] {
+  border-color: var(--border-accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.cw-chip[data-state='warn'] {
+  border-style: dashed;
+  color: var(--danger-text);
+}
+.cw-hint {
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: 1.65;
+  color: var(--muted);
+}
+.cw-hint--warn {
+  color: var(--danger-text);
+}
+.cw-hint--inline {
+  font-size: var(--fs-micro);
+}
+
+/* 原生 file input 只做「按钮的隐形代理」，不要占位 */
+.cw-file {
+  display: none;
+}
+
+/* ---- 扫码登录 ----
+   二维码用白底实色，不能用主题色渐变：反色或半透明都会扫不出来 */
+.cw-qr {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.cw-qr__code {
+  flex: none;
+  width: 132px;
+  height: 132px;
+  border-radius: var(--r-sm);
+  background: #fff;
+  overflow: hidden;
+}
+.cw-qr__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  shape-rendering: crispEdges;
+}
+.cw-qr__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cw-qr__side .cw-hint[data-state='scanned'] {
+  color: var(--accent);
+}
+.cw-qr__side .cw-hint[data-state='expired'],
+.cw-qr__side .cw-hint[data-state='error'] {
+  color: var(--danger-text);
+}
+
+/* ---- 课程信息与分P ----
+   分P 列表独占剩余高度：50 讲的课程不能把整块面板撑到页面外 */
+.cw-course {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.cw-course__title {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--fs-title);
+  line-height: 1.4;
+  color: var(--text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cw-course__meta {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.cw-parts {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.cw-part {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+/* 分P行：勾选/标题在左，播放入口在右。播放入口必须在 label 外，
+   否则点一下会顺手把勾选状态切掉 */
+.cw-part-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.cw-part__play {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.cw-part__play:hover {
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+}
+.cw-part__play:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+/* 「字幕」比播放入口更次要：小一号、默认不抢颜色 */
+.cw-part__sub {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+.cw-part__sub:hover,
+.cw-part__sub[aria-expanded='true'] {
+  border-color: var(--border-accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.cw-part__sub:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+/* 分P字幕：嵌在分P列表里，限高滚动；每一行点下去直接去视频笔记的对应秒 */
+.cw-transcript {
+  margin: 2px 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.cw-transcript__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.cw-transcript__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 260px;
+  margin-top: 6px;
+  overflow-y: auto;
+}
+.cw-transcript__line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+.cw-transcript__line:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.cw-transcript__line:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+.cw-transcript__time {
+  flex: none;
+  width: 3.4em;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+}
+.cw-part:hover {
+  background: var(--panel);
+}
+.cw-part:focus-within {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
+}
+.cw-part input {
+  flex: none;
+  accent-color: var(--accent);
+}
+.cw-part__page {
+  flex: none;
+  width: 30px;
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.cw-part__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cw-part__state {
+  flex: none;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.cw-part[data-state='ready'] .cw-part__state {
+  color: var(--accent);
+}
+.cw-part[data-state='empty'] .cw-part__state {
+  color: var(--danger-text);
+}
+
+/* ---- 讲义预览 ----
+   用等宽字体是因为它最终是 Markdown 原文；保存前用户需要看清 frontmatter 与锚点有没有排错 */
+.cw-preview {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--sp-3);
+  overflow: auto;
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.cw-preview__empty {
+  color: var(--muted);
+  font-family: inherit;
+}
+
+/* ---- 错误条 ----
+   放在面板底部而不是弹窗：错误是关于「这一次操作」的，弹窗会挡住用户正在改的输入 */
+.cw-error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin: 0 var(--sp-5) var(--sp-4);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+}
+
+/* ---- 窄屏：纵向堆叠，分P 列表不再抢高度 ---- */
+@media (max-width: 1100px) {
+  .cw-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .cw-col--left {
+    flex: none;
+  }
+  .cw-col--right {
+    flex: none;
+    min-height: 420px;
+  }
+  .cw-parts {
+    max-height: 320px;
+  }
+}

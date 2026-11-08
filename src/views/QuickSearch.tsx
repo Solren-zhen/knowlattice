@@ -8,6 +8,10 @@ import { useEsc } from './useEsc';
 import BottomSheet from './BottomSheet';
 import { vaultSearch, type SearchDoc } from '../core/searchIndex';
 import { buildSnippet, segment, titleHits, type Hit } from '../core/searchHit';
+import { loadBanks, type QuizBank } from '../core/qbank';
+import { searchBanks } from '../core/qbankSearch';
+import { loadMistakes } from '../core/mistakes';
+import PanelOverlay from './PanelOverlay';
 
 /** 窄屏阈值：只跟「手指能不能够到居中弹窗」有关 */
 const NARROW_QUERY = '(max-width: 700px)';
@@ -27,6 +31,9 @@ interface Props {
   /** 打开笔记；第二个参数是命中词，交给编辑器跳转 + 高亮 */
   /** 打开笔记；第二参是命中词（编辑器跳转 + 高亮），第三参是触发的行元素（共享元素转场来源） */
   onOpenPath: (path: string, highlight?: string, origin?: Element | null) => void;
+  /** 跨面板联动：题库里搜同一个词；不传则「其他位置」只展示不跳转 */
+  onOpenQuiz?: (query: string) => void;
+  onOpenMistakes?: () => void;
 }
 
 /** 把命中区间渲染成 <mark>；片段里可能有多处命中，逐段切 */
@@ -38,7 +45,7 @@ function Marked({ text, hits }: { text: string; hits: Hit[] }) {
   );
 }
 
-export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }: Props) {
+export default function QuickSearch({ open, docs, recents, onClose, onOpenPath, onOpenQuiz, onOpenMistakes }: Props) {
   const [query, setQuery] = useState('');
   const [sel, setSel] = useState(0);
   const [searchReady, setSearchReady] = useState(vaultSearch.isReady());
@@ -55,6 +62,31 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
   useEffect(() => {
     vaultSearch.sync(docs);
   }, [docs]);
+
+  /**
+   * 多源搜索：笔记之外还有题库与错题本。
+   * 题库只在面板打开时读一次索引（loadBanks 内部有缓存）；错题本读 localStorage，量很小。
+   */
+  const [banks, setBanks] = useState<QuizBank[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void loadBanks().then((list) => { if (active) setBanks(list); }).catch(() => { /* 题库缺失不影响笔记搜索 */ });
+    return () => { active = false; };
+  }, [open]);
+
+  const questionHits = useMemo(
+    () => (query.trim() ? searchBanks(banks, query, { perBank: 3, limit: 5 }) : []),
+    [banks, query],
+  );
+  const mistakeHits = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return Object.entries(loadMistakes())
+      .filter(([, m]) => m.title.toLowerCase().includes(q) || m.chapter.toLowerCase().includes(q))
+      .slice(0, 4)
+      .map(([path, m]) => ({ path, title: m.title, chapter: m.chapter, count: m.count }));
+  }, [query]);
 
   // 用户开始输入时若索引还没建好：异步分块构建，构建期间显示「索引构建中」
   useEffect(() => {
@@ -186,7 +218,9 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
             {/* 空态判据用 rows（= 过滤掉失效条目后真正要显示的条数）：results 现在是命中数，
                 它的空只说明「一条命中都没有」；列表空而 results 非空只可能是命中全部失效，
                 那时按旧写法也该显示这个空态。 */}
-            {searchReady && rows.length === 0 && <div className="qs-empty">没有匹配「{query}」的笔记</div>}
+            {searchReady && rows.length === 0 && questionHits.length === 0 && mistakeHits.length === 0 && (
+              <div className="qs-empty">没有匹配「{query}」的笔记、题目或错题</div>
+            )}
           {rows.map((row, i) => (
             <div
               key={row.id}
@@ -201,6 +235,41 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
               <div className="qs-snippet"><Marked text={row.snip.text} hits={row.snip.hits} /></div>
             </div>
           ))}
+          {(questionHits.length > 0 || mistakeHits.length > 0) && (
+            <div className="qs-extra" role="group" aria-label="其他位置">
+              <div className="qs-extra-head">其他位置</div>
+              {questionHits.map((hit) => (
+                <button
+                  key={`${hit.bank}:${hit.question.id}`}
+                  type="button"
+                  className="qs-item qs-item--extra"
+                  title={onOpenQuiz ? '去题库用这个关键词继续搜' : '题库结果'}
+                  onClick={() => {
+                    onClose();
+                    onOpenQuiz?.(query.trim());
+                  }}
+                >
+                  <span className="qs-extra-kind">题目 · {hit.bank}</span>
+                  <span className="qs-title">{hit.text.slice(0, 80)}</span>
+                </button>
+              ))}
+              {mistakeHits.map((hit) => (
+                <button
+                  key={`mistake:${hit.path}`}
+                  type="button"
+                  className="qs-item qs-item--extra"
+                  title={onOpenMistakes ? '打开错题本' : '错题'}
+                  onClick={() => {
+                    onClose();
+                    onOpenMistakes?.();
+                  }}
+                >
+                  <span className="qs-extra-kind">错题 · {hit.chapter}</span>
+                  <span className="qs-title">{hit.title}（错 {hit.count} 次）</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
   );
@@ -216,8 +285,8 @@ export default function QuickSearch({ open, docs, recents, onClose, onOpenPath }
   }
 
   return (
-    <div className="panel-backdrop qs-overlay" onClick={onClose}>
+    <PanelOverlay tone="search" onClose={onClose}>
       {panel}
-    </div>
+    </PanelOverlay>
   );
 }

@@ -43,3 +43,19 @@
 
 死代码的三个模块（`mistakeNoteRecommendation` / `learningPathPlanner` / `cardRelatedQuizzes`）
 要么接进界面，要么删掉。接的话需要先定 UI 落点（推荐位置：错题本详情页、复习卡背面、Dashboard 的学习计划卡）。
+
+## 2026-11-06 更新（本次审查后落地）
+
+上面是 2026-10-18 的核验记录；以下是本轮改动后的现状，判据仍是「有没有非测试调用方」。
+
+| 原条目 | 现状 | 落点 |
+|---|---|---|
+| P1-2 做题错误 → 复习卡 | ✓ 已接入 | `QuizView` 顶部「错题卡 +N」→ `core/qbankCards` → `core/generatedCards`（备份 v16 随包） |
+| P1-5 做题错误 → 相关笔记 | ✓ 已接入 | `MistakeBook` 每条错题下的「相关笔记」→ `core/mistakeNoteRecommendation` |
+| P1-6 学习路径规划 | ✓ 已接入 | `Dashboard`「本周学习路径」→ `core/learningDashboard` + `core/learningPathPlanner` |
+| P2-7 复习时展示关联题目 | ✓ 已接入 | `ReviewView` 翻面后的「相关练习」→ `core/cardRelatedQuizzes` |
+| P1-1 笔记 → 自动生成卡片 | 删除重复实现 | `noteToCards` 与 `srsCards.splitNoteIntoCards` 重复，已删 |
+| — 通路打开历史 | 删除 | `pathwayHistory` 无调用方，且与 `pathwayTemplates` 职责重叠 |
+
+仍未接的模块：`knowledgeLookup`、`pathwayBuilder`（有单测/无界面落点）；
+`color`、`schemaMigrate` 是未提交的工作区文件，本轮不动。

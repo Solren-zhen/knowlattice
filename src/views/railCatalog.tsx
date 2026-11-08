@@ -10,17 +10,18 @@
 import type { ReactNode } from 'react';
 import {
   IconAi, IconBody, IconBook, IconBrain, IconCards, IconChart, IconConvert,
-  IconFolderIn, IconGraph, IconHistory, IconInfo, IconPathway, IconQuiz,
-  IconSearch, IconTag, IconTarget, IconTodo, IconTree, IconVideo,
+  IconFile, IconFolderIn, IconGraph, IconHistory, IconInfo, IconQuiz,
+  IconCourse, IconMatGen, IconSearch, IconTag, IconTarget, IconTodo, IconTree, IconVideo,
 } from './icons';
 
 /** 去处的键：与 Workspace 的 railActions 一一对应（那边漏一个键会编译失败） */
 export type RailKey =
   | 'tree' | 'search'
-  | 'quiz' | 'review' | 'mistakes' | 'report' | 'todos' | 'video'
-  | 'graph' | 'anatomy' | 'brain' | 'mind' | 'pathway' | 'tags' | 'medref'
+  | 'quiz' | 'review' | 'mistakes' | 'report' | 'todos' | 'video' | 'course' | 'words'
+  | 'graph' | 'anatomy' | 'brain' | 'mind' | 'tags' | 'medref'
   | 'import' | 'pdf' | 'convert' | 'history' | 'notice'
-  | 'ai' | 'settings';
+  | 'ai' | 'settings'
+  | 'matgen';
 
 export interface Entry {
   key: RailKey;
@@ -66,6 +67,9 @@ export const RAIL_GROUPS: RailGroup[] = [
       { key: 'ai', label: 'AI 助手', icon: <IconAi />, primary: true },
       // keepDrawer：视频是浮层不是整屏面板，点完别收抽屉，否则「再点一次收起」要重新展开
       { key: 'video', label: '视频笔记', icon: <IconVideo />, keepDrawer: true },
+      { key: 'course', label: '课程工坊', icon: <IconCourse /> },
+      { key: 'matgen', label: '资料生成', icon: <IconMatGen /> },
+      { key: 'words', label: '单词工坊', icon: <IconBook /> },
       { key: 'mistakes', label: '错题本', icon: <IconTarget />, primary: true },
       { key: 'report', label: '学习报告', icon: <IconChart /> },
       { key: 'todos', label: '待办', icon: <IconTodo /> },
@@ -78,7 +82,6 @@ export const RAIL_GROUPS: RailGroup[] = [
       { key: 'graph', label: '知识图谱', icon: <IconGraph /> },
       { key: 'anatomy', label: '3D 解剖', icon: <IconBody /> },
       { key: 'brain', label: '脑图谱', icon: <IconBrain /> },
-      { key: 'pathway', label: '医学通路', icon: <IconPathway />, primary: true },
       { key: 'tags', label: '标签', icon: <IconTag /> },
       { key: 'medref', label: '医学速查', icon: <IconBook /> },
     ],
@@ -88,6 +91,7 @@ export const RAIL_GROUPS: RailGroup[] = [
     icon: <IconConvert />,
     entries: [
       { key: 'import', label: '导入', icon: <IconFolderIn /> },
+      { key: 'pdf', label: 'PDF 对照', icon: <IconFile /> },
       { key: 'convert', label: '格式转换', icon: <IconConvert /> },
       { key: 'history', label: '历史版本', icon: <IconHistory /> },
     ],
@@ -105,7 +109,7 @@ export const RAIL_GROUPS: RailGroup[] = [
 /**
  * 扁平索引：按 key 取 label / icon。首页「最近使用」用它渲染，避免第二份文案与第二套分组名。
  *
- * Partial 是故意的：RailKey 是「能打开的去处」，比这张菜单表大——思维导图与 PDF 拆分
+ * Partial 是故意的：RailKey 是「能打开的去处」，比这张菜单表大——思维导图
  * 已从导轨下架（仍能从命令面板和笔记工具条打开）。取用前必须判空，写死了会在
  * 首页「最近使用」里读到旧 localStorage 残留键时崩。
  */

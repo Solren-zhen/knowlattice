@@ -83,7 +83,7 @@ export function containsTerm(hay: string, term: string): boolean {
 /** 题目的可搜字段（保序，题干在最前） */
 function fieldTexts(q: QuizQuestion): Array<[QuestionField, string]> {
   const out: Array<[QuestionField, string]> = [['stem', q.stem]];
-  for (const o of q.options) if (o) out.push(['option', o]);
+  for (const o of q.options ?? []) if (o) out.push(['option', o]);
   if (q.answerText) out.push(['answer', q.answerText]);
   for (const e of explanationsOf(q)) if (e.text) out.push(['explanation', e.text]);
   const chapters = chaptersOf(q);

@@ -199,24 +199,28 @@ export function usePanelDrag(key: string): PanelDrag {
       // 标题栏外面还可能包着内容容器；真正带固定定位和 transform 的是标了根节点的外框。
       const el = handle.closest<HTMLElement>('[data-panel-drag-root]') ?? handle.parentElement;
       if (!el) return;
-      const rect = handle.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
       /**
+       * 夹边量的是**整块面板**，不是抓手：抓手可以挂在面板底部（右侧功能栏的下方拖条），
+       * 按抓手上沿算会把整窗拖出屏幕顶。抓手在顶部时两者重合（标题栏就是面板上沿），
+       * 所以这处换算与旧行为等价。
+       *
        * rect 已包含当前的 translate。夹边范围必须换算回「未位移」的默认矩形，
        * 否则会把 base 重复计一次：面板停在右边界后再往右拖，maxX 会变成很小的值，
        * translate 直接被夹回 0，看起来就是整窗突然跳回默认位置。
        */
-      const baseLeft = rect.left - pos.x;
-      const baseTop = rect.top - pos.y;
+      const baseLeft = elRect.left - pos.x;
+      const baseTop = elRect.top - pos.y;
       drag.current = {
         startX: e.clientX,
         startY: e.clientY,
         baseX: pos.x,
         baseY: pos.y,
-        // 允许的位移范围：让 rect.left + dx 落在 [MIN_VISIBLE_X - width, innerWidth - MIN_VISIBLE_X]
-        minX: MIN_VISIBLE_X - rect.width - baseLeft,
+        // 允许的位移范围：让 elRect.left + dx 落在 [MIN_VISIBLE_X - width, innerWidth - MIN_VISIBLE_X]
+        minX: MIN_VISIBLE_X - elRect.width - baseLeft,
         maxX: window.innerWidth - MIN_VISIBLE_X - baseLeft,
-        // 抓手在面板顶部：向上拖时不能让抓手跟着整块面板一起离开屏幕，
-        // 否则只剩底部 40px 可见，用户再次打开就再也抓不到窗口。
+        // 上沿不许离开视口顶：否则整块面板只剩底部 40px 可见，用户再也抓不回来
+        //（抓手上沿离顶 40px 也没有意义——那意味着面板顶上那截已经在屏幕外）。
         minY: -baseTop,
         maxY: window.innerHeight - MIN_VISIBLE_Y - baseTop,
         el,
@@ -263,6 +267,9 @@ export function usePanelDrag(key: string): PanelDrag {
   }, [key]);
 
   const reset = useCallback(() => {
+    // 双击复位时可能还有一次点击的 pointerup 没走完：先丢掉拖动态，
+    // 否则那次 pointerup 会把刚归零的位置又写回夹边值（表现为「双击复位后还差一截」）
+    drag.current = null;
     setPos({ x: 0, y: 0 });
     try {
       localStorage.removeItem(KEY_PREFIX + key);

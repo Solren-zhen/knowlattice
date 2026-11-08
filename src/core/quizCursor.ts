@@ -7,6 +7,7 @@
  * 按原顺序排，找不到的题直接跳过（题库被删了一半也还能续上剩下的）。
  */
 import type { ComposeRules } from './qbankCompose';
+import { asRecord } from './record';
 
 export interface QuizCursor {
   /** 题库名（与 QuizBank.name 同一口径，恢复时按它找库） */
@@ -32,10 +33,6 @@ const KEY = 'knowlattice-quiz-cursor';
 
 /** 超过这个时长就不提示续做了：隔了两周再弹「继续上次」，用户多半已经忘了当时在练什么 */
 const STALE_MS = 14 * 24 * 3600 * 1000;
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-}
 
 /**
  * 读出游标。**任何一处不符合形状就整条丢弃**：半个游标（有 id 列表没下标）会让恢复

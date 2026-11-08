@@ -108,36 +108,38 @@ describe('placeCard', () => {
 
   it('没有点击点（列表选中）时停靠在左上角，让开顶部 chip 行', () => {
     const p = placeCard(null, stage, CARD_ESTIMATE);
-    expect(p.left).toBe(12);
-    expect(p.top).toBeGreaterThanOrEqual(48);
+    expect(p).toEqual({ left: 12, top: 56 });
   });
 
-  it('点击点在中间：落在光标右下方，坐标为舞台相对值', () => {
-    const p = placeCard({ x: 300, y: 250 }, stage, CARD_ESTIMATE);
-    expect(p).toEqual({ left: 300 - 100 + 16, top: 250 - 50 + 16 });
+  it('横向永远贴左边缘：点击点再靠右也不会把卡片压到模型上', () => {
+    const leftClick = placeCard({ x: 120, y: 250 }, stage, CARD_ESTIMATE);
+    const rightClick = placeCard({ x: 880, y: 250 }, stage, CARD_ESTIMATE);
+    expect(leftClick.left).toBe(12);
+    expect(rightClick.left).toBe(12);
   });
 
-  it('点靠近右边缘：翻到光标左侧且不越界', () => {
-    const p = placeCard({ x: 100 + 790, y: 250 }, stage, CARD_ESTIMATE);
-    expect(p.left).toBeLessThan(790 - 100);
-    expect(p.left + CARD_ESTIMATE.width).toBeLessThanOrEqual(stage.width - 12);
-    expect(p.left).toBeGreaterThanOrEqual(12);
+  it('纵向跟随点击点居中，并避开顶部 chip 行', () => {
+    const p = placeCard({ x: 300, y: 350 }, stage, CARD_ESTIMATE, 72);
+    // 350 - 50 - 150 = 150
+    expect(p).toEqual({ left: 12, top: 150 });
+    const nearTop = placeCard({ x: 300, y: 150 }, stage, CARD_ESTIMATE, 72);
+    expect(nearTop.top).toBe(72);
   });
 
-  it('点靠近下边缘：翻到光标上方且不越界', () => {
+  it('点靠近下边缘：纵向夹紧，卡片不超出舞台', () => {
     const p = placeCard({ x: 300, y: 50 + 590 }, stage, CARD_ESTIMATE);
     expect(p.top + CARD_ESTIMATE.height).toBeLessThanOrEqual(stage.height - 12);
     expect(p.top).toBeGreaterThanOrEqual(12);
   });
 
-  it('点落在舞台外（如左上角外侧）时夹到边距内', () => {
+  it('点落在舞台外（如左上角外侧）时停到 chip 行下方', () => {
     const p = placeCard({ x: 0, y: 0 }, stage, CARD_ESTIMATE);
-    expect(p).toEqual({ left: 12, top: 12 });
+    expect(p).toEqual({ left: 12, top: 56 });
   });
 
   it('卡片比舞台还大时不产生负坐标', () => {
     const tiny: CardStageRect = { left: 0, top: 0, width: 200, height: 120 };
     const p = placeCard({ x: 100, y: 60 }, tiny, CARD_ESTIMATE);
-    expect(p).toEqual({ left: 12, top: 12 });
+    expect(p).toEqual({ left: 12, top: 56 });
   });
 });

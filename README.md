@@ -94,9 +94,12 @@ npm run dev
 常用命令：
 
 ~~~bash
-npm run build        # 构建静态网页
+npm run build        # 构建静态网页（先校验 vendor 包完整性）
 npm run preview      # 预览构建结果
 npm run pack         # 生成离线便携包
+npm run lint         # 静态检查（oxlint）
+npm run test         # 单元 / DOM 测试（vitest）
+npm run test:e2e     # 真实浏览器冒烟（Playwright，首次需 npx playwright install chromium）
 npm run bench        # 性能基线（5000 篇量级核心路径耗时，只测量不断言）
 ~~~
 

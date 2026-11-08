@@ -25,6 +25,17 @@ export interface MistakeNote {
 }
 
 /**
+ * 推荐只需要「题干 + 可选的章节 / 答案 / 解析」这一小组字段：
+ * 题库里的 QuizQuestion 与错题本的 MistakeRecord 都能直接传，不必为前者造一个假题目对象。
+ */
+export interface MistakeSource {
+  stem: string;
+  chapter?: string;
+  answerText?: string;
+  explanation?: string;
+}
+
+/**
  * 笔记元数据（用于匹配）
  */
 export interface NoteMetadata {
@@ -47,7 +58,7 @@ export interface NoteMetadata {
  * @returns 推荐的笔记列表
  */
 export function recommendNotesForMistake(
-  question: QuizQuestion,
+  question: MistakeSource,
   allNotes: NoteMetadata[],
   maxRecommendations = 3
 ): NoteRecommendation[] {

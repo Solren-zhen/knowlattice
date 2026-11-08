@@ -204,8 +204,33 @@ describe('链接来源', () => {
     expect(onInsert).toHaveBeenCalledWith('[▶ 12:34](#vn=754)');
   });
 
-  it('网盘来源给「打开原页」，且在浏览器里落到该秒', () => {
-    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+  it('B 站分P显示关联课程：能打开课程笔记 / 返回课程工坊', () => {
+    const onOpenCourseNote = vi.fn();
+    const onOpenCourse = vi.fn();
+    setup({
+      media: 'bili:BV1xx411c7mD:p3',
+      src: null,
+      course: {
+        bvid: 'BV1xx411c7mD',
+        page: 3,
+        courseTitle: '病理学',
+        part: '炎症',
+        notePath: 'B站课程/病理学.md',
+        noteTitle: '病理学',
+      },
+      onOpenCourseNote,
+      onOpenCourse,
+    });
+
+    expect(screen.getByText('课程')).toBeTruthy();
+    expect(screen.getByText('P3 · 炎症')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '打开课程笔记' }));
+    expect(onOpenCourseNote).toHaveBeenCalledWith('B站课程/病理学.md');
+    fireEvent.click(screen.getByRole('button', { name: '返回课程工坊' }));
+    expect(onOpenCourse).toHaveBeenCalledWith('BV1xx411c7mD');
+  });
+
+  it('网盘来源给「打开原页」，且在浏览器里落到该秒', () => {    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     render(
       <VideoNoteView
         {...({

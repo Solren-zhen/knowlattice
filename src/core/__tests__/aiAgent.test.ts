@@ -292,6 +292,16 @@ describe('模型侧工具实现', () => {
     expect(prompt).toContain('不确定');
   });
 
+  it('明确编辑请求优先于教学契约：只做这一件事，不反问/不出题/不写日志', () => {
+    const prompt = buildNoteSystemPrompt(null);
+    expect(prompt).toContain('任务优先');
+    expect(prompt).toContain('不反问、不出题、不写学习日志');
+    expect(prompt).toContain('用户要求具体编辑时一律不适用');
+    expect(prompt).toContain('提问概念');
+    // 学习日志仍然要写，但只限真实学习互动
+    expect(prompt).toContain('只有发生了实际学习互动');
+  });
+
   it('AGENT.md 内容作为自定义指南注入系统提示', () => {
     const prompt = buildNoteSystemPrompt(null, '永远用表格对比鉴别诊断。');
     expect(prompt).toContain('AGENT.md');

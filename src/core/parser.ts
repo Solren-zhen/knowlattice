@@ -92,7 +92,9 @@ export function parseFrontmatter(raw: string): ParsedNote {
             .filter(Boolean);
         }
       } else if (key === 'chapter' || key === 'source' || key === 'created') {
-        meta[key] = value.trim();
+        // 课程笔记等生成的 frontmatter 会给标量加双引号；这里统一去掉，
+        // 否则 source 拼成 `"https://…"`，按 URL 解析会失败
+        meta[key] = unquote(value.trim());
       }
     }
   }

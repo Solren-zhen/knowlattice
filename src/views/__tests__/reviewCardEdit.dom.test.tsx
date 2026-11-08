@@ -222,3 +222,23 @@ describe('建卡粒度在界面上真的生效', () => {
     await waitFor(() => expect(screen.getByText('乙笔记')).toBeTruthy());
   });
 });
+
+describe('复习范围筛选', () => {
+  it('选某篇笔记后队列只剩这篇的卡，切回全部恢复', () => {
+    renderView();
+    const select = screen.getByLabelText('复习范围') as HTMLSelectElement;
+    const allOption = select.querySelector('option[value="all"]') as HTMLOptionElement;
+    expect(allOption.textContent).toContain('3');
+
+    fireEvent.change(select, { target: { value: 'note:b.md' } });
+    expect(screen.getByText('乙笔记')).toBeTruthy();
+    expect(screen.queryByText('一、首选检查')).toBeNull();
+
+    fireEvent.change(select, { target: { value: 'note:a.md' } });
+    expect(screen.getByText('一、首选检查')).toBeTruthy();
+    expect(screen.getByText('本范围 2 张卡')).toBeTruthy();
+
+    fireEvent.change(select, { target: { value: 'all' } });
+    expect(select.value).toBe('all');
+  });
+});

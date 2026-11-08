@@ -80,7 +80,7 @@ export interface WeeklyReport {
   /**
    * 生成报告时点有多少张卡片到期。
    * 这是**实时量**（此刻队列里到期几张），不是周统计量；报告本身拿不到卡片队列，
-   * 所以由调用方通过 options.dueCards 传进来。
+   * 所以由调用方通过 options.dueCards / options.dueCardCount 传进来。
    */
   dueCards: number;
 }
@@ -104,8 +104,10 @@ export function generateWeeklyReport(
     allQuestions?: Map<string, QuizQuestion>;
     /** 待复习卡片（今日到期）*/
     dueCards?: ReviewCard[];
-    /** 任务完成数（本周）*/
-    completedTasks?: number;
+    /** 只关心「到期几张」时直接给数量，避免调用方为了一个 length 去取当前时间戳 */
+    dueCardCount?: number;
+    /** 未完成的任务数（用于「今天还有几项」建议；旧名 completedTasks 语义正好相反） */
+    incompleteTasks?: number;
     /** 专注记录（番茄钟）*/
     focusSessions?: Array<{ startAt: number; endAt: number }>;
   } = {}
@@ -118,7 +120,8 @@ export function generateWeeklyReport(
     stats = {},
     allQuestions = new Map(),
     dueCards = [],
-    completedTasks = 0,
+    dueCardCount,
+    incompleteTasks = 0,
     focusSessions = [],
   } = options;
 
@@ -148,7 +151,8 @@ export function generateWeeklyReport(
   const weakPoints = analyzeWeakPoints(stats, allQuestions, reviewRecords);
 
   // 今日建议
-  const suggestions = generateSuggestions(dueCards, weakPoints, completedTasks);
+  const dueCount = dueCardCount ?? dueCards.length;
+  const suggestions = generateSuggestions(dueCards, weakPoints, incompleteTasks);
 
   // 学习打卡
   const streakDays = getStudyStreak();
@@ -162,7 +166,7 @@ export function generateWeeklyReport(
     suggestions,
     streakDays,
     last7Days,
-    dueCards: dueCards.length,
+    dueCards: dueCount,
   };
 }
 

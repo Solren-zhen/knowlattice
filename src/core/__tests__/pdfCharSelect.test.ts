@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickCharParts } from '../pdfCharSelect';
+import { paragraphOfLine, paragraphRanges, pickCharParts } from '../pdfCharSelect';
 import type { TextBox } from '../pdfSelect';
 
 const box = (top: number, left: number, width = 60, height = 20): TextBox => ({
@@ -67,5 +67,57 @@ describe('pickCharParts columnMode', () => {
   it('keeps both columns when disabled', () => {
     const parts = pickCharParts(twoCol, { x: 40, y: 5 }, { x: 40, y: 45 }, at);
     expect(text(parts)).toBe('def|ghijkl|mnopqr|stuvwx|yza');
+  });
+});
+
+describe('paragraph grouping', () => {
+  const band = (top: number, height = 20) => ({ top, bottom: top + height });
+
+  it('keeps evenly spaced lines in one paragraph', () => {
+    expect(paragraphRanges([band(0), band(20), band(40)])).toEqual([[0, 2]]);
+  });
+
+  it('splits at a visibly larger line gap', () => {
+    expect(paragraphRanges([band(0), band(20), band(100), band(120)]))
+      .toEqual([[0, 1], [2, 3]]);
+  });
+
+  it('treats a noticeably larger line (heading) as its own paragraph', () => {
+    expect(paragraphRanges([band(0), band(20), band(60, 32), band(100)]))
+      .toEqual([[0, 1], [2, 2], [3, 3]]);
+  });
+
+  it('falls back to the line itself when the index is out of range', () => {
+    expect(paragraphOfLine([band(0)], 5)).toEqual([5, 5]);
+  });
+});
+
+describe('pickCharParts paragraph guard', () => {
+  // 两段：前三行一段，空行后两行一段；每行一个 60px 宽的 3 字文字块。
+  const paraItems = [
+    mk(0, 10, 'aaa'), mk(20, 10, 'bbb'), mk(40, 10, 'ccc'),
+    mk(100, 10, 'ddd'), mk(120, 10, 'eee'),
+  ];
+  const paraCharAt = (i: number, x: number): number => {
+    const b = paraItems[i].box;
+    const len = paraItems[i].text.length;
+    return Math.max(0, Math.min(len, Math.round(((x - b.left) / (b.right - b.left)) * len)));
+  };
+  const paraText = (parts: ReturnType<typeof pickCharParts>) =>
+    parts.map((p) => paraItems[p.index].text.slice(p.start, p.end)).join('|');
+
+  it('truncates a long downward drag to the paragraph where it started', () => {
+    const parts = pickCharParts(paraItems, { x: 12, y: 10 }, { x: 70, y: 110 }, paraCharAt);
+    expect(paraText(parts)).toBe('aaa|bbb|ccc');
+  });
+
+  it('also truncates when dragging upward from the lower paragraph', () => {
+    const parts = pickCharParts(paraItems, { x: 70, y: 130 }, { x: 12, y: 10 }, paraCharAt);
+    expect(paraText(parts)).toBe('ddd|eee');
+  });
+
+  it('leaves a within-paragraph selection untouched', () => {
+    const parts = pickCharParts(paraItems, { x: 12, y: 22 }, { x: 70, y: 42 }, paraCharAt);
+    expect(paraText(parts)).toBe('bbb|ccc');
   });
 });

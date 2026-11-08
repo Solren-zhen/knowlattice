@@ -90,8 +90,8 @@ async function dbExists(name: string): Promise<boolean> {
 async function copyDb(oldName: string, newName: string): Promise<void> {
   const oldDb = await openExisting(oldName);
   if (!oldDb) return;
-  if (await dbExists(newName)) { oldDb.close(); return; }
 
+  // 旧库结构与记录先整体读出：新建与「补齐半成品」两条路径都要用
   const schemas: StoreSchema[] = [];
   const records = new Map<string, unknown[]>();
   for (const name of Array.from(oldDb.objectStoreNames)) {
@@ -110,6 +110,63 @@ async function copyDb(oldName: string, newName: string): Promise<void> {
   const version = oldDb.version;
   oldDb.close();
 
+  if (await dbExists(newName)) {
+    // 「新库存在」≠「迁移完成」：上次复制半途失败留下的半成品库、或 8 秒超时期间
+    // 应用先挂载建出的空库，都会卡在这里。按逐 store 记录数校验，缺了就补齐——
+    // put 按主键覆盖，迁移期间应用已写入的新记录不会被清掉。
+    await patchPartialCopy(newName, schemas, records);
+  } else {
+    await createAndFill(newName, version, schemas, records);
+  }
+
+  // 复制成功后才删旧库；被其它标签页占用（blocked）就留着，下次启动再删
+  await new Promise<void>((resolve) => {
+    const r = indexedDB.deleteDatabase(oldName);
+    r.onsuccess = () => resolve();
+    r.onerror = () => resolve();
+    r.onblocked = () => resolve();
+  });
+}
+
+/** 新库已存在时按记录数校验完整性，缺哪个 store 就把旧记录 put 回去补齐。 */
+async function patchPartialCopy(
+  newName: string,
+  schemas: StoreSchema[],
+  records: Map<string, unknown[]>,
+): Promise<void> {
+  const newDb = await openExisting(newName);
+  if (!newDb) return; // 被占用/打不开：本轮放弃，旧库保留，下次启动再试
+  try {
+    const have = new Set(Array.from(newDb.objectStoreNames));
+    for (const sc of schemas) {
+      if (!have.has(sc.name)) {
+        // schema 对不上（新库版本更高且没有这个 store）：没法无版本升级地补，留待人工
+        console.warn(`迁移 ${newName}：新库缺少 store「${sc.name}」，本轮跳过（旧库保留）`);
+        continue;
+      }
+      const count = await request(newDb.transaction(sc.name, 'readonly').objectStore(sc.name).count());
+      if (count >= (records.get(sc.name)?.length ?? 0)) continue; // 这个 store 已完整
+      const tx = newDb.transaction(sc.name, 'readwrite');
+      const store = tx.objectStore(sc.name);
+      for (const rec of records.get(sc.name) ?? []) store.put(rec);
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    }
+  } finally {
+    newDb.close();
+  }
+}
+
+/** 新库不存在：按旧库版本号建库、灌入全部记录。 */
+async function createAndFill(
+  newName: string,
+  version: number,
+  schemas: StoreSchema[],
+  records: Map<string, unknown[]>,
+): Promise<void> {
   const newDb = await new Promise<IDBDatabase>((resolve, reject) => {
     const r = indexedDB.open(newName, version);
     r.onupgradeneeded = () => {
@@ -139,14 +196,6 @@ async function copyDb(oldName: string, newName: string): Promise<void> {
     });
   }
   newDb.close();
-
-  // 复制成功后才删旧库；被其它标签页占用（blocked）就留着，下次启动再删
-  await new Promise<void>((resolve) => {
-    const r = indexedDB.deleteDatabase(oldName);
-    r.onsuccess = () => resolve();
-    r.onerror = () => resolve();
-    r.onblocked = () => resolve();
-  });
 }
 
 /** 迁移三个 IndexedDB 库。必须早于 vault / 历史 / PDF 首次打开新库，否则会读到空库。 */

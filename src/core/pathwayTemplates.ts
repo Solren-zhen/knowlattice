@@ -1,5 +1,11 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
+/**
+ * 通路模板的持久化层。**UI 已下架**（MedicalPathwayBuilder 于 2026-10 重构中移除）：
+ * 这个文件只剩 vault 备份导入导出在用——老用户手里可能还有通路模板数据与备份，
+ * 保留读写是为了「备份兼容」，让这些数据仍能随备份迁移。不要再为新功能引用它。
+ */
+
 export interface PathwayTemplate {
   id: string;
   title: string;

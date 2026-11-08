@@ -6,8 +6,8 @@
  * 行尾 `^id` 若照原样渲染，读者会以为笔记里写脏了；脚注引用若显示成 `[^1]` 原文，
  * 作者就没有理由用它；锚点点进去若没有可定位的元素，`[[笔记#^id]]` 就成了死链。
  */
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import Preview from '../Preview';
 
 afterEach(() => cleanup());
@@ -20,6 +20,23 @@ async function renderPreview(content: string) {
   );
   return container;
 }
+
+describe('课程锚点', () => {
+  it('预览里点 #cw= 交给宿主打开课程分P，不当作普通外链', async () => {
+    const onJumpCourse = vi.fn(() => true);
+    const { container } = render(
+      <Preview
+        content={'[▶ P3 12:34](#cw=BV1xx411c7mD:p3:t754)'}
+        onJumpCourse={onJumpCourse}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('.markdown-body a[href^="#cw="]')).toBeTruthy(),
+    );
+    fireEvent.click(container.querySelector('.markdown-body a[href^="#cw="]')!);
+    expect(onJumpCourse).toHaveBeenCalledWith({ bvid: 'BV1xx411c7mD', page: 3, seconds: 754 });
+  });
+});
 
 describe('块锚点', () => {
   it('行尾 ^id 不再显示成正文，而是留一个可定位的锚点', async () => {

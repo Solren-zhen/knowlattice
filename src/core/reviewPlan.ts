@@ -23,8 +23,16 @@ export interface ReviewPlan {
   examDate: string;
   /** 考试名称，用于显示（如「执业医师笔试」）；空 = 只显示天数 */
   examLabel: string;
-  /** 每日复习上限（张）；0 = 不限制 */
+  /** 每日复习上限（张，含新卡）；0 = 不限制 */
   dailyCap: number;
+  /**
+   * 每日新学上限（张）；0 = 不限制。
+   *
+   * 与 `dailyCap` 的区别：`dailyCap` 截的是**整条队列**，到期卡一多就会把新卡挤没；
+   * 这个只截「还没排程的新卡」，到期卡永远不受影响 —— 新笔记第一次打开时
+   * 不该被整库新卡一次性糊脸，但已经到期的旧卡该复习还得复习。
+   */
+  newLimit: number;
 }
 
 const KEY = 'knowlattice-review-plan';
@@ -32,7 +40,7 @@ const KEY = 'knowlattice-review-plan';
 /** 上限的最大值：超过这个数就失去"节流"的意义，多半是误输入 */
 export const MAX_DAILY_CAP = 2000;
 
-export const DEFAULT_PLAN: ReviewPlan = { examDate: '', examLabel: '', dailyCap: 0 };
+export const DEFAULT_PLAN: ReviewPlan = { examDate: '', examLabel: '', dailyCap: 0, newLimit: 0 };
 
 /** `YYYY-MM-DD` 且是真实存在的日期（挡掉 2026-02-31 这类） */
 export function isIsoDate(s: string): boolean {
@@ -49,7 +57,9 @@ export function sanitizePlan(raw: unknown): ReviewPlan {
   const examLabel = typeof o.examLabel === 'string' ? o.examLabel.slice(0, 40) : '';
   const cap = typeof o.dailyCap === 'number' && Number.isFinite(o.dailyCap) ? Math.floor(o.dailyCap) : 0;
   const dailyCap = cap > 0 && cap <= MAX_DAILY_CAP ? cap : 0;
-  return { examDate, examLabel, dailyCap };
+  const nl = typeof o.newLimit === 'number' && Number.isFinite(o.newLimit) ? Math.floor(o.newLimit) : 0;
+  const newLimit = nl > 0 && nl <= MAX_DAILY_CAP ? nl : 0;
+  return { examDate, examLabel, dailyCap, newLimit };
 }
 
 export function loadPlan(): ReviewPlan {
@@ -73,7 +83,7 @@ export function exportPlan(): ReviewPlan {
 
 export function importPlan(raw: unknown): boolean {
   const clean = sanitizePlan(raw);
-  if (!clean.examDate && !clean.examLabel && !clean.dailyCap) return false;
+  if (!clean.examDate && !clean.examLabel && !clean.dailyCap && !clean.newLimit) return false;
   savePlan(clean);
   return true;
 }

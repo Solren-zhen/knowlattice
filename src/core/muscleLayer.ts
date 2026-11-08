@@ -13,15 +13,15 @@
  * 另外「muscular」系统并不全是肌肉：1110 条里 454 条是肌肉，其余是肌腱/附着(527)、
  * 滑囊、筋膜、韧带等。它们不参与分层，而是跟随同名（或其所属）肌肉的层级。
  *
- * 层级：1 = 最浅（皮下可及），4 = 最深。发现分层不对，直接改 RULES 即可。
+ * 层级：1 = 最浅（皮下可及），6 = 最深。发现分层不对，直接改 RULES 即可。
  */
 
 import type { ManifestOrgan } from './anatomy';
 
-export type MuscleLayer = 1 | 2 | 3 | 4;
+export type MuscleLayer = 1 | 2 | 3 | 4 | 5 | 6;
 
 /** 层级文案（下标 0 对应第 1 层） */
-export const LAYER_LABELS = ['浅层', '二层', '三层', '深层'] as const;
+export const LAYER_LABELS = ['浅层', '二层', '三层', '四层', '五层', '深层'] as const;
 
 /** 非肌肉结构的特征词：肌腱、腱膜、筋膜、韧带、滑囊、睑板、滑车、束、弓、环、白线等 */
 const NON_MUSCLE_RE =
@@ -56,36 +56,42 @@ interface Rule {
  * 先写「名字就能唯一确定」的，再写「整组同层」的路径规则。
  */
 const RULES: Rule[] = [
-  // ===== 第 4 层：最深（眶内、舌内、喉内、咽、椎体深层、盆底、足底深层、深层髋旋转肌、小腿深层）=====
-  { path: /Muscles of head/i, name: /(superior|inferior|medial|lateral) rectus|oblique muscle|levator palpebrae|genioglossus|hyoglossus/, layer: 4 },
-  { path: /Laryngeal muscles|Pharyngeal muscles/i, layer: 4 },
-  { path: /Suboccipital muscles|Transversospinal muscles|Intertransversarii/i, layer: 4 },
-  { name: /^rotatores$|interspinales|levatores (breves|longi) costarum/, layer: 4 },
-  { name: /transversus thoracis|innermost intercostal|^diaphragm$/, layer: 4 },
-  { name: /coccygeus|pubococcygeus|pubo-analis|anal sphincter/, layer: 4 },
-  { name: /quadratus lumborum/, layer: 4 },
-  { path: /Deep gluteal muscles/i, layer: 4 },
-  { name: /psoas major|subscapularis|obturator externus|iliacus/, layer: 4 },
-  { path: /Muscles of hand|Muscles of foot/i, name: /interossei|lumbrical|quadratus plantae/, layer: 4 },
-  { path: /Posterior compartment of leg/i, name: /popliteus|flexor digitorum longus|flexor hallucis longus|tibialis posterior/, layer: 4 },
-  { name: /pronator quadratus/, layer: 4 },
-  { name: /longus (colli|capitis)|rectus (anterior|lateralis) capitis/, layer: 4 },
+  // ===== 第 6 层：最深（眶内、舌内肌、枕下/横突棘肌、盆底、小腿深层、骨间肌所在的更深处）=====
+  { path: /Muscles of head/i, name: /(superior|inferior|medial|lateral) rectus|oblique muscle|levator palpebrae|genioglossus/, layer: 6 },
+  { path: /Suboccipital muscles|Transversospinal muscles/i, layer: 6 },
+  { name: /^rotatores$|interspinales|levatores (breves|longi) costarum/, layer: 6 },
+  { name: /transversus thoracis|innermost intercostal|^diaphragm$/, layer: 6 },
+  { name: /coccygeus|pubococcygeus|pubo-analis|anal sphincter|iliococcygeus/, layer: 6 },
+  { name: /longus (colli|capitis)|rectus (anterior|lateralis) capitis/, layer: 6 },
+  { path: /Posterior compartment of leg/i, name: /popliteus|flexor digitorum longus|flexor hallucis longus|tibialis posterior/, layer: 6 },
+  { name: /pronator quadratus/, layer: 6 },
 
-  // ===== 第 3 层：深层（被浅层肌肉覆盖）=====
+  // ===== 第 5 层：深层（髂腰肌、深髋旋转肌、骨间肌、喉/咽壁肌）=====
+  { path: /Laryngeal muscles|Pharyngeal muscles/i, layer: 5 },
+  { path: /Muscles of head/i, name: /hyoglossus/, layer: 5 },
+  { name: /intertransversarii/, layer: 5 },
+  { path: /Intertransversarii/i, layer: 5 },
+  { name: /quadratus lumborum|psoas major|iliacus/, layer: 5 },
+  { path: /Deep gluteal muscles/i, layer: 5 },
+  { name: /obturator externus/, layer: 5 },
+  { path: /Muscles of hand|Muscles of foot/i, name: /interossei/, layer: 5 },
+
+  // ===== 第 4 层：四层（前臂深肌、手足内在肌中层）=====
+  { name: /subscapularis/, layer: 4 },
+  { name: /vastus intermedius|gluteus minimus|adductor (brevis|magnus)/, layer: 4 },
+  { path: /Anterior compartment of forearm/i, name: /profundus|flexor pollicis longus/, layer: 4 },
+  { path: /Posterior compartment of forearm/i, name: /extensor indicis|supinator/, layer: 4 },
+  { path: /Muscles of hand|Muscles of foot/i, name: /lumbrical|quadratus plantae|adductor pollicis|adductor hallucis|flexor pollicis brevis|flexor hallucis brevis|opponens|flexor digiti minimi/, layer: 4 },
+
+  // ===== 第 3 层：中层（被浅层覆盖、但未到深层）=====
   { path: /Rotator cuff muscles/i, layer: 3 },
   { path: /Muscles of head/i, name: /pterygoid/, layer: 3 },
   { name: /scalenus posterior/, layer: 3 },
   { path: /Erector spinae/i, layer: 3 },             // 竖脊肌：背部固有肌的浅层，但位于斜方肌/背阔肌深面
-  { path: /Hypaxial muscles of back/i, name: /serratus posterior|intertransversarii/, layer: 3 },
+  { path: /Hypaxial muscles of back/i, name: /serratus posterior/, layer: 3 },
   { name: /pectoralis minor|transversus abdominis|internal intercostal/, layer: 3 },
   { path: /Anterior compartment of arm/i, name: /brachialis|coracobrachialis/, layer: 3 },
-  { path: /Posterior compartment of forearm/i, name: /extensor indicis|supinator/, layer: 3 },
-  { path: /Anterior compartment of forearm/i, name: /profundus|flexor pollicis longus/, layer: 3 },
-  { name: /adductor brevis|adductor magnus/, layer: 3 },
-  { path: /Anterior compartment of thigh/i, name: /vastus intermedius/, layer: 3 },
-  { name: /gluteus minimus/, layer: 3 },
   { path: /Posterior compartment of leg/i, name: /soleus|plantaris/, layer: 3 },
-  { path: /Muscles of hand|Muscles of foot/i, layer: 3 },   // 手/足其余内在肌
 
   // ===== 第 2 层 =====
   { path: /Muscles of head/i, name: /deep part of masseter/, layer: 2 },
@@ -101,6 +107,10 @@ const RULES: Rule[] = [
   { path: /Posterior compartment of forearm/i, name: /abductor pollicis longus|extensor pollicis/, layer: 2 },
   { path: /Anterior compartment of forearm/i, name: /superficialis/, layer: 2 },
   { name: /internal abdominal oblique/, layer: 2 },
+  { name: /deep head of pronator teres/, layer: 2 },          // 深头比浅头深一层
+  // 手/足内在肌不再整组塞第 3 层：足底/足背第一层、鱼际/小鱼际最外层是「皮下可及」级
+  { path: /Muscles of foot/i, name: /abductor hallucis|flexor digitorum brevis|abductor digiti minimi|extensor digitorum brevis|extensor hallucis brevis/, layer: 2 },
+  { path: /Muscles of hand/i, name: /abductor pollicis brevis|abductor digiti minimi/, layer: 2 },
 
   // ===== 第 1 层：最浅（皮下可及）=====
   { path: /Facial muscles/i, layer: 1 },

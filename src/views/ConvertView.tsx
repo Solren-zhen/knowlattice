@@ -10,9 +10,11 @@ import { anydocErrorCode, anydocToMarkdown } from '../core/anydoc';
 import { ocrPdfToMarkdown } from '../core/ocr';
 import { netErrorHint } from '../core/netError';
 import { stripPageAnchors } from '../core/pageAnchor';
+import { sanitizeRenderedHtml } from '../core/domSanitize';
 import { toast } from '../core/feedback';
 import { IconConvert, IconClose } from './icons';
 import Loading from './Loading';
+import PanelOverlay from './PanelOverlay';
 
 const md = new MarkdownIt({ html: false, linkify: false, breaks: false });
 
@@ -171,7 +173,7 @@ export default function ConvertView({ onSave, onAttach, onClose }: Props) {
   };
 
   return (
-    <div className="panel-backdrop quiz-overlay" onClick={onClose}>
+    <PanelOverlay tone="quiz" onClose={onClose}>
       <div className="quiz-panel convert-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title">格式转换 · PDF / Word → Markdown</span>
@@ -247,7 +249,7 @@ export default function ConvertView({ onSave, onAttach, onClose }: Props) {
             </div>
             {showPreview ? (
               <div className="convert-preview-scroll">
-                <div className="preview" dangerouslySetInnerHTML={{ __html: md.render(stripPageAnchors(previewMarkdown)) }} />
+                <div className="preview" dangerouslySetInnerHTML={{ __html: sanitizeRenderedHtml(md.render(stripPageAnchors(previewMarkdown))) }} />
               </div>
             ) : (
               <textarea
@@ -272,6 +274,6 @@ export default function ConvertView({ onSave, onAttach, onClose }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </PanelOverlay>
   );
 }

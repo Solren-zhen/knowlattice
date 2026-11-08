@@ -19,6 +19,7 @@ import {
 } from '../core/brainAtlas';
 import { netErrorHint } from '../core/netError';
 import { IconBrain, IconClose } from './icons';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   onClose: () => void;
@@ -157,7 +158,7 @@ export default function BrainAtlasView({ onClose }: Props) {
   }, [peel, azi, elev]);
 
   return (
-    <div className="panel-backdrop quiz-overlay" onClick={onClose}>
+    <PanelOverlay tone="quiz" onClose={onClose}>
       <div className="panel quiz-panel brain-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title"><IconBrain /> 脑图谱 · MRI 对照</span>
@@ -229,6 +230,6 @@ export default function BrainAtlasView({ onClose }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </PanelOverlay>
   );
 }

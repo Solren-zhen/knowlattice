@@ -7,8 +7,9 @@
  *   - 搜索是首屏主入口。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import HomeView, { type HomeFeature } from '../HomeView';
+import { RAIL_INDEX } from '../railCatalog';
 
 const FEATURES: HomeFeature[] = [
   { key: 'tree', label: '目录', icon: null },
@@ -98,5 +99,24 @@ describe('知识首页 · 最近使用', () => {
     const { props } = renderHome();
     fireEvent.click(screen.getByRole('button', { name: /搜索/ }));
     expect(props.onSearch).toHaveBeenCalledOnce();
+  });
+});
+
+describe('知识首页 · 学习日历', () => {
+  it('工作台直接渲染当月日历，导轨上不再有它的入口', () => {
+    const { container } = renderHome();
+    const card = container.querySelector('.home-cal');
+    expect(card).toBeTruthy();
+    // 当月至少 28 天；monthCells 固定 6 行，卡片只保留本月占用的整周
+    expect(container.querySelectorAll('.home-cal__cell').length).toBeGreaterThanOrEqual(28);
+    expect(screen.getByRole('region', { name: '学习日历' })).toBeTruthy();
+    expect(Object.keys(RAIL_INDEX)).not.toContain('calendar');
+  });
+
+  it('卡片里的「完整日历」打开学习报告页', () => {
+    const { props, container } = renderHome({ onOpenReport: vi.fn() });
+    const card = container.querySelector('.home-cal') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: '在学习报告中查看完整日历' }));
+    expect(props.onOpenReport).toHaveBeenCalledOnce();
   });
 });

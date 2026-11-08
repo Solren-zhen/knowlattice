@@ -1,0 +1,195 @@
+/* ============================================================
+   题库「边刷边改」右侧笔记抽屉
+   - 未打开：两个包裹层 display: contents，完全不改变原题库布局。
+   - 打开：桌面题面 + 笔记并排；窄屏上下分栏（题面在上，笔记在下）。
+   - 只改布局与输入框，不引入任何主题令牌。
+   ============================================================ */
+
+.quiz-workbench,
+.quiz-main {
+  display: contents;
+}
+
+.quiz-note-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.quiz-note-toggle.is-on {
+  color: var(--accent);
+  border-color: var(--border-accent);
+  background: var(--accent-soft);
+}
+
+.quiz-panel.quiz-panel--note-open {
+  width: min(1180px, 96vw);
+  height: min(88vh, 900px);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* 打开笔记后仍保留右下角拖拽调大小（同 .quiz-panel 基础规则），仅改默认尺寸 */
+  resize: both;
+}
+.quiz-panel.quiz-panel--note-open > .quiz-header,
+.quiz-panel.quiz-panel--note-open > .quiz-progress {
+  flex: none;
+}
+.quiz-panel.quiz-panel--note-open .quiz-workbench {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.quiz-panel.quiz-panel--note-open .quiz-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.quiz-panel.quiz-panel--note-open .quiz-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.quiz-panel.quiz-panel--note-open .quiz-nav,
+.quiz-panel.quiz-panel--note-open .quiz-footer {
+  flex: none;
+}
+
+.quiz-note-pane {
+  flex: 0 0 min(400px, 38%);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+}
+.quiz-note-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.quiz-note-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-caption);
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+}
+.quiz-note-select {
+  flex: 1 1 150px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-caption);
+}
+.quiz-note-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.quiz-note-text {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-reading);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.quiz-note-text::placeholder { color: var(--muted); }
+.quiz-note-text:focus {
+  box-shadow: inset 0 0 0 2px var(--accent-ring);
+}
+.quiz-note-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-micro);
+}
+.quiz-note-status {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.quiz-note-status.is-dirty { color: var(--warn-text); }
+.quiz-note-jump {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+.quiz-note-jump:hover { text-decoration: underline; }
+.quiz-note-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.quiz-note-empty p { margin: 0; }
+
+@media (max-width: 860px) {
+  .quiz-panel.quiz-panel--note-open {
+    width: 96vw;
+    min-width: 0;
+    height: 92vh;
+    max-height: 92vh;
+  }
+  .quiz-panel.quiz-panel--note-open .quiz-header {
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    padding: 10px 14px;
+  }
+  .quiz-panel.quiz-panel--note-open .quiz-title {
+    flex: 1 1 100%;
+    font-size: var(--fs-body);
+  }
+  .quiz-panel.quiz-panel--note-open .quiz-header .muted {
+    display: none;
+  }
+  .quiz-panel.quiz-panel--note-open .quiz-header .btn-icon[aria-label='缩小题目界面'],
+  .quiz-panel.quiz-panel--note-open .quiz-header .btn-icon[aria-label='放大题目界面'] {
+    display: none;
+  }
+  .quiz-panel.quiz-panel--note-open .quiz-workbench {
+    flex-direction: column;
+  }
+  .quiz-panel.quiz-panel--note-open .quiz-main {
+    flex: 1 1 54%;
+  }
+  .quiz-note-pane {
+    flex: 0 0 46%;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}

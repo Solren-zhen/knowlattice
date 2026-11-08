@@ -1,0 +1,331 @@
+/* ============================================================
+   浅色首页 · 生物医学背景（仅 light 主题）
+   参考图：蓝白 DNA / 山峦 / 分子结构背景 + 半透明玻璃卡片。
+   这里的每条规则都限定 html[data-theme='light']；dark / lite 不加载这层覆盖。
+   不改任何主题令牌，只改首页场景的背景与卡片材质。
+   ============================================================ */
+
+/* 浅色首页背景铺在 body 上（星图画布 z-index:0 在 #root 之下、body 背景之上），
+   .app 本身保持透明，知识星图才能像国风一样叠画在背景之上。
+   白色渐变叠加也一起移到 body::before，避免盖住星图。 */
+html[data-theme='light'] .app--home {
+  background: none;
+}
+html[data-theme='light'] body:has(.app--home) {
+  background-color: #e9f1ff;
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(247, 250, 255, 0.24) 46%, rgba(247, 250, 255, 0.42) 100%),
+    url('/home-bg.jpg');
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center top;
+  background-attachment: fixed;
+}
+
+/* 导航轨与目录卡：让背景从玻璃后面透出来，而不是压一层实底 */
+html[data-theme='light'] .app--home .rail {
+  background: rgba(255, 255, 255, 0.58);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+  border-right: 1px solid rgba(255, 255, 255, 0.58);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.24);
+}
+html[data-theme='light'] .app--home .c-tree {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(255, 255, 255, 0.74);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: 0 24px 60px -38px rgba(30, 64, 175, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+/* 内容区：更宽、更松，标题回到参考图的量级 */
+html[data-theme='light'] .app--home .home-stage {
+  width: min(1120px, 100%);
+  padding: 40px 26px 46px;
+  gap: 22px;
+  position: relative;
+  z-index: 2;
+}
+/* 桌宠在浅色首页退到内容之后：它会按用户拖放位置固定，压在卡片上会挡住待办文字 */
+html[data-theme='light'] .app--home .pet {
+  z-index: 1;
+}
+html[data-theme='light'] .app--home .home-title {
+  font-size: clamp(30px, 2.8vw, 38px);
+  font-weight: 760;
+  letter-spacing: -0.035em;
+  color: #0f172a;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+html[data-theme='light'] .app--home .home-sub {
+  font-size: 15px;
+  color: rgba(30, 41, 59, 0.72);
+}
+html[data-theme='light'] .app--home .home-sec-title {
+  color: rgba(30, 41, 59, 0.6);
+}
+
+/* 搜索：从实心主按钮改成参考图里的玻璃搜索条 */
+html[data-theme='light'] .app--home .home-search {
+  min-width: 280px;
+  justify-content: flex-start;
+  padding: 10px 16px 10px 18px;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 30px -22px rgba(30, 64, 175, 0.55), inset 0 1px 0 #fff;
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+}
+html[data-theme='light'] .app--home .home-search:hover {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.94);
+}
+html[data-theme='light'] .app--home .home-search__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-theme='light'] .app--home .home-search kbd {
+  margin-left: auto;
+  color: var(--muted);
+  background: rgba(241, 245, 249, 0.9);
+  border-color: rgba(15, 23, 42, 0.06);
+}
+
+/* 继续：带图标与箭头的横向卡片 */
+html[data-theme='light'] .app--home .home-recents__list {
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+html[data-theme='light'] .app--home .home-recent {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.86);
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 16px 44px -32px rgba(30, 64, 175, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+html[data-theme='light'] .app--home .home-recent:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(79, 70, 229, 0.36);
+}
+html[data-theme='light'] .app--home .home-recent__icon {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: var(--accent);
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.14), rgba(34, 211, 238, 0.1));
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 1px 0 #fff;
+}
+html[data-theme='light'] .app--home .home-recent__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+html[data-theme='light'] .app--home .home-recent::after {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: 2px;
+  border-top: 1.5px solid var(--muted);
+  border-right: 1.5px solid var(--muted);
+  transform: rotate(45deg);
+  opacity: 0.5;
+}
+
+/* 继续刷题 / 待复习 / 错题：玻璃胶囊 */
+html[data-theme='light'] .app--home .home-resume .chip {
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 24px -22px rgba(30, 64, 175, 0.5), inset 0 1px 0 #fff;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+html[data-theme='light'] .app--home .home-resume .chip-accent {
+  color: #fff;
+  background: var(--accent);
+  border-color: transparent;
+}
+html[data-theme='light'] .app--home .home-resume .chip-accent:hover {
+  background: var(--accent-hover);
+}
+
+/* 工作台卡片 */
+html[data-theme='light'] .app--home .home-wb__card,
+html[data-theme='light'] .app--home .home-feat {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 18px 48px -34px rgba(30, 64, 175, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+html[data-theme='light'] .app--home .home-wb__kpi b {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 22px;
+}
+html[data-theme='light'] .app--home .home-wb__kpi b svg {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  opacity: 0.82;
+}
+html[data-theme='light'] .app--home .home-wb__empty-state {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+}
+html[data-theme='light'] .app--home .home-wb__empty-art {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  color: var(--accent);
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.12), rgba(34, 211, 238, 0.1));
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  box-shadow: inset 0 1px 0 #fff;
+}
+html[data-theme='light'] .app--home .home-wb__empty {
+  margin: 0;
+  max-width: 30ch;
+}
+html[data-theme='light'] .app--home .home-wb__actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+html[data-theme='light'] .app--home .home-wb__actions button {
+  padding: 10px 11px;
+  background: rgba(255, 255, 255, 0.86);
+  border-color: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 1px 0 #fff;
+}
+html[data-theme='light'] .app--home .home-wb__actions button:hover {
+  background: rgba(79, 70, 229, 0.08);
+  border-color: rgba(79, 70, 229, 0.3);
+}
+html[data-theme='light'] .app--home .home-wb__actions .home-wb__tutor {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.14), rgba(34, 211, 238, 0.08));
+  border-color: rgba(79, 70, 229, 0.28);
+}
+
+/* 学习日历：参考图里的整月玻璃卡 */
+html[data-theme='light'] .app--home .home-cal {
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 18px;
+}
+html[data-theme='light'] .app--home .home-cal__meta {
+  gap: 4px 8px;
+}
+html[data-theme='light'] .app--home .home-cal__meta span {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(255, 255, 255, 0.9);
+}
+html[data-theme='light'] .app--home .home-cal__week {
+  color: rgba(51, 65, 85, 0.62);
+}
+html[data-theme='light'] .app--home .home-cal__grid {
+  gap: 5px;
+}
+html[data-theme='light'] .app--home .home-cal__cell {
+  min-height: 42px;
+  padding: 5px 2px 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.74);
+  border-color: rgba(255, 255, 255, 0.82);
+}
+html[data-theme='light'] .app--home .home-cal__cell:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(79, 70, 229, 0.32);
+  box-shadow: 0 10px 22px -18px rgba(30, 64, 175, 0.55);
+}
+html[data-theme='light'] .app--home .home-cal__cell[data-level='1'] {
+  background: color-mix(in srgb, var(--accent) 10%, #fff);
+}
+html[data-theme='light'] .app--home .home-cal__cell[data-level='2'] {
+  background: color-mix(in srgb, var(--accent) 20%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 24%, #fff);
+}
+html[data-theme='light'] .app--home .home-cal__cell[data-level='3'] {
+  background: color-mix(in srgb, var(--accent) 32%, #fff);
+  border-color: color-mix(in srgb, var(--accent) 38%, #fff);
+}
+html[data-theme='light'] .app--home .home-cal__cell[data-today] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-ring), 0 10px 22px -18px rgba(30, 64, 175, 0.6);
+}
+html[data-theme='light'] .app--home .home-cal__day {
+  font-size: 12px;
+}
+html[data-theme='light'] .app--home .home-cal .sc-ring {
+  width: 24px;
+  height: 24px;
+}
+html[data-theme='light'] .app--home .home-cal__mins {
+  font-size: 10px;
+}
+
+/* 最近使用 / 键盘提示：压成背景上的辅助层 */
+html[data-theme='light'] .app--home .home-feat {
+  background: rgba(255, 255, 255, 0.68);
+}
+html[data-theme='light'] .app--home .home-keys {
+  padding: 10px 14px;
+  color: rgba(30, 41, 59, 0.66);
+  border-top-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 12px;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+@media (max-width: 980px) {
+  html[data-theme='light'] .app--home {
+    background-attachment: scroll;
+  }
+  html[data-theme='light'] .app--home .home-stage {
+    padding: 28px 18px 36px;
+  }
+  html[data-theme='light'] .app--home .home-search {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  html[data-theme='light'] .app--home .home-title {
+    font-size: 27px;
+  }
+  html[data-theme='light'] .app--home .home-recent {
+    padding: 9px 10px;
+  }
+  html[data-theme='light'] .app--home .home-cal {
+    padding: 12px;
+  }
+  html[data-theme='light'] .app--home .home-cal__cell {
+    min-height: 36px;
+  }
+  html[data-theme='light'] .app--home .home-cal .sc-ring {
+    width: 18px;
+    height: 18px;
+  }
+  html[data-theme='light'] .app--home .home-keys {
+    padding: 8px 10px;
+  }
+}

@@ -1,22 +1,27 @@
 {
   "name": "knowlattice",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "node scripts/clean-dist.mjs && node scripts/copy-pdf-worker.mjs",
-    "build": "tsc -b && vite build && node scripts/assert-public-dist.mjs",
-    "lint": "oxlint",
+    "prebuild": "node scripts/verify-vendor.mjs && node scripts/clean-dist.mjs && node scripts/copy-pdf-worker.mjs",
+    "build": "tsc -b && vite build && node scripts/assert-public-dist.mjs && node scripts/size-budget.mjs",
+    "lint": "oxlint && node scripts/hooks-order-check.mjs",
     "test": "vitest run",
     "bench": "vitest bench --run",
+    "sizebudget": "node scripts/size-budget.mjs",
+    "features:gen": "node scripts/features-gen.mjs",
+    "ui:interact": "node scripts/ui-interact.mjs",
     "preview": "vite preview",
     "pack": "node scripts/pack.mjs",
     "predev": "node scripts/copy-pdf-worker.mjs",
     "tauri": "node scripts/tauri.mjs",
     "tauri:build:win": "node scripts/tauri.mjs build --bundles nsis",
-    "tauri:build:mac": "node scripts/tauri.mjs build --bundles app,dmg"
+    "tauri:build:mac": "node scripts/tauri.mjs build --bundles app,dmg",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -30,8 +35,6 @@
     "@earendil-works/pi-ai": "1.0.0",
     "@firecrawl/anydoc-wasm": "^0.2.4",
     "@niivue/niivue": "^0.69.0",
-    "@react-pdf-viewer/core": "^3.12.0",
-    "@react-pdf-viewer/default-layout": "^3.12.0",
     "@tauri-apps/api": "^2.12.1",
     "@tauri-apps/plugin-dialog": "^2.8.1",
     "@tauri-apps/plugin-fs": "^2.6.0",
@@ -48,7 +51,7 @@
     "markdown-it": "^15.0.0",
     "mind-elixir": "^6.0.0-next.4",
     "minisearch": "^7.2.0",
-    "pdfjs-dist": "3.11.174",
+    "pdfjs-dist": "6.4.299",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "sql.js": "^1.14.2",
@@ -59,6 +62,7 @@
     "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tauri-apps/cli": "^2",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.3",
@@ -74,5 +78,8 @@
     "typescript": "~6.0.2",
     "vite": "^8.2.2",
     "vitest": "^5.0.0"
+  },
+  "overrides": {
+    "tar": "7.5.22"
   }
 }

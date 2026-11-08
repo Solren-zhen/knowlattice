@@ -95,8 +95,33 @@ export function applyReview(card: ReviewCard, rating: Rating, now = Date.now()):
   return next;
 }
 
-/** 今日到期队列：due <= 现在 的卡片优先（按到期时间升序），其余按笔记顺序补齐为新卡 */
-export function dueQueue(cardsIn: ReviewCard[], now = Date.now()): ReviewCard[] {
+/**
+ * 今日已「首次学习」的卡数（张）。
+ *
+ * FSRS 里第一次评分后 `reps` 变 1、`last_review` 是今天 —— 这就是「今天新学的卡」，
+ * 不需要额外的每日计数器：调度表本身就是事实来源，重装/换设备后也不会算错。
+ */
+export function todaysNewStudied(schedules: Record<string, Card>, now = Date.now(), excludePrefix = ''): number {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const from = start.getTime();
+  let n = 0;
+  for (const [key, c] of Object.entries(schedules)) {
+    if (excludePrefix && key.startsWith(excludePrefix)) continue;
+    if (c.reps !== 1 || !c.last_review) continue;
+    const at = new Date(c.last_review).getTime();
+    if (Number.isFinite(at) && at >= from) n++;
+  }
+  return n;
+}
+
+/**
+ * 今日到期队列：due <= 现在 的卡片优先（按到期时间升序），其余按笔记顺序补齐为新卡。
+ *
+ * `newLimit > 0` 时只放入「今日新学额度」内的新卡（额度 = newLimit - 今天已首学的张数），
+ * 到期卡**一律不截**：节流的目标是别一次灌一堆新内容，不是把该复习的旧卡也压掉。
+ */
+export function dueQueue(cardsIn: ReviewCard[], now = Date.now(), newLimit = 0): ReviewCard[] {
   const cards = loadCards();
   const due: ReviewCard[] = [];
   const newOnes: ReviewCard[] = [];
@@ -106,7 +131,12 @@ export function dueQueue(cardsIn: ReviewCard[], now = Date.now()): ReviewCard[] 
     else if (dueMs(s) <= now) due.push(c);
   }
   due.sort((a, b) => dueMs(scheduleOf(cards, a)!) - dueMs(scheduleOf(cards, b)!));
-  return [...due, ...newOnes];
+  // 生词卡与笔记卡共用一张调度表（键见 core/vocab.ts vocabCardKey），但生词有自己独立的队列、
+  // 不走 newLimit——额度里若把它们也算成「今天已新学」，背 20 个生词笔记卡当天就一张不剩了。
+  const pickedNew = newLimit > 0
+    ? newOnes.slice(0, Math.max(0, newLimit - todaysNewStudied(cards, now, 'vocab:')))
+    : newOnes;
+  return [...due, ...pickedNew];
 }
 
 /** 统计信息：total/learned/dueNow 都是**卡片**数（一篇笔记可能贡献多张） */

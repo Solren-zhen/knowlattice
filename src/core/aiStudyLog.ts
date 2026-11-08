@@ -6,6 +6,7 @@
  * 纯函数 + 参数校验，写盘仍走面板的提案确认流（与 propose_note_* 同一套）。
  */
 import { serializeFrontmatter } from './parser';
+import { groundingIssue } from './grounding';
 
 /** 系统目录（不进复习队列、不是知识笔记）。与 srsCards 的 NON_CARD_PREFIXES 保持一致 */
 export const STUDY_LOG_DIR = '学习日志';
@@ -70,8 +71,14 @@ export function appendStudyLogEntry(existing: string | undefined, entry: StudyLo
 /**
  * 校验并整理模型给的 propose_study_log 参数。合法返回条目，不合法返回给模型的错误文案。
  * weakPoints 只收非空字符串并去重（模型爱把同一薄弱点换措辞写两遍）。
+ *
+ * `options.resolve` 给了就额外做 grounding：条目里引用的 `[[笔记名]]` 必须能解析到真实笔记，
+ * 否则返回错误文案让模型改（宁可让它多查一次，也不要往用户库里塞坏链）。
  */
-export function studyLogEntryFromArgs(args: Record<string, unknown>): StudyLogEntry | string {
+export function studyLogEntryFromArgs(
+  args: Record<string, unknown>,
+  options: { resolve?: (target: string) => boolean } = {},
+): StudyLogEntry | string {
   const topic = String(args.topic ?? '').trim();
   if (!topic) return '错误：缺少 topic（这次学习的主题）。';
   const weakPoints = [...new Set(
@@ -82,5 +89,7 @@ export function studyLogEntryFromArgs(args: Record<string, unknown>): StudyLogEn
   if (!weakPoints.length) return '错误：weak_points 为空。至少写一条薄弱点（这次哪里没掌握），可含 [[双链]]。';
   const drill = typeof args.drill === 'string' && args.drill.trim() ? args.drill.trim() : undefined;
   const summary = typeof args.summary === 'string' && args.summary.trim() ? args.summary.trim() : undefined;
+  const linkError = groundingIssue([topic, ...weakPoints, drill ?? '', summary ?? ''], { resolve: options.resolve });
+  if (linkError) return linkError;
   return { topic, weakPoints, drill, summary };
 }

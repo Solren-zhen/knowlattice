@@ -18,6 +18,9 @@
 import { dayKey } from './todos';
 
 const STATE_KEY = 'knowlattice-pomodoro';
+/** 配置键是独立常量而非模板拼出（`${STATE_KEY}-config`）：字面量键才能被 kv.test 的
+ *  「字面量键必须登记」护栏抓到，模板拼键是护栏盲区（见 KV_KEYS 登记项）。 */
+const CONFIG_KEY = 'knowlattice-pomodoro-config';
 const RECORDS_KEY = 'knowlattice-pomodoros';
 
 export type PomodoroPhase = 'focus' | 'short' | 'long';
@@ -51,6 +54,8 @@ export interface PomodoroState {
   focusDone: number;
   /** 本次专注关联的待办 */
   taskId: string | null;
+  /** 本次专注的科目（自由文本；空 = 未分类） */
+  subject: string | null;
 }
 
 export interface PomodoroRecord {
@@ -60,10 +65,12 @@ export interface PomodoroRecord {
   endedAt: number;
   minutes: number;
   taskId?: string;
+  /** 科目（用于学习日历按科目汇总）；旧记录没有这个字段 */
+  subject?: string;
 }
 
 export function defaultState(taskId: string | null = null): PomodoroState {
-  return { phase: 'focus', running: false, startedAt: null, elapsedMs: 0, focusDone: 0, taskId };
+  return { phase: 'focus', running: false, startedAt: null, elapsedMs: 0, focusDone: 0, taskId, subject: null };
 }
 
 /** 计划时长（毫秒） */
@@ -154,6 +161,7 @@ export function tick(state: PomodoroState, cfg: PomodoroConfig, now: number, id 
       endedAt: endedAtOf(state, cfg, now),
       minutes: Math.max(1, cfg.focusMin),
       ...(state.taskId ? { taskId: state.taskId } : {}),
+      ...(state.subject ? { subject: state.subject } : {}),
     },
   };
 }
@@ -195,14 +203,14 @@ export function sanitizeConfig(raw: unknown): PomodoroConfig {
 
 export function loadConfig(): PomodoroConfig {
   try {
-    return sanitizeConfig(JSON.parse(localStorage.getItem(`${STATE_KEY}-config`) ?? '{}'));
+    return sanitizeConfig(JSON.parse(localStorage.getItem(CONFIG_KEY) ?? '{}'));
   } catch {
     return { ...DEFAULT_CONFIG };
   }
 }
 
 export function saveConfig(cfg: PomodoroConfig) {
-  localStorage.setItem(`${STATE_KEY}-config`, JSON.stringify(cfg));
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
 }
 
 export function loadState(): PomodoroState {
@@ -217,6 +225,7 @@ export function loadState(): PomodoroState {
       elapsedMs: typeof o.elapsedMs === 'number' && Number.isFinite(o.elapsedMs) && o.elapsedMs > 0 ? o.elapsedMs : 0,
       focusDone: typeof o.focusDone === 'number' && Number.isFinite(o.focusDone) && o.focusDone > 0 ? Math.floor(o.focusDone) : 0,
       taskId: typeof o.taskId === 'string' ? o.taskId : null,
+      subject: typeof o.subject === 'string' && o.subject.trim() ? o.subject.trim().slice(0, 16) : null,
     };
   } catch {
     return defaultState();
@@ -242,6 +251,7 @@ function sanitizeRecords(raw: unknown): PomodoroRecord[] {
       endedAt: o.endedAt,
       minutes: o.minutes,
       ...(typeof o.taskId === 'string' && o.taskId ? { taskId: o.taskId } : {}),
+      ...(typeof o.subject === 'string' && o.subject.trim() ? { subject: o.subject.trim().slice(0, 16) } : {}),
     });
   }
   return out;

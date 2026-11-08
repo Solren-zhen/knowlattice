@@ -39,10 +39,12 @@ afterEach(() => {
 
 function paneWith(text: string) {
   const pane = document.createElement('div');
+  const layer = document.createElement('div');
+  layer.className = 'textLayer';
   const el = document.createElement('span');
-  el.className = 'rpv-core__text-layer-text';
   el.textContent = text;
-  pane.appendChild(el);
+  layer.appendChild(el);
+  pane.appendChild(layer);
   BOX.set(el, { left: 0, top: 0, right: 60, bottom: 20 });
   document.body.appendChild(pane);
   return { pane, el };

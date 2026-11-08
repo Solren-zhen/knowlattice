@@ -45,6 +45,7 @@ import { isImagePath } from '../core/imageRef';
 import { toast } from '../core/feedback';
 import { IconConvert, IconClose, IconRestore } from './icons';
 import Loading from './Loading';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   /** 笔记备份恢复（含题库 / 复习进度按「只补新键」合并） */
@@ -606,7 +607,7 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
   };
 
   return (
-    <div className="panel-backdrop quiz-overlay" onClick={onClose}>
+    <PanelOverlay tone="quiz" onClose={onClose}>
       <div className="quiz-panel convert-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title">导入 · 自动识别格式</span>
@@ -699,6 +700,6 @@ export default function ImportView({ onImportBackup, onImportMd, onImportPack, o
           </div>
         )}
       </div>
-    </div>
+    </PanelOverlay>
   );
 }

@@ -118,6 +118,7 @@ describe('架构不变量', () => {
     // 理由：core 要能在纯 Node 下跑（测试、脚本）。`import type` 编译后不留痕，安全；
     // 运行时 import 会把 WebView 专属 API 带进 Node，跑测试时直接失败。
     // 例外：确实需要在 core 里做平台判断时，把实现下沉到 storage，再从 core 通过接口调用。
+    // 动态 import() 同样算运行时依赖（编译后照样留痕），这里和静态 import 一起扫。
     const offenders: string[] = [];
     for (const file of PROD.filter((p) => rel(p).startsWith('core/'))) {
       for (const imp of importsOf(file)) {
@@ -125,6 +126,11 @@ describe('架构不变量', () => {
           offenders.push(`${rel(file)}:${imp.line} → ${imp.spec}`);
         }
       }
+      readFileSync(file, 'utf8').split(/\r?\n/).forEach((text, i) => {
+        if (/\bimport\s*\(\s*['"]@tauri-apps/.test(text)) {
+          offenders.push(`${rel(file)}:${i + 1} → 动态 import @tauri-apps`);
+        }
+      });
     }
     expect(offenders).toEqual([]);
   });

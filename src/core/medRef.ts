@@ -2,7 +2,7 @@
  * 医学速查：症状 → 疾病、方剂口诀。
  *
  * 内置数据由 `tools/ingest-app-data.mjs` 洗成 `public/app-data/medref/*.json`（kq.medref.v1），
- * 只留症状/分类/疾病、口诀正文这些内容字段；公有领域口诀（汤头歌诀）直接编在代码里。
+ * 只留症状/分类/疾病、口诀正文这些内容字段。
  *
  * 用户自己加/改的条目存在本机（见 medRefStore），与内置数据合并显示：
  * 同名时以用户那条为准（自己改的不能被内置覆盖）。
@@ -49,11 +49,9 @@ async function readJson<T>(file: string): Promise<T> {
 export async function loadMedRef(): Promise<MedRefData> {
   if (cache) return cache;
   cache = (async () => {
-    const [s, m] = await Promise.all([
-      readJson<{ symptoms: MedSymptom[] }>('symptoms.json'),
-      readJson<{ books: MedMnemonicLib[] }>('mnemonics.json'),
-    ]);
-    return { symptoms: s.symptoms ?? [], books: m.books ?? [] };
+    const s = await readJson<{ symptoms: MedSymptom[] }>('symptoms.json');
+    // 中医口诀不再进医学速查；口诀页只显示用户在本机自建的条目。
+    return { symptoms: s.symptoms ?? [], books: [] };
   })();
   cache.catch(() => { cache = null; });
   return cache;
@@ -139,10 +137,13 @@ export function inCat(cat: string, filter: string): boolean {
  * 合并内置症状与用户自建：同名以用户那条为准，其余内置排前面（保持原有顺序）。
  * 用 Map 而不是 find 循环——用户条目多了以后 O(n²) 会在输入时卡顿。
  */
-export function mergeSymptoms(builtin: MedSymptom[], user: MedSymptom[]): MedSymptom[] {
-  if (!user.length) return builtin;
+export function mergeSymptoms(builtin: MedSymptom[], user: MedSymptom[], hidden: string[] = []): MedSymptom[] {
+  if (!user.length && !hidden.length) return builtin;
+  const blocked = new Set(hidden);
   const mine = new Map(user.map((s) => [s.name, s]));
-  const out = builtin.map((s) => mine.get(s.name) ?? s);
-  for (const s of user) if (!builtin.some((b) => b.name === s.name)) out.push(s);
+  const out = builtin.filter((s) => !blocked.has(s.name)).map((s) => mine.get(s.name) ?? s);
+  for (const s of user) {
+    if (!blocked.has(s.name) && !builtin.some((b) => b.name === s.name)) out.push(s);
+  }
   return out;
 }

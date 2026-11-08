@@ -1,0 +1,393 @@
+/* ============================================================
+   国风主题 · 宣纸 · 墨 · 花青（仅 [data-theme='guofeng']）
+   参考 HelixMind 的 Paper & Ink：暖白宣纸、墨色正文、唯一强调色花青、
+   深墨卷轴导航轨、衬线大标题、实底纸卡（不做玻璃）。
+   本文件只作用于国风：不改 light / dark / lite 的令牌与材质。
+   ============================================================ */
+
+[data-theme='guofeng'] {
+  /* ---- 宣纸纸面：纸比卡片暗一档，材质才分得开 ---- */
+  --bg: #f1ece1;
+  --bg-raised: #fbf8f1;
+  --panel: #f0ebe0;
+  --panel-deep: #e7dfd0;
+  --border: rgba(45, 44, 37, 0.12);
+  --border-strong: rgba(45, 44, 37, 0.22);
+  --border-accent: rgba(43, 90, 99, 0.32);
+  --text: #23241e;
+  --text-2: #3d4138;
+  --muted: #5f635a;
+
+  /* ---- 花青：全站唯一强调色 ---- */
+  --accent: #2b5a63;
+  --accent-hover: #204850;
+  --accent-soft: rgba(43, 90, 99, 0.10);
+  --accent-ring: rgba(43, 90, 99, 0.28);
+  --accent-ink: #fbf8ef;
+  --grad-primary: linear-gradient(180deg, #33636b 0%, #28505a 100%);
+  --grad-primary-hover: linear-gradient(180deg, #28505a 0%, #1e4048 100%);
+
+  /* ---- 状态色：纸上的矿物色，压低饱和以免盖过墨 ---- */
+  --danger: #9c483c;
+  --danger-soft: rgba(156, 72, 60, 0.09);
+  --success: #3f6b4a;
+  --success-ink: #f7fbf6;
+  --danger-ink: #fff9f6;
+  --danger-text: #85382d;
+  --amber-text: #74491b;
+  --cyan-text: #2b5a63;
+  --success-text: #315a3b;
+  --warn-bg: #f3ecdf;
+  --warn-border: #d9c9ad;
+  --warn-text: #74491b;
+
+  /* ---- 文本高亮与气泡：纸上的朱砂 / 花青 ---- */
+  --hl-bg: #a63b2a;
+  --hl-ink: #fffaf4;
+  --bubble-bg: #e9e4d6;
+  --bubble-border: rgba(43, 90, 99, 0.42);
+  --bubble-ink: #2b5a63;
+  --bubble-shadow: 0 1px 2px rgba(45, 38, 26, 0.08);
+
+  /* ---- 纸卡材质：实底、细线、暖影，不做玻璃 ---- */
+  --panel-glass: rgba(251, 248, 241, 0.82);
+  --panel-glass-strong: rgba(251, 248, 241, 0.96);
+  --glass-surface: #fbf8f1;
+  --glass-shine: inset 0 1px 0 rgba(255, 255, 255, 0.72), inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  --glass-border: rgba(45, 44, 37, 0.12);
+  --glass-blur: blur(0px) saturate(100%);
+  --hero-halo: rgba(241, 236, 225, 0.78);
+  --lattice-line: rgba(45, 44, 37, 0.08);
+
+  /* ---- 暖影与按压：投影与纸同源，不用冷灰蓝 ---- */
+  --press-inset: inset 0 2px 6px rgba(45, 44, 37, 0.12), inset 0 1px 1px rgba(45, 44, 37, 0.07);
+  --shadow-xs: 0 1px 2px rgba(45, 44, 37, 0.05);
+  --shadow-sm: 0 1px 3px rgba(45, 44, 37, 0.07), 0 1px 2px rgba(45, 44, 37, 0.04);
+  --shadow-md: 0 6px 18px -4px rgba(45, 44, 37, 0.12), 0 2px 6px -1px rgba(45, 44, 37, 0.06);
+  --shadow-lg: 0 18px 44px -8px rgba(45, 44, 37, 0.18), 0 4px 12px -2px rgba(45, 44, 37, 0.07);
+  --shadow-modal: 0 30px 72px -18px rgba(45, 44, 37, 0.34), 0 8px 24px -6px rgba(45, 44, 37, 0.10);
+  --glow-accent: 0 0 0 1px rgba(43, 90, 99, 0.16), 0 4px 18px -2px rgba(43, 90, 99, 0.22);
+
+  /* ---- 衬线标题：只给页面级标题，不把正文改成宋体 ---- */
+  --font-display: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+
+  /* ---- 材质层（16-liquid-glass）在国风下整体退成实底纸面 ---- */
+  --lg-tint: #fbf8f1;
+  --lg-tint-strong: #fbf8f1;
+  --lg-frost: #fbf8f1;
+  --lg-frost-hover: #f7f0e1;
+  --lg-edge: rgba(45, 38, 26, 0.12);
+  --lg-edge-cool: rgba(43, 90, 99, 0.18);
+  --lg-rim: rgba(45, 38, 26, 0.12);
+  --lg-blur: none;
+  --lg-blur-soft: none;
+  --lg-sheen: none;
+  /* 顶边镜面高光：纸墨是实底，这道白线不属于纸 */
+  --lg-inset-highlight: none;
+  --lg-shadow: 0 18px 44px -18px rgba(45, 38, 26, 0.28), 0 4px 12px -6px rgba(45, 38, 26, 0.12);
+  --lg-shadow-soft: 0 10px 28px -16px rgba(45, 38, 26, 0.22), 0 2px 8px -4px rgba(45, 38, 26, 0.10);
+  --lg-scrim: rgba(24, 22, 17, 0.58);
+  --lg-tint-image: none;
+}
+
+/* ---- 水墨山水纸面：宣纸底色兜底，整幅山水画 cover 铺满，静止不漂移 ---- */
+[data-theme='guofeng'] body {
+  background-color: #f1ece1;
+  background-image: url('/guofeng-bg.png');
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  color: var(--text);
+  color-scheme: light;
+}
+/* 背景画已自带纸纹与墨晕，再叠 wash 会发闷，撤掉 */
+[data-theme='guofeng'] body::before {
+  content: none;
+}
+/* 玻璃层的彩色环境光与扫光在纸上没有意义，撤掉；
+   知识星图是应用记忆点，国风与浅色都保留 */
+[data-theme='guofeng'] body::after,
+[data-theme='guofeng'] .deck::before {
+  display: none;
+}
+[data-theme='guofeng'] .rail::before,
+[data-theme='guofeng'] .card::before,
+[data-theme='guofeng'] .home-wb__card::before,
+[data-theme='guofeng'] .rail-branch::before,
+[data-theme='guofeng'] .rail-flyout::before,
+[data-theme='guofeng'] .dock-col > .agent-panel::before,
+[data-theme='guofeng'] .ai-panel::before,
+[data-theme='guofeng'] .card::after {
+  display: none;
+}
+
+/* ---- 深墨卷轴导航轨：墨底、米字、赭石选中；与纸面同源 ---- */
+[data-theme='guofeng'] .rail {
+  background: linear-gradient(180deg, #2b2820 0%, #1e1c16 46%, #14130f 100%);
+  background-image:
+    /* 宣纸帘纹：极淡的横向细纹（repeating-linear-gradient，无图片资源），
+       叠在墨色渐变上让轨面有「纸」的肌理而非纯色塑料感 */
+    repeating-linear-gradient(90deg,
+      rgba(214, 205, 188, 0.022) 0 1px,
+      transparent 1px 3px),
+    linear-gradient(180deg, #2b2820 0%, #1e1c16 46%, #14130f 100%);
+  border-right: 1px solid rgba(214, 205, 188, 0.14);
+  box-shadow: 1px 0 0 rgba(214, 205, 188, 0.08), 12px 0 34px -20px rgba(30, 25, 16, 0.55);
+  color: #c6c0b2;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+/* ---- 文艺范三件：衬线字、界栏线、朱批选中 ---- */
+/* 品牌字标与功能标签走衬线（--font-display，23 内已定义的宋体系）：
+   展开态的 KnowLattice 像书坊题签，条目像刻本目录；字距微张是排版的「气口」。 */
+[data-theme='guofeng'] .rail .rail-label {
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+}
+[data-theme='guofeng'] .rail .rail-home .rail-label {
+  color: #c2a271;
+  letter-spacing: 0.14em;
+}
+/* 分隔线 = 界栏：更细更淡，中线略实、两端收锋（线装书栏线的抽象） */
+[data-theme='guofeng'] .rail .rail-sep,
+[data-theme='guofeng'] .rail .rail-group-divider {
+  background: linear-gradient(90deg, transparent, rgba(214, 205, 188, 0.20) 30%, rgba(214, 205, 188, 0.20) 70%, transparent);
+  height: 1px;
+  opacity: 0.7;
+}
+[data-theme='guofeng'] .rail .rail-expand,
+[data-theme='guofeng'] .rail .rail-home,
+[data-theme='guofeng'] .rail .rail-btn,
+[data-theme='guofeng'] .rail .rail-group-btn {
+  color: #c6c0b2;
+}
+[data-theme='guofeng'] .rail .rail-expand:hover,
+[data-theme='guofeng'] .rail .rail-home:hover,
+[data-theme='guofeng'] .rail .rail-btn:hover,
+[data-theme='guofeng'] .rail .rail-group-btn:hover {
+  background: rgba(214, 205, 188, 0.10);
+  color: #fbf7ee;
+  box-shadow: none;
+}
+[data-theme='guofeng'] .rail .rail-home {
+  color: #c2a271;
+}
+[data-theme='guofeng'] .rail .rail-btn.on,
+[data-theme='guofeng'] .rail .rail-group-btn.is-open {
+  background: rgba(194, 162, 113, 0.16);
+  color: #eadcc3;
+  box-shadow: inset 0 0 0 1px rgba(194, 162, 113, 0.24);
+}
+[data-theme='guofeng'] .rail .rail-btn.on::before {
+  /* 朱批：细竖线上深下浅（渐隐收锋），像书页边的朱砂批注，不再是一个色块端点 */
+  background: linear-gradient(180deg, #c2a271 0%, rgba(194, 162, 113, 0.25) 100%);
+  width: 2px;
+  box-shadow: none;
+}
+[data-theme='guofeng'] .rail .rail-section-label,
+[data-theme='guofeng'] .rail .rail-group-divider span,
+[data-theme='guofeng'] .rail .rail-label {
+  color: #a9a293;
+}
+[data-theme='guofeng'] .rail .rail-expand:hover,
+[data-theme='guofeng'] .rail--expanded .rail-expand:hover {
+  color: #fbf7ee;
+  background: rgba(214, 205, 188, 0.10);
+}
+[data-theme='guofeng'] .rail-scroll {
+  scrollbar-color: rgba(214, 205, 188, 0.26) transparent;
+}
+[data-theme='guofeng'] .rail-scroll::-webkit-scrollbar-thumb {
+  background: rgba(214, 205, 188, 0.26);
+}
+[data-theme='guofeng'] .rail-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(214, 205, 188, 0.42);
+}
+[data-theme='guofeng'] .rail--expanded::after {
+  background: rgba(24, 22, 17, 0.55);
+}
+
+/* ---- 纸卡：标题、卡片、目录、编辑器统一到同一张纸 ---- */
+[data-theme='guofeng'] .card,
+[data-theme='guofeng'] .home-wb__card,
+[data-theme='guofeng'] .home-recent,
+[data-theme='guofeng'] .home-feat,
+[data-theme='guofeng'] .panel,
+[data-theme='guofeng'] .quiz-panel,
+[data-theme='guofeng'] .convert-panel,
+[data-theme='guofeng'] .draft-panel,
+[data-theme='guofeng'] .recite-panel,
+[data-theme='guofeng'] .sheet-panel {
+  background: var(--bg-raised);
+  background-image: none;
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+[data-theme='guofeng'] .home-wb__card {
+  border-top: 2px solid color-mix(in srgb, var(--text) 72%, transparent);
+}
+[data-theme='guofeng'] .home-recent:hover,
+[data-theme='guofeng'] .home-feat:hover {
+  background: var(--panel);
+  border-color: var(--border-accent);
+}
+[data-theme='guofeng'] .home-recent__icon {
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+  color: var(--accent);
+  box-shadow: none;
+}
+[data-theme='guofeng'] .home-search {
+  background: var(--bg-raised);
+  border-color: var(--border);
+  color: var(--text-2);
+  box-shadow: var(--shadow-xs);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+[data-theme='guofeng'] .home-search:hover {
+  background: var(--panel);
+  color: var(--accent);
+}
+[data-theme='guofeng'] .home-search kbd {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--muted);
+}
+[data-theme='guofeng'] .home-wb__actions button {
+  background: var(--bg-raised);
+  border-color: var(--border);
+  box-shadow: none;
+}
+[data-theme='guofeng'] .home-wb__actions button:hover {
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+}
+[data-theme='guofeng'] .panel-backdrop {
+  background: var(--lg-scrim);
+  backdrop-filter: blur(6px) saturate(110%);
+  -webkit-backdrop-filter: blur(6px) saturate(110%);
+}
+[data-theme='guofeng'] .panel__head {
+  background: var(--bg-raised);
+  border-bottom-color: var(--border);
+}
+[data-theme='guofeng'] .editor-toolbar {
+  background: var(--bg-raised);
+  border-bottom-color: var(--border);
+}
+[data-theme='guofeng'] .editor-host .cm-gutters {
+  background: var(--bg-raised);
+  border-right-color: var(--border);
+}
+
+/* ---- 大标题：衬线；数字用衬线字阶，正文仍是系统字 ---- */
+[data-theme='guofeng'] .home-title,
+[data-theme='guofeng'] .panel__title,
+[data-theme='guofeng'] .preview.placeholder .hero-title,
+[data-theme='guofeng'] .sc-head h2 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+[data-theme='guofeng'] .home-title {
+  font-size: clamp(30px, 2.8vw, 38px);
+  color: var(--text);
+}
+[data-theme='guofeng'] .home-sub {
+  color: var(--muted);
+}
+[data-theme='guofeng'] .home-sec-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+[data-theme='guofeng'] .home-sec-title::before {
+  content: '';
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+[data-theme='guofeng'] .home-wb__kpi b,
+[data-theme='guofeng'] .home-cal__meta b {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+[data-theme='guofeng'] .home-wb__kpi b svg {
+  color: var(--accent);
+}
+
+/* ---- 学习日历：矿物色环，与纸面同一套颜料 ---- */
+[data-theme='guofeng'] .home-cal,
+[data-theme='guofeng'] .sc-panel,
+[data-theme='guofeng'] .sc-embed {
+  --sc-slot-0: #2b5a63;
+  --sc-slot-1: #a8793c;
+  --sc-slot-2: #3f6b4a;
+  --sc-slot-3: #7b5a8c;
+  --sc-slot-4: #2f6f73;
+  --sc-slot-5: #9c483c;
+  --sc-slot-6: #a64b5f;
+  --sc-slot-7: #4a5d7a;
+  --sc-slot-8: #b08a3e;
+  --sc-slot-9: #8a8578;
+}
+[data-theme='guofeng'] .home-cal__meta span {
+  background: var(--panel);
+  border-color: var(--border);
+}
+[data-theme='guofeng'] .home-cal__cell {
+  background: var(--panel);
+  border-color: var(--border);
+}
+[data-theme='guofeng'] .home-cal__cell:hover {
+  background: var(--bg-raised);
+  border-color: var(--border-accent);
+}
+[data-theme='guofeng'] .home-cal__cell[data-level='1'] {
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+}
+[data-theme='guofeng'] .home-cal__cell[data-level='2'] {
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+}
+[data-theme='guofeng'] .home-cal__cell[data-level='3'] {
+  background: color-mix(in srgb, var(--accent) 20%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+}
+[data-theme='guofeng'] .home-cal__cell[data-today] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-ring);
+}
+
+/* ---- 首页桌宠：墨色首页里退到内容之后，避免挡住卡片文字 ---- */
+[data-theme='guofeng'] .app--home .home-stage {
+  position: relative;
+  z-index: 2;
+}
+[data-theme='guofeng'] .app--home .pet {
+  z-index: 1;
+}
+
+/* ---- 选择与滚动条：花青半透明，纸面细线 ---- */
+[data-theme='guofeng'] ::selection {
+  background: rgba(43, 90, 99, 0.20);
+}
+[data-theme='guofeng'] ::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+}
+[data-theme='guofeng'] ::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* 品牌标在国风墨轨上改为赭石/花青色，避免紫色品牌砖跳出纸墨色系 */
+[data-theme='guofeng'] .rail-home > svg,
+[data-theme='guofeng'] .rail-home > img {
+  filter: sepia(0.9) saturate(1.15) hue-rotate(118deg) brightness(0.92);
+}

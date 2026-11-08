@@ -769,9 +769,12 @@ describe('上下文预算 / 引用核验 / 面板细节', () => {
     piSwitch.fail = true; // 走内置引擎（pi 路径的同一套预算由 core/aiBudget 提供）
     const big = `# 心脏\n${'心'.repeat(20_000)}`;
     const bodies: Array<{ messages: Array<{ role: string; content?: string }> }> = [];
-    // 8 次：单次约 6.1k，累计必超 40k 预算，最旧的会被换成占位说明
+    // 8 次：单次约 6.1k，累计必超 40k 预算，最旧的会被换成占位说明。
+    // 这里用 8 篇不同的笔记而不是同一篇：同参数连续调用会被 loopGuard 当原地打转拦掉
+    // （那是另一条规则，见 core/loopGuard），而本用例要验的是上下文裁剪。
+    const docs = new Map([1, 2, 3, 4, 5, 6, 7, 8].map((n) => [`解剖/心脏${n}.md`, big]));
     const calls = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
-      index: n - 1, id: `r${n}`, function: { name: 'read_note', arguments: '{"path":"解剖/心脏.md"}' },
+      index: n - 1, id: `r${n}`, function: { name: 'read_note', arguments: JSON.stringify({ path: `解剖/心脏${n}.md` }) },
     }));
     const fetchMock = stubFetch([
       async () => sseResponse([dataLine({ choices: [{ delta: { tool_calls: calls } }] })]),
@@ -780,7 +783,7 @@ describe('上下文预算 / 引用核验 / 面板细节', () => {
         return sseResponse(finalChunks('读完了。'));
       },
     ]);
-    renderPanel({ docs: new Map([['解剖/心脏.md', big]]) });
+    renderPanel({ docs: docs });
 
     await sendMessage('把这六段都读一遍');
     await waitFor(() => expect(bodies).toHaveLength(1));
@@ -1112,5 +1115,34 @@ describe('上下文预算 / 引用核验 / 面板细节', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * 「导师陪练」与「AI 笔记」共用同一个面板，必须在标识上分得清：
+ * 品牌名、面板 data-mode、输入框无障碍名要随模式一起切换，关掉后要能回到原样。
+ */
+describe('导师陪练与 AI 笔记的界面区分', () => {
+  it('开导师 → 品牌变导师陪练；关掉导师与陪练 → 回到 AI 笔记', async () => {
+    seedSettings();
+    renderPanel();
+    const brand = () => document.querySelector('.agent-brand-name')?.textContent;
+    const mode = () => document.querySelector('.agent-panel')?.getAttribute('data-mode');
+
+    expect(brand()).toBe('AI 笔记');
+    expect(mode()).toBe('note');
+
+    fireEvent.click(screen.getByRole('button', { name: '导师' }));
+    await waitFor(() => expect(brand()).toBe('导师陪练'));
+    expect(mode()).toBe('tutor');
+    expect(screen.getByLabelText('对导师陪练说点什么')).toBeTruthy();
+
+    // 关导师会保留陪练，所以要再关一次陪练才回到普通 AI 笔记
+    fireEvent.click(screen.getByRole('button', { name: '导师' }));
+    await waitFor(() => expect(brand()).toBe('陪练'));
+    fireEvent.click(screen.getByRole('button', { name: '陪练' }));
+    await waitFor(() => expect(brand()).toBe('AI 笔记'));
+    expect(mode()).toBe('note');
+    expect(screen.getByLabelText('对 AI 笔记说点什么')).toBeTruthy();
   });
 });

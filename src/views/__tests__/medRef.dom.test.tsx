@@ -2,7 +2,7 @@
 /**
  * 医学速查的挂载冒烟：用**仓库内的测试夹具**喂 fetch，确认
  * 1) 取数路径（app-data/medref/...）是对的，2) 首屏真的渲染出内容而不是空白，
- * 3) 自建条目能存能改能删（存本机，不进仓库），4) 公有领域口诀随包带着。
+ * 3) 自建与内置条目都能改能删（存本机，不进仓库），4) 不再带入中医口诀。
  *
  * 夹具必须入库：public/app-data/ 是运行时生成物（CI 上没有），测试不能依赖本机
  * 跑过 ingest 脚本。只桩 fetch（网络出口），不桩我们自己的解析逻辑。
@@ -12,7 +12,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import MedRefView from '../MedRefView';
-import { loadUserSymptoms } from '../../core/medRefStore';
+import {
+  loadHiddenMnemonics,
+  loadHiddenSymptoms,
+  loadUserMnemonics,
+  loadUserSymptoms,
+} from '../../core/medRefStore';
 
 const FIXTURE = join(process.cwd(), 'src', 'views', '__tests__', 'fixtures', 'medref');
 
@@ -111,14 +116,47 @@ describe('医学速查', () => {
     expect(opts).toEqual(expect.arrayContaining(['自测分类X', '自测分类Y']));
   });
 
-  it('口诀页带着公有领域歌诀，且能新增自己的', async () => {
+  it('内置症状可以编辑，并保存为本机覆盖项', async () => {
+    stubFetch();
+    render(<MedRefView onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/条症状/)).toBeTruthy());
+    fireEvent.change(screen.getByLabelText('速查搜索'), { target: { value: '稽留热' } });
+
+    await waitFor(() => expect(screen.getByText('编辑')).toBeTruthy());
+    fireEvent.click(screen.getByText('编辑'));
+    fireEvent.change(screen.getByLabelText('症状分类'), { target: { value: '本机分类' } });
+    fireEvent.click(screen.getByText('保存'));
+
+    await waitFor(() => expect(loadUserSymptoms()).toHaveLength(1));
+    expect(loadUserSymptoms()[0]).toMatchObject({ name: '稽留热', cat: '本机分类' });
+    expect(screen.getAllByText('本机分类')).toHaveLength(2); // 筛选芯片 + 条目分类
+  });
+
+  it('内置症状可以删除，刷新后仍不回显', async () => {
+    stubFetch();
+    const first = render(<MedRefView onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/条症状/)).toBeTruthy());
+    fireEvent.change(screen.getByLabelText('速查搜索'), { target: { value: '稽留热' } });
+    await waitFor(() => expect(screen.getByText('删除')).toBeTruthy());
+    fireEvent.click(screen.getByText('删除'));
+
+    await waitFor(() => expect(loadHiddenSymptoms()).toContain('稽留热'));
+    await waitFor(() => expect(screen.getByText(/没有匹配/)).toBeTruthy());
+    first.unmount();
+
+    render(<MedRefView onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/条症状/)).toBeTruthy());
+    expect(screen.queryByText('稽留热')).toBeNull();
+  });
+
+  it('口诀页不再带中医歌诀，只显示用户新增的内容', async () => {
     stubFetch();
     render(<MedRefView onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText(/条症状/)).toBeTruthy());
 
     fireEvent.click(screen.getByText('口诀'));
-    await waitFor(() => expect(screen.getByText('汤头歌诀')).toBeTruthy());
-    expect(screen.getByText(/公有领域/)).toBeTruthy();
+    expect(screen.queryByText('汤头歌诀')).toBeNull();
+    expect(screen.getByText(/还没有口诀/)).toBeTruthy();
 
     fireEvent.click(screen.getByText('＋ 新增'));
     fireEvent.change(screen.getByLabelText('方名'), { target: { value: '自编方一' } });
@@ -127,12 +165,11 @@ describe('医学速查', () => {
     await waitFor(() => expect(screen.getByText('自编方一')).toBeTruthy());
   });
 
-  it('口诀页也按自建分类筛，且不再显示别的门类', async () => {
+  it('自建口诀能编辑和删除，删除后不会回流', async () => {
     stubFetch();
-    const { container } = render(<MedRefView onClose={() => {}} />);
+    render(<MedRefView onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText(/条症状/)).toBeTruthy());
     fireEvent.click(screen.getByText('口诀'));
-    await waitFor(() => expect(screen.getByText('汤头歌诀')).toBeTruthy());
 
     fireEvent.click(screen.getByText('＋ 新增'));
     fireEvent.change(screen.getByLabelText('方名'), { target: { value: '自编方甲' } });
@@ -141,10 +178,35 @@ describe('医学速查', () => {
     fireEvent.click(screen.getByText('保存'));
     await waitFor(() => expect(screen.getByText('自编方甲')).toBeTruthy());
 
-    const before = container.querySelectorAll('.medref-row').length;
+    fireEvent.click(screen.getByText('编辑'));
+    fireEvent.change(screen.getByLabelText('口诀备注'), { target: { value: '改过备注' } });
+    fireEvent.click(screen.getByText('保存'));
+    await waitFor(() => expect(loadUserMnemonics()[0].tip).toBe('改过备注'));
+
+    fireEvent.click(screen.getByText('删除'));
+    await waitFor(() => expect(loadUserMnemonics()).toHaveLength(0));
+    expect(loadHiddenMnemonics()).toContainEqual({ book: '我的口诀', term: '自编方甲' });
+    expect(screen.queryByText('自编方甲')).toBeNull();
+  });
+
+  it('口诀页按自建分类筛，且不再显示别的门类', async () => {
+    stubFetch();
+    const { container } = render(<MedRefView onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/条症状/)).toBeTruthy());
+    fireEvent.click(screen.getByText('口诀'));
+    await waitFor(() => expect(screen.getByText(/还没有口诀/)).toBeTruthy());
+
+    fireEvent.click(screen.getByText('＋ 新增'));
+    fireEvent.change(screen.getByLabelText('方名'), { target: { value: '自编方甲' } });
+    fireEvent.change(screen.getByLabelText('口诀分类'), { target: { value: '自测门类' } });
+    fireEvent.change(screen.getByLabelText('歌诀正文'), { target: { value: '甲乙丙丁' } });
+    fireEvent.click(screen.getByText('保存'));
+    await waitFor(() => expect(screen.getByText('自编方甲')).toBeTruthy());
+
+    // 当前只有这一条口诀；分类筛选后仍应保留它，并让筛选芯片处于按下态。
     fireEvent.click(screen.getByRole('button', { name: /自测门类/ }));
     await waitFor(() => expect(container.querySelectorAll('.medref-row')).toHaveLength(1));
     expect(screen.getByText('自编方甲')).toBeTruthy();
-    expect(container.querySelectorAll('.medref-row').length).toBeLessThan(before);
+    expect(screen.getByRole('button', { name: /自测门类/ }).getAttribute('aria-pressed')).toBe('true');
   });
 });

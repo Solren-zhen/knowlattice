@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>管线自检 · GLB 上屏</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #F6F8FA; overflow: hidden; }
+  #hud {
+    position: fixed; left: 16px; top: 14px; z-index: 2;
+    font: 12px/1.6 -apple-system, "Segoe UI", "PingFang SC", sans-serif; color: #6B7785;
+  }
+  #hud b { color: #1B2430; font-size: 13px; display: block; margin-bottom: 2px; }
+  canvas { display: block; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="hud"><b>GLB 上屏自检</b><span id="meta">加载中…</span></div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xF6F8FA);
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 1, 4000);
+camera.position.set(150, 90, 210);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0xCFD8DF, 2.1));
+const key = new THREE.DirectionalLight(0xffffff, 1.8);
+key.position.set(180, 240, 160);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xBFD4DD, 0.7);
+fill.position.set(-160, -60, -140);
+scene.add(fill);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 0, 0);
+
+const loader = new GLTFLoader();
+const stats = [];
+
+function load(url, name, x) {
+  return new Promise((resolve) => {
+    loader.load(url, (gltf) => {
+      const group = gltf.scene;
+      let meshes = 0, faces = 0;
+      group.traverse((o) => {
+        if (!o.isMesh) return;
+        meshes++;
+        faces += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
+        // 刻意不在这里 computeVertexNormals()：这张图的用途是检验 GLB 自带法线是否可用。
+        // 前端补算会把这个缺陷藏起来（管线里真踩过：导出法线全零 → 器官通体纯黑）。
+        o.material = new THREE.MeshStandardMaterial({
+          color: 0x0F766E, roughness: 0.78, metalness: 0.02,
+          side: THREE.DoubleSide, flatShading: false,
+        });
+      });
+      const box = new THREE.Box3().setFromObject(group);
+      const c = box.getCenter(new THREE.Vector3());
+      group.position.sub(c);
+      group.position.x += x;
+      scene.add(group);
+      stats.push(`${name}: ${meshes} mesh / ${Math.round(faces).toLocaleString()} 面 / 高 ${Math.round(box.getSize(new THREE.Vector3()).y)}mm`);
+      resolve();
+    }, undefined, (e) => { stats.push(`${name}: 加载失败 ${e?.message ?? e}`); resolve(); });
+  });
+}
+
+await load('./out/digestive.glb', 'digestive', -60);
+await load('./out/cardiovascular.glb', 'cardiovascular', 80);
+
+document.getElementById('meta').textContent = stats.join('　·　');
+renderer.render(scene, camera);
+
+// 供截图脚本判断渲染完成
+window.__ready = true;
+window.__frames = 0;
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene, camera);
+  window.__frames++;
+})();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

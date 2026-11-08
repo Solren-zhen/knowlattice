@@ -126,8 +126,39 @@ function organColorAttribute(
   return new THREE.BufferAttribute(arr, 3, true);
 }
 
-/** 共享材质的键：一个系统内按「是否筋膜」分两批 */
-const materialKey = (system: string, fascia: boolean) => `${system}|${fascia ? 'fascia' : 'solid'}`;
+/** 材质分组：骨 / 软骨 / 肌肉 / 血管 / 筋膜 / 其余器官 */
+type Finish = 'bone' | 'cartilage' | 'muscle' | 'vessel' | 'organ' | 'fascia';
+
+function finishOf(organ: ManifestOrgan): Finish {
+  if (isFascia(organ)) return 'fascia';
+  switch (organ.system) {
+    case 'skeletal': return 'bone';
+    case 'articular': return 'cartilage';
+    case 'muscular': return 'muscle';
+    case 'cardiovascular': return 'vessel';
+    default: return 'organ';
+  }
+}
+
+/**
+ * 一套「质感」而不是一套「颜色」：模型没有 UV / 贴图，组织差异只能靠
+ * 粗糙度、清漆层和环境反射强度表达。骨是干燥哑光，软骨微透，血管/脏器有一层湿润清漆，
+ * 筋膜半透明。颜色仍由逐结构顶点色承载，这里只决定同一批结构能否共用材质。
+ */
+const FINISH_PROFILE: Record<
+  Finish,
+  { roughness: number; env: number; clearcoat: number; clearcoatRoughness: number; opacity: number }
+> = {
+  bone: { roughness: 0.82, env: 0.35, clearcoat: 0.15, clearcoatRoughness: 0.6, opacity: 1 },
+  cartilage: { roughness: 0.42, env: 0.55, clearcoat: 0.5, clearcoatRoughness: 0.25, opacity: 1 },
+  muscle: { roughness: 0.5, env: 0.45, clearcoat: 0.35, clearcoatRoughness: 0.35, opacity: 1 },
+  vessel: { roughness: 0.28, env: 0.9, clearcoat: 0.8, clearcoatRoughness: 0.18, opacity: 1 },
+  organ: { roughness: 0.58, env: 0.5, clearcoat: 0.3, clearcoatRoughness: 0.35, opacity: 1 },
+  fascia: { roughness: 0.72, env: 0.3, clearcoat: 0.1, clearcoatRoughness: 0.6, opacity: 0.45 },
+};
+
+/** 共享材质的键：按「组织质感」分，一个材质服务全部同质感结构 */
+const materialKey = (organ: ManifestOrgan) => finishOf(organ);
 
 /**
  * 结构最终颜色 = 类别/器官/系统配色 + 同系统内明暗微差。
@@ -161,11 +192,14 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     rebuildPickers: () => void;
     /** 按需渲染：标记场景已变化，下一帧才真正绘制 */
     invalidate: () => void;
-    /** 每个「系统 × 是否筋膜」共享一对材质（基础 / 选中高亮），替代逐结构克隆材质 */
-    sharedMaterials: Map<string, { base: THREE.MeshStandardMaterial; highlight: THREE.MeshStandardMaterial }>;
-    getMaterials: (
-      system: string, fascia: boolean, source: THREE.Material
-    ) => { base: THREE.MeshStandardMaterial; highlight: THREE.MeshStandardMaterial };
+    /** 每个「组织质感」共享一对材质（基础 / 选中高亮），替代逐结构克隆材质 */
+    sharedMaterials: Map<string, { base: THREE.MeshPhysicalMaterial; highlight: THREE.MeshPhysicalMaterial }>;
+    getMaterials: (organ: ManifestOrgan) => {
+      base: THREE.MeshPhysicalMaterial;
+      highlight: THREE.MeshPhysicalMaterial;
+    };
+    /** 阴影相机与接触阴影跟随当前加载的模型包围盒 */
+    updateShadow: (box: THREE.Box3) => void;
     /** 视角预设取景：前 / 后 / 左 / 右 / 复位(三视角) */
     fitView: (view: 'front' | 'back' | 'left' | 'right' | 'iso') => void;
     /** 聚焦到单个结构；结构尚未加载出来时返回 false，由调用方稍后重试 */
@@ -174,7 +208,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     applyVisibility: () => void;
   } | null>(null);
   const [activeSystems, setActiveSystems] = useState<Set<string>>(new Set(['skeletal']));
-  const [muscleLayer, setMuscleLayer] = useState(4);
+  const [muscleLayer, setMuscleLayer] = useState(6);
   const muscleLayers = useRef(new Map<string, number>());
   /** 全组件共享一个 DRACOLoader（解码 worker 复用），卸载时统一释放 */
   const dracoRef = useRef<DRACOLoader | null>(null);
@@ -217,10 +251,14 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
     const fullPixelRatio = Math.min(window.devicePixelRatio, 1.25);
     renderer.setPixelRatio(fullPixelRatio);
     renderer.setClearColor(0x000000, 0);
+    // 自阴影：肋骨内腔、器官褶皱、指骨之间需要「挡住光」的暗部，否则体积感会被均匀照明冲平
+    renderer.shadowMap.enabled = true;
+    // three r185 起 PCFSoftShadowMap 已废弃（内部会自动降级并打警告），直接用 PCFShadowMap
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     // 色彩与色调映射：ACES + sRGB 输出，避免高光死白、暗部发灰
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NeutralToneMapping; // 保饱和度，ACES 会把高亮区去饱和成白色
-    renderer.toneMappingExposure = 0.75;
+    renderer.toneMappingExposure = 0.85;
     host.appendChild(renderer.domElement);
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
@@ -231,14 +269,53 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       '3D 解剖视图：拖拽旋转，滚轮缩放，单击选中结构并在光标旁浮现该结构的笔记卡片，同一位置再点可穿透到下一层'
     );
 
-    // 灯光总量要和 albedo 同量级：环境贴图叠加后强度过高会把模型冲成死白（ACES 还会去饱和）
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8478, 0.35));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.75);
-    dir.position.set(2, 3, 4);
-    scene.add(dir);
-    const dir2 = new THREE.DirectionalLight(0xdfe8e2, 0.3);
-    dir2.position.set(-3, -1, -2);
-    scene.add(dir2);
+    // 环境底光压低：均匀照明会把结构之间的明暗差异冲平，体积感交给主光/顶光/轮廓光/阴影塑造
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8478, 0.12));
+    // 主光：唯一投影光源，负责肋骨内腔、器官褶皱、骨与骨之间的暗部
+    const key = new THREE.DirectionalLight(0xfff4e6, 1.05);
+    key.position.set(2.5, 3.2, 3.8);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.bias = -0.0004;
+    key.shadow.normalBias = 0.02;
+    scene.add(key, key.target);
+    // 顶光：从正上方往下打，肩、颅顶、骨盆上沿出现高光，下缘自然入暗。
+    // 标本摄影里这盏灯负责「轮廓成立」，不做投影（否则要再付一张 shadow map）
+    // 顶光：舞台聚光灯——一束从正上方打下来的锥形光，软边半影；
+    // decay=2 物理衰减让模型顶部比脚下更亮，落光有梯度（强度在 updateShadow 里按距离平方补偿）
+    const top = new THREE.SpotLight(0xfff2dd, 2.4, 0, 0.45, 0.6, 2);
+    top.position.set(0.15, 4.5, 0.45);
+    scene.add(top, top.target);
+    // 冷暖两盏辅助光：轮廓光从背后擦过分开同色结构，补光只托住背光面，不参与照明主导
+    const rim = new THREE.DirectionalLight(0xb9d2f5, 0.75);
+    rim.position.set(-2.2, 1.6, -3.2);
+    scene.add(rim);
+    const fill = new THREE.DirectionalLight(0xdfe8e2, 0.16);
+    fill.position.set(-3, -1, 2);
+    scene.add(fill);
+
+    // 接触阴影：没有它结构像浮在虚空里。但整块地面投影在没有地面的场景里会变成
+    // 「躺在地上的第二个身体」，所以只用一张径向渐变贴图做脚下的软接触阴影。
+    const contactTex = (() => {
+      const size = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const ctx = canvas.getContext('2d')!;
+      const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+      g.addColorStop(0, 'rgba(0,0,0,0.55)');
+      g.addColorStop(0.55, 'rgba(0,0,0,0.22)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, size, size);
+      return new THREE.CanvasTexture(canvas);
+    })();
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ map: contactTex, transparent: true, depthWrite: false })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.visible = false; // 拿到模型包围盒后再放到脚下
+    scene.add(ground);
 
     // 环境贴图（RoomEnvironment + PMREM）：GLTF 无材质时默认 metalness=1，
     // 没有环境反射时模型会又暗又灰，顶点色里的解剖配色几乎看不出来。
@@ -276,35 +353,35 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       threeRef.current?.organMap.forEach((v) => pickMeshes.push(v.mesh as THREE.Mesh));
     };
 
-    // 每个「系统 × 是否筋膜」共享一对材质：基础材质 + 选中高亮材质。
+    // 每种「组织质感」共享一对材质：基础材质 + 选中高亮材质。
     // 逐结构 clone 材质（全量最多 3478 份）会让逐 draw call 的材质切换与 uniforms
     // 上传成为拖拽旋转时的主要 CPU 开销；逐结构颜色由顶点色承载。
     const sharedMaterials = new Map<
       string,
-      { base: THREE.MeshStandardMaterial; highlight: THREE.MeshStandardMaterial }
+      { base: THREE.MeshPhysicalMaterial; highlight: THREE.MeshPhysicalMaterial }
     >();
-    const getMaterials = (system: string, fascia: boolean, source: THREE.Material) => {
-      const key = materialKey(system, fascia);
-      let entry = sharedMaterials.get(key);
+    const getMaterials = (organ: ManifestOrgan) => {
+      const finish = finishOf(organ);
+      let entry = sharedMaterials.get(finish);
       if (!entry) {
-        const base = source.clone() as THREE.MeshStandardMaterial;
-        base.vertexColors = true;
-        base.color.setHex(0xffffff); // 结构颜色烘进顶点色
-        // 解剖标本是绝缘体，不是金属：GLTF 默认 metalness=1 会让顶点色完全不参与漫反射
-        base.metalness = 0.05;
-        base.roughness = 0.55;
-        base.envMapIntensity = 0.5;
-        if (fascia) {
-          base.transparent = true;
-          base.opacity = 0.45;
-          base.roughness = 0.7;
-        }
+        const p = FINISH_PROFILE[finish];
+        const base = new THREE.MeshPhysicalMaterial({
+          color: 0xffffff, // 结构颜色烘进顶点色
+          vertexColors: true,
+          metalness: 0, // 解剖标本是绝缘体：GLTF 默认 metalness=1 会让顶点色完全不参与漫反射
+          roughness: p.roughness,
+          envMapIntensity: p.env,
+          clearcoat: p.clearcoat,
+          clearcoatRoughness: p.clearcoatRoughness,
+          transparent: finish === 'fascia',
+          opacity: p.opacity,
+        });
         const highlight = base.clone();
-        // 底色现在偏亮，自发光要够强才能让选中结构一眼看出来
+        // 底色偏亮，自发光要够强才能让选中结构一眼看出来
         highlight.emissive.setHex(0x1f7a4d);
         highlight.emissiveIntensity = 1.15;
         entry = { base, highlight };
-        sharedMaterials.set(key, entry);
+        sharedMaterials.set(finish, entry);
       }
       return entry;
     };
@@ -342,6 +419,42 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       const cur = threeRef.current;
       cur?.pickMeshes.forEach((m) => { if (m.visible !== false) box.expandByObject(m); });
       return box;
+    };
+    /**
+     * 阴影相机、主光位置与接触阴影都跟着模型包围盒走。
+     * 方向光用的是正交阴影相机，覆盖范围写死会在大模型上裁掉一半投影、小模型上精度浪费；
+     * 每加载完一个系统按当前 pickMeshes 的包围盒重设一次。
+     */
+    const updateShadow = (box: THREE.Box3) => {
+      if (box.isEmpty()) {
+        // 系统全关掉时地面阴影也该消失，否则会在空场景里留一块黑斑
+        ground.visible = false;
+        return;
+      }
+      const center = box.getCenter(new THREE.Vector3());
+      const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-4);
+      // 主光固定从右前上方来：模型旋转时阴影方向稳定，符合「影棚拍摄」的观感
+      key.position.copy(center).addScaledVector(new THREE.Vector3(0.55, 0.72, 1).normalize(), radius * 3);
+      key.target.position.copy(center);
+      key.target.updateMatrixWorld();
+      // 聚光灯从近正上方打向模型中心：锥形亮核在躯干，四肢随半影渐暗（舞台灯的落光）
+      top.position.copy(center).add(new THREE.Vector3(0.15 * radius, radius * 4, 0.45 * radius));
+      top.target.position.copy(center);
+      // decay=2 的物理衰减按距离平方掉光，这里同步补 I ∝ d²，配比不随模型尺寸漂移
+      top.intensity = 2.4 * top.position.distanceTo(center) ** 2;
+      top.target.updateMatrixWorld();
+      const cam = key.shadow.camera;
+      cam.left = -radius * 1.25;
+      cam.right = radius * 1.25;
+      cam.top = radius * 1.25;
+      cam.bottom = -radius * 1.25;
+      cam.near = radius * 0.2;
+      cam.far = radius * 8;
+      cam.updateProjectionMatrix();
+      ground.position.set(center.x, box.min.y + radius * 0.002, center.z);
+      ground.scale.set(radius * 1.1, radius * 1.1, 1);
+      ground.visible = true;
+      ground.updateMatrixWorld(true);
     };
     const fitView = (view: 'front' | 'back' | 'left' | 'right' | 'iso') => {
       const box = visibleBox();
@@ -385,6 +498,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       getMaterials,
       fitView,
       focusOrgan,
+      updateShadow,
       applyVisibility,
     };
     const t = threeRef.current;
@@ -589,6 +703,9 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       t.sharedMaterials.clear();
       scene.environment = null;
       envRT.dispose();
+      ground.geometry.dispose();
+      (ground.material as THREE.Material).dispose();
+      contactTex.dispose();
       renderer.dispose();
       host.removeChild(renderer.domElement);
       threeRef.current = null;
@@ -609,7 +726,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       const entry = t.organMap.get(organId);
       if (entry) {
         const mesh = entry.mesh as THREE.Mesh;
-        const shared = t.sharedMaterials.get(materialKey(entry.organ.system, isFascia(entry.organ)));
+        const shared = t.sharedMaterials.get(materialKey(entry.organ));
         if (shared) {
           mesh.material = shared.highlight;
           t.highlighted = { mesh, base: shared.base };
@@ -707,9 +824,12 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
           if (!organ) return;
           const mesh = obj as THREE.Mesh;
           if (!mesh.isMesh) return;
-          // 共享材质（系统 × 是否筋膜）；结构颜色写进顶点色，不再逐结构 clone 材质
-          const shared = t.getMaterials(organ.system, isFascia(organ), mesh.material as THREE.Material);
+          // 共享材质（按组织质感分组）；结构颜色写进顶点色，不再逐结构 clone 材质
+          const shared = t.getMaterials(organ);
           mesh.material = shared.base;
+          // 自阴影 + 接触阴影：结构之间互相遮挡才有体积。筋膜是半透明软组织，投全黑影子会失真
+          mesh.castShadow = !isFascia(organ);
+          mesh.receiveShadow = true;
           mesh.geometry.setAttribute('color', organColorAttribute(mesh.geometry, organ));
           // 拾取用：organ 反查键 + 本地包围盒（供射线粗筛，省掉对上千网格的三角形求交）
           mesh.userData.organId = organ.organ_id;
@@ -745,11 +865,16 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       }
       t.invalidate();
 
+      // 阴影相机与接触阴影跟着当前加载范围走；用 pickMeshes 而不是 scene 求包围盒，
+      // 避免把只用来接影子的地面平面算进去
+      const frameBox = new THREE.Box3();
+      for (const m of t.pickMeshes) frameBox.expandByObject(m);
+      t.updateShadow(frameBox);
+
       // 首次加载后取景：标准 fit-to-view
-      if (t.framePending) {
-        const box = new THREE.Box3().setFromObject(t.scene);
-        const center = box.getCenter(new THREE.Vector3());
-        const halfW = box.getSize(new THREE.Vector3()).length() / 2;
+      if (t.framePending && !frameBox.isEmpty()) {
+        const center = frameBox.getCenter(new THREE.Vector3());
+        const halfW = frameBox.getSize(new THREE.Vector3()).length() / 2;
         const dist = (halfW / Math.tan((t.camera.fov * Math.PI) / 360)) * 1.25;
         t.camera.near = dist / 100;
         t.camera.far = dist * 20;
@@ -790,7 +915,7 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
   );
   /** 每层结构数，显示在分层按钮上 */
   const layerCounts = useMemo(() => {
-    const c = [0, 0, 0, 0];
+    const c = [0, 0, 0, 0, 0, 0];
     for (const l of muscleLayerMap.values()) c[l - 1]++;
     return c;
   }, [muscleLayerMap]);
@@ -819,16 +944,8 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
         });
         t.systemGroups.delete(sys);
       }
-      // 共享材质按系统释放并从缓存移除：否则重新打开该系统会用到已 dispose 的材质
-      for (const fascia of [false, true]) {
-        const key = materialKey(sys, fascia);
-        const entry = t.sharedMaterials.get(key);
-        if (entry) {
-          entry.base.dispose();
-          entry.highlight.dispose();
-          t.sharedMaterials.delete(key);
-        }
-      }
+      // 共享材质按「组织质感」跨系统复用（骨/肌/血管…共 6 对），不能随单个系统卸载释放：
+      // 否则会 dispose 掉其它已加载系统正在用的材质。统一在组件卸载时释放。
       for (const [id, v] of [...t.organMap]) {
         if (v.organ.system === sys) t.organMap.delete(id);
       }
@@ -839,6 +956,10 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
       }
     }
     t.rebuildPickers();
+    // 卸载系统后包围盒可能变小：阴影相机与接触阴影跟着回收，避免投影精度浪费/阴影残留
+    const box = new THREE.Box3();
+    for (const m of t.pickMeshes) box.expandByObject(m);
+    t.updateShadow(box);
     t.invalidate();
     for (const s of activeSystems) void loadSystem(s);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -918,20 +1039,40 @@ export default function AnatomyViewer3D({ manifest, selectedId, onSelect }: Prop
           </button>
         ))}
         {activeSystems.has('muscular') && (
-          <div className="viewer3d-layer-picker" title="按解剖学深浅分层逐层显示；数字为该层结构数（规则表见 core/muscleLayer）">
-            <span>肌肉分层</span>
-            {[1, 2, 3, 4].map((n) => (
-              <button
-                key={n}
-                className={`layer-chip ${muscleLayer >= n ? 'on' : ''}`}
-                onClick={() => setMuscleLayer(n)}
-              >
-                {n === 4 ? '全部' : LAYER_LABELS[n - 1]}
-                <span className="layer-count">
-                  {n === 4 ? layerCounts.reduce((a, b) => a + b, 0) : layerCounts[n - 1]}
-                </span>
-              </button>
-            ))}
+          <div
+            className="viewer3d-layer-picker"
+            title="按解剖学深浅分层逐层显示：拖动滑条选择显示到哪一层，数字为该层结构数（规则表见 core/muscleLayer）"
+          >
+            <span className="layer-label">肌肉分层</span>
+            <div
+              className="layer-slider"
+              style={{ ['--pct' as string]: `${((muscleLayer - 1) / 5) * 100}%` }}
+            >
+              {/* aria-label 必须放在 onChange 的箭头函数之前：静态自审（uiRules R8）
+                  按 `^<input ...>` 截断到第一个 `>`，写在 `=>` 之后会被判成无标签 */}
+              <input
+                type="range"
+                aria-label="肌肉分层"
+                aria-valuetext={muscleLayer === 6 ? '全部 6 层' : `${LAYER_LABELS[muscleLayer - 1]}（第 ${muscleLayer} 层）`}
+                className="layer-range"
+                min={1}
+                max={6}
+                step={1}
+                value={muscleLayer}
+                onChange={(e) => setMuscleLayer(Number(e.target.value))}
+              />
+              <span className="layer-ticks" aria-hidden="true">
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <i key={n} className={muscleLayer >= n ? 'on' : ''} />
+                ))}
+              </span>
+            </div>
+            <span className="layer-readout">
+              {muscleLayer === 6 ? '全部' : LAYER_LABELS[muscleLayer - 1]}
+              <span className="layer-count">
+                {muscleLayer === 6 ? layerCounts.reduce((a, b) => a + b, 0) : layerCounts[muscleLayer - 1]}
+              </span>
+            </span>
           </div>
         )}
       </div>

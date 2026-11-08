@@ -19,6 +19,7 @@ import {
   type VocabEntry,
 } from '../core/vocab';
 import type { Rating } from '../core/srs';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   onClose: () => void;
@@ -104,7 +105,7 @@ export default function VocabView({ onClose, src }: Props) {
   if (reviewing) {
     const cur = queue[qIdx];
     return (
-      <div className="panel-backdrop" onClick={onClose}>
+      <PanelOverlay tone="plain" onClose={onClose}>
         <div
           ref={panelRef}
           className="panel quiz-panel"
@@ -136,12 +137,12 @@ export default function VocabView({ onClose, src }: Props) {
             )}
           </div>
         </div>
-      </div>
+      </PanelOverlay>
     );
   }
 
   return (
-    <div className="panel-backdrop" onClick={onClose}>
+    <PanelOverlay tone="plain" onClose={onClose}>
       <div
         ref={panelRef}
         className="panel quiz-panel"
@@ -221,6 +222,6 @@ export default function VocabView({ onClose, src }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </PanelOverlay>
   );
 }

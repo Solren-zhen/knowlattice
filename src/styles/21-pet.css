@@ -1,0 +1,326 @@
+/* ============================================================
+   桌宠 · 晶格精灵（2026-11）
+
+   只负责这一枚角色：尺寸、配色、待机动作、气泡与关闭键。
+   位置由 views/Pet.tsx 写 left/top（默认右下角），本文件不参与布局。
+   颜色全部从主题 token 派生，浅色 / 深色 / 国风主题都能自己重新着色。
+   ============================================================ */
+
+.pet,
+.pet-custom-preview {
+  /* 自定义主色挂 --pet-accent；没设就跟随主题强调色 */
+  --pet-base: var(--pet-accent, var(--accent));
+  /* 晶体三面：暗面 → 主面 → 亮面；用主色混极深/极浅，不写死第二种色相 */
+  --pet-deep: color-mix(in srgb, var(--pet-base) 74%, #0b1020);
+  --pet-mid: color-mix(in srgb, var(--pet-base) 62%, #ffffff);
+  --pet-light: color-mix(in srgb, var(--pet-base) 26%, #ffffff);
+  --pet-facet: color-mix(in srgb, var(--pet-base) 14%, #ffffff);
+  --pet-ink: #171a24;
+  --pet-glow: color-mix(in srgb, var(--pet-base) 55%, #ffffff);
+  --pet-size: 112px;
+}
+
+.pet {
+  position: fixed;
+  z-index: 58;
+  right: 18px;
+  bottom: 18px;
+  width: var(--pet-size);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 体型：同一枚角色只改尺寸，坐标与动作都不变 */
+.pet--s { --pet-size: 88px; }
+.pet--m { --pet-size: 112px; }
+.pet--l { --pet-size: 140px; }
+
+[data-theme='dark'] .pet,
+[data-theme='dark'] .pet-custom-preview {
+  /* 深色下晶面整体偏紫，眼睛翻成浅色发光点，否则黑豆会埋进深面里 */
+  --pet-deep: color-mix(in srgb, var(--pet-base) 58%, #05060a);
+  --pet-mid: color-mix(in srgb, var(--pet-base) 72%, #0c0f18);
+  --pet-light: color-mix(in srgb, var(--pet-base) 62%, #ffffff);
+  --pet-facet: color-mix(in srgb, var(--pet-base) 86%, #ffffff);
+  --pet-ink: #eef2ff;
+  --pet-glow: color-mix(in srgb, var(--pet-base) 40%, #ffffff);
+}
+
+.pet-figure {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: grab;
+  transform-origin: 50% 90%;
+  animation: pet-float 4.4s var(--ease-in-out) infinite;
+}
+
+.pet-figure:active { cursor: grabbing; }
+
+.pet.is-dragging .pet-figure {
+  animation: none;
+  cursor: grabbing;
+  transform: scale(1.04);
+}
+
+.pet-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  /* 只给轮廓一层极软的落影，晶体本身不再加发光描边 */
+  filter: drop-shadow(0 10px 14px rgba(15, 23, 42, 0.18));
+}
+
+/* 上传图片模式：与 SVG 同层替换，随容器尺寸与浮动动画一起动 */
+.pet-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 10px 14px rgba(15, 23, 42, 0.18));
+}
+
+.pet-shadow {
+  fill: var(--pet-base);
+  opacity: 0.16;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pet-shadow 4.4s var(--ease-in-out) infinite;
+}
+
+.pet-face { stroke: var(--pet-deep); stroke-width: 1.2; stroke-linejoin: round; }
+.pet-face--left { fill: var(--pet-deep); }
+.pet-face--right { fill: var(--pet-mid); }
+.pet-facet { fill: var(--pet-light); stroke: var(--pet-deep); stroke-width: 1.1; stroke-linejoin: round; }
+.pet-ridge { stroke: var(--pet-facet); stroke-width: 1.2; opacity: 0.9; }
+
+/* 光核：胸口的呼吸点，也是「晶格」这个身份的唯一发光元素 */
+.pet-core-halo {
+  fill: var(--pet-glow);
+  opacity: 0.32;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pet-pulse 3.4s var(--ease-in-out) infinite;
+}
+.pet-core-dot { fill: #ffffff; opacity: 0.92; }
+
+.pet-eye { fill: var(--pet-ink); transform-box: fill-box; transform-origin: center; animation: pet-blink 5.8s infinite; }
+.pet-eye-smile { fill: none; stroke: var(--pet-ink); stroke-width: 2.2; stroke-linecap: round; }
+.pet-eye-star { fill: var(--pet-ink); }
+.pet-eye-smile,
+.pet-eye-star { transform-box: fill-box; transform-origin: center; animation: pet-blink 5.8s infinite; }
+.pet-mouth { fill: none; stroke: var(--pet-ink); stroke-width: 1.8; stroke-linecap: round; opacity: 0.8; }
+
+/* 头顶配饰：不挡表情，只在晶体尖上方长出来 */
+.pet-accessory--sprout path { fill: var(--pet-light); stroke: var(--pet-deep); stroke-width: 1.1; stroke-linejoin: round; }
+.pet-accessory--sprout .pet-accessory-stem { fill: none; stroke: var(--pet-deep); stroke-width: 1.4; stroke-linecap: round; }
+.pet-accessory--halo ellipse { fill: none; stroke: var(--pet-glow); stroke-width: 2.4; opacity: 0.9; }
+
+/* 两侧小晶体片：各自绕根部摆一点，像手 */
+.pet-arm path { fill: var(--pet-light); stroke: var(--pet-deep); stroke-width: 1.1; stroke-linejoin: round; }
+.pet-arm--left { transform-box: fill-box; transform-origin: 100% 50%; animation: pet-swing-left 3.6s var(--ease-in-out) infinite; }
+.pet-arm--right { transform-box: fill-box; transform-origin: 0% 50%; animation: pet-swing-right 3.6s var(--ease-in-out) infinite; }
+
+/* ---- 气泡：右对齐到角色，往视口内侧展开 ---- */
+.pet-bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(230px, calc(100vw - 28px));
+  padding: 8px 11px;
+  border-radius: 11px;
+  background: var(--panel-glass-strong, var(--bg-raised));
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border, var(--border));
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  white-space: normal;
+  animation: pet-pop 180ms var(--ease-out);
+  pointer-events: none;
+}
+.pet-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  background: inherit;
+  border-right: 1px solid var(--glass-border, var(--border));
+  border-bottom: 1px solid var(--glass-border, var(--border));
+  transform: rotate(45deg);
+}
+/* 角色在右半屏时，气泡右对齐，避免从右侧探出视口 */
+.pet-bubble--right { left: auto; right: 0; transform: none; }
+.pet-bubble--right::after { left: auto; right: 26px; margin-left: 0; }
+
+/* ---- 关闭键：只在指针/键盘进入时出现，不挡拖动 ---- */
+.pet-close {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--muted);
+  box-shadow: var(--shadow-xs);
+  opacity: 0;
+  cursor: pointer;
+  transition: var(--tr-interact);
+}
+.pet:hover .pet-close,
+.pet:focus-within .pet-close { opacity: 1; }
+.pet-close:hover { color: var(--danger-text); border-color: var(--border-strong); }
+.pet-close:focus-visible { opacity: 1; outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+@media (hover: none) { .pet-close { opacity: 1; } }
+
+/* ---- 动效 ---- */
+@keyframes pet-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+@keyframes pet-shadow {
+  0%, 100% { transform: scaleX(1); opacity: 0.16; }
+  50% { transform: scaleX(0.82); opacity: 0.10; }
+}
+@keyframes pet-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.26; }
+  50% { transform: scale(1.18); opacity: 0.42; }
+}
+@keyframes pet-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.12); }
+}
+@keyframes pet-swing-left {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-6deg); }
+}
+@keyframes pet-swing-right {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(6deg); }
+}
+@keyframes pet-pop {
+  from { opacity: 0; transform: translate(-50%, 4px) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+/* 右对齐的那条不能共用上面带 -50% 的位移，单独给一版 */
+.pet-bubble--right { animation-name: pet-pop-right; }
+@keyframes pet-pop-right {
+  from { opacity: 0; transform: translateY(4px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- 窄屏：缩小，但不贴边到手指点不到 ---- */
+@media (max-width: 700px) {
+  .pet { right: 12px; bottom: 12px; }
+  .pet.pet--s { --pet-size: 70px; }
+  .pet.pet--m { --pet-size: 84px; }
+  .pet.pet--l { --pet-size: 104px; }
+  .pet-close { width: 20px; height: 20px; }
+}
+
+/* ---- 减少动效：停掉浮动、眨眼、摆臂与光核呼吸 ---- */
+@media (prefers-reduced-motion: reduce) {
+  .pet-figure,
+  .pet-shadow,
+  .pet-core-halo,
+  .pet-eye,
+  .pet-eye-smile,
+  .pet-eye-star,
+  .pet-arm--left,
+  .pet-arm--right { animation: none; }
+  .pet-bubble { animation: none; }
+}
+
+/* ============================================================
+   自定义面板：预览 + 名字 / 主色 / 体型 / 表情 / 头顶
+   面板外壳复用 .panel + .settings-row / .settings-chips，
+   这里只补桌宠自己的预览与色板。
+   ============================================================ */
+
+.pet-custom-panel {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(88vh, 760px);
+}
+
+.pet-custom-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding: 2px 2px 10px;
+}
+
+.pet-custom-preview {
+  width: var(--pet-size);
+  margin: 2px auto 8px;
+  display: grid;
+  place-items: center;
+}
+
+.pet-custom-preview .pet-svg {
+  filter: drop-shadow(0 10px 16px rgba(15, 23, 42, 0.16));
+}
+
+.pet-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.pet-swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+}
+
+.pet-swatch--theme {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2, var(--cyan-text, var(--accent))));
+}
+
+.pet-swatch.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.pet-name-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+}
+
+.pet-name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.pet-custom-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.pet-custom-foot .settings-note { flex: 1; margin: 0; }

@@ -17,6 +17,8 @@
  * 隐私模式/配额下写不进去，也只是下次启动再提示一次，不影响更新本身）。
  */
 import type { Update } from '@tauri-apps/plugin-updater';
+// R5：运行时 Tauri API 的唯一出口在 storage/tauriCommands，这里只拿类型（type import 编译后不留痕）
+import { checkAppUpdate, currentAppVersion, relaunchApp } from '../storage/tauriCommands';
 
 export type UpdatePhase =
   /** 还没查过 */
@@ -221,8 +223,7 @@ let pending: Update | null = null;
 
 async function currentVersion(): Promise<string> {
   try {
-    const { getVersion } = await import('@tauri-apps/api/app');
-    return await getVersion();
+    return await currentAppVersion();
   } catch {
     return '';
   }
@@ -250,8 +251,7 @@ export async function checkForUpdate(options: { manual?: boolean } = {}): Promis
   loadUpdatePrefs();
   commit({ ...state, phase: 'checking', manual, error: '', pct: null, dismissed: false });
   try {
-    const { check } = await import('@tauri-apps/plugin-updater');
-    const update = await check({ timeout: 30_000 });
+    const update = await checkAppUpdate({ timeout: 30_000 });
     if (!update) {
       commit(stateAfterCheck(state, { kind: 'current' }, manual, prefs));
       return state;
@@ -301,8 +301,7 @@ export async function installUpdate(): Promise<void> {
     pending = null;
     // Windows：安装器启动后应用会退出（restartAfterInstall 默认 true），通常走不到这里。
     // macOS / Linux：install 不会自行重启，必须显式重启，否则用户打开的还是旧版本。
-    const { relaunch } = await import('@tauri-apps/plugin-process');
-    await relaunch();
+    await relaunchApp();
   } catch (e) {
     pending = null;
     commit(stateAfterCheck(state, { kind: 'failed', message: messageOf(e) }, true, prefs));

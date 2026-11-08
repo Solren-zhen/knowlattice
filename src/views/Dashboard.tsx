@@ -1,6 +1,7 @@
 /**
  * 学习统计 / 打卡：汇总复习、错题、题库、笔记、待办，并展示连续打卡与近 7 天学习曲线。
  * 打卡数据来自复习评卡 / 题库作答（markStudy），存在 localStorage。
+ * 近 7 天一行同时汇总背诵留痕（reciteLog）与单词工坊每日统计（wordDrill daily）。
  *
  * 本版新增：考试中心入口、每日一练连续打卡、薄弱点雷达图（跨库合并的章节掌握度）。
  */
@@ -10,8 +11,8 @@ import { srsStats } from '../core/srs';
 import { buildCards } from '../core/srsCards';
 import { toast } from '../core/feedback';
 import { dueMistakes, loadMistakes } from '../core/mistakes';
-import { loadBanks } from '../core/qbank';
-import { chapterMastery, initializeStats, type ChapterMastery } from '../core/qbankStats';
+import { loadBanks, type QuizQuestion } from '../core/qbank';
+import { chapterMastery, initializeStats, type ChapterMastery, type StatsMap } from '../core/qbankStats';
 import { mergeMastery, radarAxes, systemMastery, weakestChapters, type RadarAxis } from '../core/qbankWeakness';
 import { dailyStreak, isDailyDone, last7Daily, todayKey } from '../core/dailyPractice';
 import { CONFIDENCE_LABELS, calibrationSummary } from '../core/qbankCalib';
@@ -22,8 +23,17 @@ import { loadReminder, notifySupport, requestNotifyPermission, saveReminder, typ
 import { MAX_DAILY_CAP, daysUntilExam, loadPlan, savePlan, type ReviewPlan } from '../core/reviewPlan';
 import { collectLearningStats } from '../core/achievementStats';
 import { syncAchievements, type AchievementState } from '../core/achievementStore';
+import { generateWeeklyReport, type WeeklyReport } from '../core/learningDashboard';
+import { generateTodayPlan, type LearningPath } from '../core/learningPathPlanner';
+import { studyRecordsSince } from '../core/studyLog';
+import { exportPomodoros } from '../core/pomodoro';
+import { reciteLog } from '../core/reciteLog';
+import { dailySeries, loadDaily } from '../core/wordDrill';
+import { loadGeneratedCards } from '../core/generatedCards';
 import { IconChart, IconClose } from './icons';
+import StudyCalendarView from './StudyCalendarView';
 import DialogSurface from './DialogSurface';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   docs: Map<string, string>;
@@ -69,21 +79,42 @@ function Radar({ axes }: { axes: RadarAxis[] }) {
 export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onOpenMistakes, onOpenExam }: Props) {
   // Esc 关闭（接进全局 Esc 栈，与其余面板一致）
   useEsc(onClose);
-  const [qbank, setQbank] = useState<{ bankCount: number; totalQ: number; mastery: ChapterMastery[] }>({ bankCount: 0, totalQ: 0, mastery: [] });
+  const [qbank, setQbank] = useState<{
+    bankCount: number;
+    totalQ: number;
+    mastery: ChapterMastery[];
+    stats: StatsMap;
+    questions: Map<string, QuizQuestion>;
+    loaded: boolean;
+  }>({ bankCount: 0, totalQ: 0, mastery: [], stats: {}, questions: new Map(), loaded: false });
   useEffect(() => {
     let active = true;
     Promise.all([loadBanks(), initializeStats()]).then(([banks, stats]) => {
       if (!active) return;
       // 跨库合并章节掌握度：雷达图/学科汇总看的是「整个人的薄弱点」，不该分库各看各的
       const mastery = mergeMastery(banks.flatMap((bank) => chapterMastery(bank, stats)));
-      setQbank({ bankCount: banks.length, totalQ: banks.reduce((count, bank) => count + bank.questions.length, 0), mastery });
+      // 周报要按 qid 找到题目所属章节，这里一次性建索引，避免每份报告重复扫描
+      const questions = new Map<string, QuizQuestion>();
+      for (const bank of banks) for (const q of bank.questions) questions.set(q.id, q);
+      setQbank({
+        bankCount: banks.length,
+        totalQ: banks.reduce((count, bank) => count + bank.questions.length, 0),
+        mastery,
+        stats,
+        questions,
+        loaded: true,
+      });
     }).catch(() => {});
     return () => { active = false; };
   }, []);
   const mdPaths = useMemo(() => [...docs.keys()].filter((p) => p.endsWith('.md')), [docs]);
+  const reviewCards = useMemo(
+    () => [...buildCards(mdPaths, docs), ...loadGeneratedCards()],
+    [mdPaths, docs],
+  );
   const rep = useMemo(() => {
     // 统计单位是「卡」（一篇笔记按小节切出多张），见 core/srsCards.ts
-    const r = srsStats(buildCards(mdPaths, docs));
+    const r = srsStats(reviewCards);
     const mistakes = Object.keys(loadMistakes()).length;
     const todos = loadTodos();
     const todoDone = todos.filter((t) => t.done).length;
@@ -91,7 +122,7 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
     const days = last7();
     const maxDay = Math.max(1, ...days.map((d) => d.count));
     return { r, mistakes, bankCount: qbank.bankCount, totalQ: qbank.totalQ, todoDone, todos: todos.length, s, days, maxDay };
-  }, [mdPaths, docs, qbank]);
+  }, [qbank, reviewCards]);
 
   /** 薄弱点：跨库合并后的学科汇总 / 雷达轴 / 最弱章（都只在有作答记录时才有内容） */
   const sysRep = useMemo(() => systemMastery(qbank.mastery), [qbank.mastery]);
@@ -104,6 +135,28 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
   /** 错题池里今天该清的条数：复习卡 / 错题 / 每日一练 三套调度各取一个数，
    *  否则用户要开三个面板自己对比才知道今天先干哪个。 */
   const dueMistakeCount = useMemo(() => dueMistakes().length, []);
+
+  /**
+   * 近 7 天的背诵与单词留痕：reciteLog 没有按时间的聚合函数，这里自己求和
+   * （篇数按去重后的笔记路径、轮数按会话条数）；单词用 wordDrill 的 dailySeries，
+   * total 是作答次数（新词 + 复习），正确率按七天合计算。
+   * 依赖留空与下面 calib 同理：面板每次打开重新挂载，挂载时取一次即可。
+   */
+  const extraWeek = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - 6);
+    const sessions = reciteLog().filter((s) => s.at >= start.getTime());
+    const series = dailySeries(loadDaily(), 7);
+    const wordTotal = series.reduce((sum, d) => sum + d.total, 0);
+    const wordCorrect = series.reduce((sum, d) => sum + d.correct, 0);
+    return {
+      recitePapers: new Set(sessions.map((s) => s.path)).size,
+      reciteRounds: sessions.length,
+      wordTotal,
+      wordRate: wordTotal > 0 ? wordCorrect / wordTotal : 0,
+    };
+  }, []);
 
   /**
    * 成就：汇总统计 → 评估 → 落盘。
@@ -160,6 +213,38 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
   const [notifyHint, setNotifyHint] = useState('');
   const examDays = daysUntilExam(plan.examDate);
 
+  /**
+   * 本周学习路径：把真实流水（studyLog）+ 逐题统计 + 专注记录合成一份周报，再生成今日计划。
+   * 之前 Dashboard 只展示「累计」数字；这里开始回答「这周干了什么、今天先干哪个」。
+   */
+  const weekly = useMemo<WeeklyReport | null>(() => {
+    if (!qbank.loaded) return null;
+    const now = new Date();
+    const monday = new Date(now);
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+    const { reviewRecords, quizRecords } = studyRecordsSince(monday.getTime());
+    const focusSessions = exportPomodoros().map((r) => ({
+      startAt: r.endedAt - r.minutes * 60_000,
+      endAt: r.endedAt,
+    }));
+    return generateWeeklyReport({
+      reviewRecords,
+      quizRecords,
+      stats: qbank.stats,
+      allQuestions: qbank.questions,
+      // 周报只需要「此刻到期几张」；直接用 srsStats 的结果，避免在渲染期再取一次 Date.now
+      dueCardCount: rep.r.dueNow,
+      incompleteTasks: Math.max(0, rep.todos - rep.todoDone),
+      focusSessions,
+    });
+  }, [qbank, rep.r.dueNow, rep.todos, rep.todoDone]);
+
+  const todayPlan = useMemo<LearningPath | null>(
+    () => (weekly ? generateTodayPlan(weekly, 60) : null),
+    [weekly],
+  );
+
   /** 改一个字段就立刻落盘；saveX 返回清洗后的对象，直接当新 state，界面与存储始终一致 */
   const updatePlan = (patch: Partial<ReviewPlan>) => {
     setPlan(savePlan({ ...plan, ...patch }));
@@ -181,6 +266,12 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
     updatePlan({ dailyCap: Number.isFinite(n) ? Math.min(MAX_DAILY_CAP, Math.max(0, Math.floor(n))) : 0 });
   };
 
+  /** 新学上限：只截「还没排程的新卡」，到期卡不受影响 */
+  const setNewLimit = (raw: string) => {
+    const n = raw === '' ? 0 : Number(raw);
+    updatePlan({ newLimit: Number.isFinite(n) ? Math.min(MAX_DAILY_CAP, Math.max(0, Math.floor(n))) : 0 });
+  };
+
   const cards = [
     { label: '连续打卡', value: `${rep.s} 天`, to: [rep.s], tpl: '{0} 天', cls: 'accent' },
     { label: '今日到期', value: `${rep.r.dueNow} 张`, to: [rep.r.dueNow], tpl: '{0} 张' },
@@ -192,7 +283,7 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
   ];
 
   return (
-    <div className="panel-backdrop mistake-overlay" onClick={onClose}>
+    <PanelOverlay tone="mistakes" onClose={onClose}>
       <DialogSurface className="panel mistake-panel" label="学习统计" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head mistake-header">
           <span className="panel__title mistake-title"><IconChart /> 学习统计</span>
@@ -250,6 +341,57 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
             </button>
           )}
         </section>
+
+        {/* 本周学习路径：周报（真实流水 + 逐题统计 + 专注记录）→ 今日计划。
+            以前这里只有累计数字，看不出「这周投入在哪、今天先做哪一步」。 */}
+        {weekly && (
+          <section className="dash-path" data-reveal aria-label="本周学习路径">
+            <h4>
+              本周学习路径
+              <span className="dash-path-range muted">{weekly.weekRange.start} ~ {weekly.weekRange.end}</span>
+            </h4>
+            <div className="dash-path-metrics">
+              <span><b>{weekly.masteryStats.reviewedCards}</b> 张复习</span>
+              <span><b>{weekly.masteryStats.quizCount}</b> 道练习</span>
+              <span><b>{weekly.timeStats.focusMinutes}</b> 分钟专注</span>
+              <span><b>{weekly.masteryStats.reviewAccuracy > 0 ? `${Math.round(weekly.masteryStats.reviewAccuracy * 100)}%` : '—'}</b> 复习正确率</span>
+              <span><b>{weekly.masteryStats.quizAccuracy > 0 ? `${Math.round(weekly.masteryStats.quizAccuracy * 100)}%` : '—'}</b> 练习正确率</span>
+            </div>
+            {weekly.weakPoints.length > 0 && (
+              <p className="dash-path-weak muted">
+                薄弱点：
+                {weekly.weakPoints.slice(0, 3).map((w) => (
+                  <span key={w.name} className="dash-path-chip">
+                    {w.name} · 错 {w.mistakeCount} 次
+                  </span>
+                ))}
+              </p>
+            )}
+            {todayPlan && todayPlan.steps.length > 0 ? (
+              <>
+                <p className="dash-path-goal muted">今日目标：{todayPlan.goal}</p>
+                <ol className="dash-path-steps">
+                  {todayPlan.steps.map((step) => (
+                    <li key={step.step} className={`dash-path-step ${step.type}`}>
+                      <span className="dash-path-step-no" aria-hidden="true">{step.step}</span>
+                      <span className="dash-path-step-text">{step.description}</span>
+                      <span className="dash-path-step-min muted">{step.estimatedMinutes} 分钟</span>
+                    </li>
+                  ))}
+                </ol>
+              </>
+            ) : (
+              <p className="dash-path-empty muted">今天没有紧急项：可以推进新卡，或去题库练一组。</p>
+            )}
+            <div className="dash-path-actions">
+              <button type="button" className="btn-small" onClick={onOpenReview}>去复习</button>
+              <button type="button" className="btn-small" onClick={onOpenQuiz}>去练题</button>
+              {onOpenMistakes && (
+                <button type="button" className="btn-small" onClick={onOpenMistakes}>清错题</button>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* 考试中心入口 + 每日一练打卡 */}
         {onOpenExam && (
@@ -387,7 +529,21 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
               ))}
             </div>
           )}
+          {/* 背诵与单词工坊此前不在报告里（reciteLog 只记事实、wordDrill daily 只进单词面板）。
+              这里一行 muted 补齐，不另开区块；两边都没有数据时整行不渲染，
+              与上面「全零不画柱子」的空态语汇一致。 */}
+          {(extraWeek.reciteRounds > 0 || extraWeek.wordTotal > 0) && (
+            <p className="dash-week-extra muted">
+              近 7 天背诵 {extraWeek.recitePapers} 篇（{extraWeek.reciteRounds} 轮）
+              · 单词练习 {extraWeek.wordTotal} 词
+              {extraWeek.wordTotal > 0 ? ` · 正确率 ${Math.round(extraWeek.wordRate * 100)}%` : ''}
+            </p>
+          )}
         </section>
+
+        {/* 学习日历：首页工作台只放得下当前月份的紧凑月历，月份切换 / 当天小结 /
+            历史汇总这些放不下的部分都收在这里（同一份番茄记录与配色） */}
+        <StudyCalendarView />
 
         <section className="dash-calib" data-reveal aria-label="元认知校准">
           <h4>元认知校准</h4>
@@ -437,18 +593,31 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
               />
             </label>
           </div>
-          <label className="dash-plan-field">
-            <span className="muted">每日复习上限</span>
-            <input
-              type="number"
-              min={0}
-              max={MAX_DAILY_CAP}
-              value={plan.dailyCap || ''}
-              placeholder="0 = 不限制"
-              onChange={(e) => setDailyCap(e.target.value)}
-            />
-          </label>
-          <p className="dash-plan-note muted">设为 0 表示不限制；设了考试日期时会按剩余天数自动收紧。</p>
+          <div className="dash-plan-row">
+            <label className="dash-plan-field">
+              <span className="muted">每日复习上限</span>
+              <input
+                type="number"
+                min={0}
+                max={MAX_DAILY_CAP}
+                value={plan.dailyCap || ''}
+                placeholder="0 = 不限制"
+                onChange={(e) => setDailyCap(e.target.value)}
+              />
+            </label>
+            <label className="dash-plan-field">
+              <span className="muted">每日新学上限</span>
+              <input
+                type="number"
+                min={0}
+                max={MAX_DAILY_CAP}
+                value={plan.newLimit || ''}
+                placeholder="0 = 不限制"
+                onChange={(e) => setNewLimit(e.target.value)}
+              />
+            </label>
+          </div>
+          <p className="dash-plan-note muted">都设为 0 表示不限制；复习上限截整条队列，新学上限只截还没学过的新卡，到期卡永远照复习。</p>
           <div className="dash-plan-row">
             <label className="dash-plan-check">
               <input type="checkbox" checked={rem.enabled} onChange={(e) => updateRem({ enabled: e.target.checked })} />
@@ -492,6 +661,6 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
           <span className="muted">载入笔记、题库、待办与学习记录，快速体验完整工作流</span>
         </div>
       </DialogSurface>
-    </div>
+    </PanelOverlay>
   );
 }

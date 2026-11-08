@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * 把外部素材洗成本项目自己的数据格式（医学速查：术语 / 症状 / 口诀）。
+ * 把外部素材洗成本项目自己的数据格式（医学速查：症状）。
  *
  * 为什么必须有这一步：原始文件里带着**别人的标识**——云端文档 id、原始分类名、
  * 作者自述。这些东西进仓库等于把来源写在脸上。
  *
  * 所以这里只做一件事：重排字段（换成 kq.medref.v1 的键），只保留内容本身。
- * 术语表不生成（产品上不需要那一栏）；公有领域口诀编在 src/core/publicMnemonics.ts 里。
+ * 术语表与中医口诀不生成：产品只保留症状速查，口诀由用户自行添加。
  * 产物写到 public/app-data/medref/，该目录**不进 git**（见 .gitignore）；
  * 仓库里只留本脚本，谁要用谁自己生成。
  *
@@ -48,20 +48,12 @@ function main() {
   console.log(`输出：${OUT}`);
 
   const symRaw = read('symptom_knowledge_data.json');
-  const mneRaw = read('tcm_mnemonics.json');
 
   write('medref/symptoms.json', {
     format: 'kq.medref.v1',
     symptoms: symRaw.items.map((s) => ({ name: s.symptom, cat: s.category, diseases: s.diseases ?? [] })),
   });
-  write('medref/mnemonics.json', {
-    format: 'kq.medref.v1',
-    books: mneRaw.libraries.map((lib) => ({
-      book: lib.specialty,
-      note: '', // 作者自述（source_note）属于来源标识，不进产物
-      entries: lib.entries.map((e) => ({ term: e.keyword, cat: e.category, body: e.detail, tip: e.mnemonic ?? '' })),
-    })),
-  });
+  // 不再输出 medref/mnemonics.json；旧产物由 loadMedRef 忽略，口诀页只保留用户自建条目。
 }
 
 main();

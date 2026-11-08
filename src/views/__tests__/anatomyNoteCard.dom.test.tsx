@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * 结构笔记卡片 DOM 测试（jsdom，不挂 WebGL）：
- * 守住「点结构 → 卡片浮在点击点旁 + 正文/空态 + CTA 接对回调」这条链路。
+ * 守住「点结构 → 卡片贴左边缘浮现 + 正文/空态 + CTA 接对回调」这条链路。
  * 定位数值由 core/anatomyCard 的纯函数决定（那边已有单测），这里只验接线是否真的接上。
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -101,12 +101,13 @@ describe('AnatomyNoteCard', () => {
     expect(props.onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('卡片落在点击点右下（相对舞台坐标），绘制前就已可见', async () => {
+  it('卡片贴舞台左边缘，纵向对齐点击点并避开顶部 chip 行', async () => {
     const { container } = renderCard();
     const card = container.querySelector<HTMLElement>('.anatomy-note-card')!;
-    // anchor(300,250) 相对舞台(100,50) = (200,200)，偏移 16 → (216,216)
-    await waitFor(() => expect(card.style.left).toBe('216px'));
-    expect(card.style.top).toBe('216px');
+    // anchor(300,250) 相对舞台(100,50) 的 y = 200，减去估计高度一半 150 → 50，
+    // 再被默认 topInset(56) 顶住；left 永远贴边距 12
+    await waitFor(() => expect(card.style.left).toBe('12px'));
+    expect(card.style.top).toBe('56px');
     expect(card.style.visibility).toBe('visible');
   });
 
@@ -118,12 +119,12 @@ describe('AnatomyNoteCard', () => {
     expect(Number.parseInt(card.style.top, 10)).toBeGreaterThanOrEqual(48);
   });
 
-  it('点靠近右边缘时翻到光标左侧且不越界（jsdom 下按估计尺寸算）', async () => {
+  it('点靠近右边缘时也不改变横向位置（卡片始终贴左）', async () => {
     const { container } = renderCard({ anchor: { x: 100 + 790, y: 250 } });
     const card = container.querySelector<HTMLElement>('.anatomy-note-card')!;
     await waitFor(() => expect(card.style.visibility).toBe('visible'));
     const left = Number.parseInt(card.style.left, 10);
-    expect(left).toBe(790 - CARD_ESTIMATE.width - 16);
+    expect(left).toBe(12);
     expect(left + CARD_ESTIMATE.width).toBeLessThanOrEqual(800 - 12);
   });
 });

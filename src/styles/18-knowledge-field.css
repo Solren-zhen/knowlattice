@@ -1,0 +1,28 @@
+/* ============================================================
+   知识星图背景层（core/knowledgeField.ts 创建并绘制）
+
+   它是 body 的固定子元素、z-index: 0；#root 是 z-index: 1，
+   所以星图永远在所有界面内容之下、在 body 底色之上。
+   线条颜色由 JS 从 --accent 取，这里不写颜色，换主题不用改本文件。
+   ============================================================ */
+
+.knowledge-field {
+  position: fixed;
+  inset: 0;
+  /* canvas 是替换元素：只写 inset:0 不会拉伸它，浏览器会拿 width 属性（设备像素）
+     当 CSS 尺寸，于是整张画布被放大 dpr 倍 —— 表现为「光斑永远在鼠标右边」。
+     必须显式给出 CSS 尺寸，1 CSS px 才等于 1 布局像素。 */
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  display: block;
+  pointer-events: none;
+}
+
+/* 打印与高对比度模式：装饰性画布一律不出现 */
+@media print {
+  .knowledge-field { display: none; }
+}
+@media (forced-colors: active) {
+  .knowledge-field { display: none; }
+}

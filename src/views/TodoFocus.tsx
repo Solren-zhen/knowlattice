@@ -24,12 +24,14 @@ interface Props {
   onReset: () => void;
   onSkip: () => void;
   onPickTask: (id: string | null) => void;
+  onPickSubject: (subject: string | null) => void;
+  subjects: readonly string[];
   onChangeConfig: (patch: Partial<PomodoroConfig>) => void;
 }
 
 export default function TodoFocus({
   state, cfg, remaining, progress, stats, todos,
-  onStart, onPause, onReset, onSkip, onPickTask, onChangeConfig,
+  onStart, onPause, onReset, onSkip, onPickTask, onPickSubject, subjects, onChangeConfig,
 }: Props) {
   const round = (state.focusDone % cfg.longEvery) + 1;
   const open = todos.filter((t) => !t.done);
@@ -97,6 +99,24 @@ export default function TodoFocus({
           ) : (
             <p className="muted wb-tip">选一条待办再开始：每完成一轮专注，它 +1 专注次数——投入是记出来的，不是估出来的。</p>
           )}
+        </section>
+
+        <section className="wb-card">
+          <h3 className="wb-card__title"><IconTimer size={14} /> 本次专注科目</h3>
+          <input
+            className="todo-input"
+            list="study-subjects"
+            aria-label="本次专注科目"
+            placeholder="如：数学、408、英语"
+            value={state.subject ?? ''}
+            onChange={(e) => onPickSubject(e.target.value.trim() ? e.target.value : null)}
+          />
+          <datalist id="study-subjects">
+            {subjects.map((name) => <option key={name} value={name} />)}
+          </datalist>
+          <p className="muted wb-tip">
+            科目会写进番茄记录，用来看「学习日历」里的每日与分科统计；不填归入「未分类」。
+          </p>
         </section>
 
         <section className="wb-card">

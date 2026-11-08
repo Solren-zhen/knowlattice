@@ -8,7 +8,7 @@
  * worker 不加载，PDF 面板静默渲染成一片空白（连 console 都没有报错）。
  *
  * 放在 `public/` 下的文件按原路径原样产出（不带 hash），
- * 于是 `./pdfjs/pdf.worker.min.js` 这个路径在 dev 与生产都成立。
+ * 于是 `./pdfjs/pdf.worker.min.mjs` 这个路径在 dev 与生产都成立。
  * public/tesseract、public/draco 走的是同一套思路。
  *
  * 除了 worker，还必须同步这两份：
@@ -18,10 +18,10 @@
  *    实测一份 UniGB-UCS2-H 单页 PDF：不配 CMap 时 0 字符，配上后 25 字符。
  *  - `standard_fonts/`：PDF 没内嵌标准 14 字体时，渲染层要拿这些替代字形。
  *
- * 顺带检查 `public/app-data/`：医学速查的数据不进仓库（见 .gitignore），由
- * `tools/ingest-app-data.mjs` 从本机素材目录生成，所以换机器/CI 构建时这里会是空的。
+ * 顺带检查 `public/app-data/medref/symptoms.json`：医学速查数据不进仓库（见 .gitignore），
+ * 由 `tools/ingest-app-data.mjs` 从本机素材目录生成，所以换机器/CI 构建时这里会是空的。
  * 缺了不让构建失败（其余功能不受影响），但必须当场说出来 —— 否则要等到打开
- * 「医学速查」才吃一个 404。同理见 src/core/medRef.ts 的报错文案。
+ * 「医学速查」才吃一个 404。口诀不再从 app-data 读取，只保留用户本机自建条目。
  */
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -31,9 +31,9 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const dist = (...p) => join(root, 'node_modules', 'pdfjs-dist', ...p);
 const destDir = join(root, 'public', 'pdfjs');
 
-const workerSrc = dist('build', 'pdf.worker.min.js');
-const workerDest = join(destDir, 'pdf.worker.min.js');
-const assetDirs = ['cmaps', 'standard_fonts'];
+const workerSrc = dist('build', 'pdf.worker.min.mjs');
+const workerDest = join(destDir, 'pdf.worker.min.mjs');
+const assetDirs = ['cmaps', 'standard_fonts', 'wasm', 'iccs'];
 
 if (!existsSync(workerSrc)) {
   console.error('[copy-pdf-worker] 找不到 pdfjs 的 worker：', workerSrc);
@@ -42,7 +42,7 @@ if (!existsSync(workerSrc)) {
 }
 mkdirSync(destDir, { recursive: true });
 copyFileSync(workerSrc, workerDest);
-console.log('[copy-pdf-worker] 已同步 pdf.worker.min.js → public/pdfjs/');
+console.log('[copy-pdf-worker] 已同步 pdf.worker.min.mjs → public/pdfjs/');
 
 for (const name of assetDirs) {
   const from = dist(name);
@@ -56,10 +56,10 @@ for (const name of assetDirs) {
 }
 
 const appDataDir = join(root, 'public', 'app-data', 'medref');
-const appDataCount = existsSync(appDataDir) ? readdirSync(appDataDir).length : 0;
-if (appDataCount === 0) {
-  console.warn('[copy-pdf-worker] public/app-data/medref/ 是空的：「医学速查」打开会报错。');
+const symptomData = join(appDataDir, 'symptoms.json');
+if (!existsSync(symptomData)) {
+  console.warn('[copy-pdf-worker] public/app-data/medref/symptoms.json 不存在：「医学速查」打开会报错。');
   console.warn('[copy-pdf-worker] 先在项目根跑：node tools/ingest-app-data.mjs');
 } else {
-  console.log(`[copy-pdf-worker] app-data 已就绪（medref ${appDataCount} 个文件）`);
+  console.log('[copy-pdf-worker] 医学速查症状数据已就绪');
 }

@@ -9,16 +9,23 @@ import { openPdf } from '../core/pdfLib';
 import { IconWand, IconClose } from './icons';
 import { toast } from '../core/feedback';
 import { netErrorHint } from '../core/netError';
+import PanelOverlay from './PanelOverlay';
+import type { ImageEntry } from '../core/imageLib';
+import ImagePickerSheet from './ImagePickerSheet';
 
 interface Props {
   /** 预填文本（来自编辑器选中内容） */
   initialText?: string;
   /** 入库：保存完整 md 笔记，返回路径 */
   onSave: (dir: string, title: string, content: string) => Promise<string>;
+  /** 图片来源：vault 附件图片条目；与 resolveAsset 同时存在时才显示「插图」入口 */
+  imageEntries?: ImageEntry[];
+  /** 附件路径 → 可显示的 URL（vault.readFile 结果）；与 imageEntries 配套 */
+  resolveAsset?: (path: string) => string | undefined;
   onClose: () => void;
 }
 
-export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
+export default function DraftGen({ initialText = '', onSave, imageEntries, resolveAsset, onClose }: Props) {
   // Esc 关闭；焦点在文本框里时先退出输入框，再按一次才关——避免草稿连同面板一起没了
   useEsc(escThenClose(onClose));
   const [text, setText] = useState(initialText);
@@ -27,6 +34,8 @@ export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
   const [tags, setTags] = useState('');
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** 审核阶段草稿正文的「插图」：内嵌图片选择器开关（题库边刷边记同款交互） */
+  const [pickerOpen, setPickerOpen] = useState(false);
   const pdfRef = useRef<HTMLInputElement>(null);
 
   /** PDF → 纯文本（pdf.js 懒加载，只有导入时才下载该 chunk） */
@@ -35,16 +44,20 @@ export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
     try {
       const buf = await file.arrayBuffer();
       const doc = await openPdf(buf);
-      let txt = '';
-      for (let p = 1; p <= doc.numPages; p++) {
-        const page = await doc.getPage(p);
-        const tc = await page.getTextContent();
-        txt += tc.items.map((it: { str?: string }) => (it.str ?? '')).join(' ') + '\n';
-        if (txt.length > 40000) break; // 过长只取前 40k 字符，防止卡顿
+      try {
+        let txt = '';
+        for (let p = 1; p <= doc.numPages; p++) {
+          const page = await doc.getPage(p);
+          const tc = await page.getTextContent();
+          txt += tc.items.map((it) => ('str' in it ? it.str : '')).join(' ') + '\n';
+          if (txt.length > 40000) break; // 过长只取前 40k 字符，防止卡顿
+        }
+        if (!txt.trim()) throw new Error('未提取到文字（可能是扫描版 PDF，需 OCR）');
+        setText(txt);
+        toast(`已提取 ${doc.numPages} 页文字，共 ${txt.length} 字，可点「生成草稿」`, 'ok');
+      } finally {
+        await doc.loadingTask.destroy();
       }
-      if (!txt.trim()) throw new Error('未提取到文字（可能是扫描版 PDF，需 OCR）');
-      setText(txt);
-      toast(`已提取 ${doc.numPages} 页文字，共 ${txt.length} 字，可点「生成草稿」`, 'ok');
     } catch (e) {
       toast(`PDF 导入失败：${(e as Error).message}`, 'err');
     } finally {
@@ -80,7 +93,7 @@ export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
   };
 
   return (
-    <div className="panel-backdrop quiz-overlay" onClick={onClose}>
+    <PanelOverlay tone="quiz" onClose={onClose}>
       <div className="quiz-panel draft-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head quiz-header">
           <span className="panel__title quiz-title">智能草稿 · 讲义转原子笔记</span>
@@ -147,6 +160,13 @@ export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
               value={draft.body}
               onChange={(e) => up({ body: e.target.value })}
             />
+            {imageEntries && resolveAsset && (
+              <div className="quiz-actions">
+                <button className="btn-small" onClick={() => setPickerOpen(true)} title="从图片库选一张图插入草稿（入库后正文按 Markdown 渲染图片）">
+                  插图
+                </button>
+              </div>
+            )}
             <div className="quiz-actions">
               <button className="btn-primary draft-gen" disabled={saving} onClick={() => void save()}>
                 {saving ? '保存中…' : '入库为笔记'}
@@ -154,9 +174,17 @@ export default function DraftGen({ initialText = '', onSave, onClose }: Props) {
               <button className="btn-small" onClick={() => setDraft(null)}>返回修改</button>
               <button className="btn-small" onClick={onClose}>取消</button>
             </div>
+            {pickerOpen && imageEntries && resolveAsset && (
+              <ImagePickerSheet
+                entries={imageEntries}
+                resolveAsset={resolveAsset}
+                onPick={(md) => up({ body: `${draft.body}\n\n${md}\n` })}
+                onClose={() => setPickerOpen(false)}
+              />
+            )}
           </div>
         )}
       </div>
-    </div>
+    </PanelOverlay>
   );
 }

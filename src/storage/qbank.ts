@@ -164,6 +164,11 @@ export async function removeQuestionStats(bank: string): Promise<void> {
   await tx.done;
 }
 
+/** 删除单题统计：数据自检修复悬空记录时用，不要按整库删。 */
+export async function removeQuestionStat(bank: string, qid: string): Promise<void> {
+  await (await getDB()).delete('stats', [bank, qid]);
+}
+
 export async function replaceQuestionStats(stats: StoredQuestionStat[]): Promise<void> {
   const db = await getDB();
   const tx = db.transaction('stats', 'readwrite');

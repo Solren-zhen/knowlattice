@@ -20,6 +20,7 @@ import { fmtDay, type StudyReport, type StudyReportRangePreset } from '../core/s
 import { useEsc } from './useEsc';
 import DialogSurface from './DialogSurface';
 import { IconClose } from './icons';
+import PanelOverlay from './PanelOverlay';
 
 /** 三个互斥档位。**文案留在面板**：core 只给字面量与边界计算，界面用词不该塞进纯函数模块 */
 const RANGE_PRESETS: Array<{ id: StudyReportRangePreset; label: string }> = [
@@ -140,7 +141,7 @@ export default function StudyReportPanel({
   };
 
   return (
-    <div className="panel-backdrop mistake-overlay" onClick={onClose}>
+    <PanelOverlay tone="mistakes" onClose={onClose}>
       <DialogSurface className="panel mistake-panel" label={report.title} onClick={(e) => e.stopPropagation()}>
         <div className="panel__head mistake-header">
           <span className="panel__title mistake-title">{report.title}</span>
@@ -160,11 +161,7 @@ export default function StudyReportPanel({
               塞到小节之间会让人先读到数字、后才发现口径不同。按钮复用既有 .chip / .chip.on
               （与错题本的过滤行同一套，见 MistakeBook 的 mistake-filter-row），不新增 CSS。 */}
           {onRangeChange && (
-            <div
-              role="group"
-              aria-label="报告时间范围"
-              style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: '0 var(--sp-3) var(--sp-2)' }}
-            >
+            <div className="report-ranges" role="group" aria-label="报告时间范围">
               <span className="muted">时间范围</span>
               {RANGE_PRESETS.map((p) => (
                 <button
@@ -199,10 +196,7 @@ export default function StudyReportPanel({
           )}
 
           {report.sufficient && report.highlights.length > 0 && (
-            <div
-              style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 var(--sp-3) var(--sp-3)' }}
-              aria-label="报告要点"
-            >
+            <div className="report-highlights" aria-label="报告要点">
               {report.highlights.map((h) => (
                 // 复用既有 .chip 的胶囊样式；它是纯展示（不可点），所以把 cursor 改回默认，
                 // 否则鼠标变成手型会让人以为「点一下能跳转」
@@ -211,14 +205,25 @@ export default function StudyReportPanel({
             </div>
           )}
 
+          {/* 顶部指标卡：与正文同源的结构化数字（core/studyReport.metrics），先给结论再给细节 */}
+          <div className="report-metrics" role="list" aria-label="关键指标">
+            {report.metrics.map((m) => (
+              <div key={m.label} className={`report-metric tone-${m.tone ?? 'plain'}`} role="listitem">
+                <span className="report-metric__label">{m.label}</span>
+                <b className="report-metric__value">{m.value}</b>
+                {m.hint && <span className="report-metric__hint">{m.hint}</span>}
+              </div>
+            ))}
+          </div>
+
           {report.sections.map((s) => (
-            <section key={s.heading} style={{ marginBottom: 12 }}>
-              <h4 style={{ margin: '8px 0 4px' }}>{s.heading}</h4>
+            <section key={s.heading} className="report-sec">
+              <h4 className="report-sec__title">{s.heading}</h4>
               <SectionBody body={s.body} />
             </section>
           ))}
         </div>
       </DialogSurface>
-    </div>
+    </PanelOverlay>
   );
 }

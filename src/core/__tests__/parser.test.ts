@@ -25,8 +25,7 @@ exam: [2023-生理-12]
     expect(r.meta.aliases).toEqual(['氧离曲线', '氧解离']);
     expect(r.meta.tags).toEqual(['生理学', '呼吸']);
     expect(r.meta.chapter).toBe('生理学');
-    expect(r.meta.source).toBe('讲义');
-    expect(r.meta.created).toBe('2026-01-02');
+    expect(r.meta.source).toBe('讲义');    expect(r.meta.created).toBe('2026-01-02');
     expect(r.meta.exam).toEqual(['2023-生理-12']);
     expect(r.title).toBe('氧解离曲线');
     // body 含一级标题行（frontmatter 之后整体为正文）
@@ -47,6 +46,13 @@ tags:
     const r = parseFrontmatter(raw);
     expect(r.meta.aliases).toEqual(['别名一', '别名二']);
     expect(r.meta.tags).toEqual(['t1']);
+  });
+
+  it('source 的 YAML 双引号会去掉（课程笔记按 URL 反解 bvid 依赖它）', () => {
+    const r = parseFrontmatter(
+      '---\nsource: "https://www.bilibili.com/video/BV1xx411c7mD"\n---\n# 标题\n',
+    );
+    expect(r.meta.source).toBe('https://www.bilibili.com/video/BV1xx411c7mD');
   });
 
   it('无 frontmatter 时原样返回正文', () => {

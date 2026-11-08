@@ -80,3 +80,22 @@ export function resetAchievements() {
     // 同上：清不掉也不该抛
   }
 }
+
+/** 备份用：只导出已解锁状态（未解锁项可由统计重算）。 */
+export function exportAchievements(): Achievement[] {
+  return loadAchievements();
+}
+
+/** 恢复用：按 id 合并，本机已有记录优先（旧备份不覆盖新解锁时间）。 */
+export function importAchievements(incoming: unknown): { added: number; kept: number } {
+  if (!Array.isArray(incoming)) return { added: 0, kept: 0 };
+  const current = loadAchievements();
+  const seen = new Set(current.map((a) => a.id));
+  const valid = incoming.filter(
+    (a): a is Achievement =>
+      !!a && typeof a === 'object' && typeof (a as Achievement).id === 'string',
+  );
+  const fresh = valid.filter((a) => !seen.has(a.id));
+  if (fresh.length > 0) saveAchievements([...current, ...fresh]);
+  return { added: fresh.length, kept: valid.length - fresh.length };
+}

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view';
+import { Compartment } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, undo, redo } from '@codemirror/commands';
 import {
   autocompletion,
@@ -18,7 +19,12 @@ import { languages } from '@codemirror/language-data';
 import { livePreview, toggleLivePreview } from '../core/livePreview';
 import { safeExternalUrl } from '../core/domSanitize';
 import { parseAnchorHref } from '../core/videoNotes';
+import { parseCourseAnchorHref, type CourseVideoRef } from '../core/courseNotes';
 import { FORMAT_KEYS, toggleCloze, toggleMark, wikiLink } from '../core/mdFormat';
+import {
+  KEYBINDING_EVENT, compactBinding, getBindings, toCodeMirrorKey, toCodeMirrorMac, type ShortcutId,
+} from '../core/keybindings';
+import { useKeybindings } from './useKeybindings';
 import { insertTable, tableSkeleton, TABLE_MAX_COLS, TABLE_MAX_ROWS, textToTable } from '../core/mdTable';
 import { blockRef, ensureBlockId } from '../core/blockAnchor';
 import { appendTableRow, insertFootnote } from '../core/footnote';
@@ -117,13 +123,30 @@ function selectPathwayBlock(view: EditorView, element: HTMLElement): boolean {
  * 五个格式命令：名称 + 键位（来自 core/mdFormat.ts）+ 动作。
  * 快捷键、右键菜单都由这张表生成，界面提示也从同一处取键名——改键不会再漏改提示。
  */
-const FORMAT_ACTIONS: Array<{ name: string; key: (typeof FORMAT_KEYS)[keyof typeof FORMAT_KEYS]; run: (v: EditorView) => void }> = [
-  { name: '加粗', key: FORMAT_KEYS.bold, run: (v) => applyMark(v, MARK_BOLD) },
-  { name: '高亮', key: FORMAT_KEYS.highlight, run: (v) => applyMark(v, MARK_HIGHLIGHT) },
-  { name: '斜体', key: FORMAT_KEYS.italic, run: (v) => applyMark(v, MARK_ITALIC) },
-  { name: '挖空', key: FORMAT_KEYS.cloze, run: (v) => applyCloze(v) },
-  { name: '插入双链', key: FORMAT_KEYS.wiki, run: (v) => applyWikiLink(v) },
+const FORMAT_ACTIONS: Array<{
+  id: ShortcutId;
+  name: string;
+  key: (typeof FORMAT_KEYS)[keyof typeof FORMAT_KEYS];
+  run: (v: EditorView) => void;
+}> = [
+  { id: 'bold', name: '加粗', key: FORMAT_KEYS.bold, run: (v) => applyMark(v, MARK_BOLD) },
+  { id: 'highlight', name: '高亮', key: FORMAT_KEYS.highlight, run: (v) => applyMark(v, MARK_HIGHLIGHT) },
+  { id: 'italic', name: '斜体', key: FORMAT_KEYS.italic, run: (v) => applyMark(v, MARK_ITALIC) },
+  { id: 'cloze', name: '挖空', key: FORMAT_KEYS.cloze, run: (v) => applyCloze(v) },
+  { id: 'wiki', name: '插入双链', key: FORMAT_KEYS.wiki, run: (v) => applyWikiLink(v) },
 ];
+
+/** 当前键表 → CodeMirror keymap；设置页改完通过 Compartment 热替换。 */
+function formatKeymapOf(keys: Record<ShortcutId, string>) {
+  return keymap.of(FORMAT_ACTIONS.map((a) => {
+    const binding = keys[a.id] ?? a.key.cm;
+    return {
+      key: toCodeMirrorKey(binding),
+      mac: toCodeMirrorMac(binding),
+      run: (v: EditorView) => { a.run(v); return true; },
+    };
+  }));
+}
 
 
 /** 读剪贴板：只有 Clipboard API 一条路，失败返回 null 由调用方提示（按 Ctrl+V 仍可粘贴） */
@@ -145,6 +168,8 @@ interface Props {
   onOpenLink?: (name: string) => void;
   /** 点 `[▶ 12:34](#vn=754)` 这类视频锚点：交给播放器 seek。返回 true 表示已处理 */
   onJumpAnchor?: (seconds: number) => boolean;
+  /** 点课程笔记里的 `[▶ 打开本节视频](#cw=...)`：交给 Workspace 打开对应分P */
+  onJumpCourse?: (ref: CourseVideoRef) => boolean;
   /** 粘贴/拖入图片时保存附件（Blob 直接入库，不转 base64），返回 vault 路径（M1 图片支持） */
   onAttach?: (filename: string, blob: Blob) => Promise<string>;
   /** 「草稿」按钮：把选中文本交给智能草稿 */
@@ -153,8 +178,8 @@ interface Props {
   onAskAi?: (text: string) => void;
   /** 右键菜单「收进生词本」：选中术语一键入册（一行一个，能拆出中英对照就自动分列） */
   onCollectWord?: (text: string) => void;
-  /** 注册需要在当前光标处执行的通路插入操作 */
-  onPathwayReady?: (insert: ((markdown: string) => void) | null) => void;
+  /** 注册在当前光标处插入 Markdown 的操作（PDF 摘录、图片等复用） */
+  onInsertReady?: (insert: ((markdown: string) => void) | null) => void;
   /** vault 相对路径 → 文件内容，用于实时预览内联渲染图片 */
   readFile?: (path: string) => string | undefined;
   /**
@@ -175,13 +200,17 @@ interface Props {
   onHistory?: () => void;
   /** 视频笔记（时间点锚点 / A-B 复读 / 收藏片段） */
   onVideo?: () => void;
+  /** 背诵：整屏只留这篇笔记与遮罩（不开分屏；分屏预览头部的「背诵」仍在） */
+  onRecite?: () => void;
   /** 注册「跳转到指定行」（本页目录点击 → 滚动 + 光标定位）；卸载时回调 null */
   onJumpReady?: (jump: ((line: number) => void) | null) => void;
 }
 
-export default function Editor({ value, onChange, linkNames = [], onOpenLink, onJumpAnchor, onAttach, onDraft, onAskAi, onCollectWord, onPathwayReady, readFile, highlight, headingLines = [], onActiveHeading, onJumpReady, noteName = '', onPrint, onHistory, onVideo }: Props) {
+export default function Editor({ value, onChange, linkNames = [], onOpenLink, onJumpAnchor, onJumpCourse, onAttach, onDraft, onAskAi, onCollectWord, onInsertReady, readFile, highlight, headingLines = [], onActiveHeading, onJumpReady, noteName = '', onPrint, onHistory, onVideo, onRecite }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const formatCompartment = useRef(new Compartment()).current;
+  const bindings = useKeybindings();
   const onChangeRef = useRef(onChange);
   const namesRef = useRef(linkNames);
   /** 预转小写的补全源：只在 linkNames 变化时重算，避免每个按键对全库名字重复 toLowerCase */
@@ -189,6 +218,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   const attachRef = useRef(onAttach);
   const openLinkRef = useRef(onOpenLink);
   const jumpAnchorRef = useRef(onJumpAnchor);
+  const jumpCourseRef = useRef(onJumpCourse);
   /** mousedown 命中过的链接部件（部件随即被换回源码，click 时只能靠它认目标） */
   const pressedLinkRef = useRef<{ kind: 'wiki' | 'link'; value: string; at: number } | null>(null);
   const readFileRef = useRef(readFile);
@@ -230,7 +260,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   const menuFocusRef = useRef(false);
   /** 程序化同步内容时置 true：dispatch 是同步的，可拦住 updateListener 的回声 onChange */
   const applyingRef = useRef(false);
-  const pathwayReadyRef = useRef(onPathwayReady);
+  const insertReadyRef = useRef(onInsertReady);
   /** 本页目录：标题行号 / 所在小节回调 / 上次通知的行号（跨节才通知，避免每键重渲染） */
   const headingLinesRef = useRef(headingLines);
   const activeHeadingRef = useRef(onActiveHeading);
@@ -244,10 +274,11 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
   attachRef.current = onAttach;
   openLinkRef.current = onOpenLink;
   jumpAnchorRef.current = onJumpAnchor;
+  jumpCourseRef.current = onJumpCourse;
   readFileRef.current = readFile;
   menuAtRef.current = setMenuAt;
   tableOpenRef.current = tableOpen;
-  pathwayReadyRef.current = onPathwayReady;
+  insertReadyRef.current = onInsertReady;
   headingLinesRef.current = headingLines;
   activeHeadingRef.current = onActiveHeading;
   jumpReadyRef.current = onJumpReady;
@@ -331,6 +362,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
         extensions: [
           lineNumbers(),
           history(),
+          formatCompartment.of(formatKeymapOf(getBindings())),
           keymap.of([
             // 撤销/重做无条件消费按键。CM 的 undo() 在撤销栈为空时返回 false，按键就没人拦，
             // 浏览器会对 contenteditable 跑原生撤销：把 DOM 退回挂载时的空内容，CM 再把这次
@@ -347,14 +379,8 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               key: 'Mod-Shift-z',
               run: (v) => { redo(v); return true; },
             },
-            // 行内格式快捷键：Alt+字母不与上面的撤销/重做冲突，也必须排在
-            // defaultKeymap、searchKeymap 之前，否则会被它们的同键绑定覆盖。
-            // 键位定义见 core/mdFormat.ts（工具栏提示与右键菜单同源）。
-            ...FORMAT_ACTIONS.map((a) => ({
-              key: a.key.cm,
-              mac: a.key.cmMac,
-              run: (v: EditorView) => { a.run(v); return true; },
-            })),
+            // 行内格式快捷键：键位来自 core/keybindings（设置页可改），用 Compartment 热替换。
+            // 必须排在 defaultKeymap、searchKeymap 之前，否则会被它们的同键绑定覆盖。
             // 行内格式键位在 Alt 系（见 core/mdFormat.ts），Ctrl/⌘ 系留给 CodeMirror。
             // 它们由 Workspace 里的应用级守卫统一消费——焦点在哪都拦得住，不必在这里再绑一遍。
             ...closeBracketsKeymap,
@@ -413,6 +439,12 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
               const linkEl = target.closest?.('.lp-link') as HTMLElement | null;
               if (linkEl) {
                 const url = linkEl.getAttribute('data-lp-url');
+                // 课程锚点 `#cw=BV...:p3[:t754]`：交给 Workspace 打开对应分P
+                const course = jumpCourseRef.current ? parseCourseAnchorHref(url) : null;
+                if (course && jumpCourseRef.current?.(course)) {
+                  e.preventDefault();
+                  return true;
+                }
                 // 视频锚点 `#vn=754`：交给播放器跳转，不走外链白名单（它不是外部地址）
                 if (url && jumpAnchorRef.current) {
                   const at = parseAnchorHref(url);
@@ -479,6 +511,8 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
                 if (col >= m.index && col <= m.index + m[0].length) {
                   e.preventDefault();
                   // 源码模式兜底同样过白名单（这里抓的是原文 URL，更要把不可信协议拦下）
+                  const course = jumpCourseRef.current ? parseCourseAnchorHref(m[2]) : null;
+                  if (course && jumpCourseRef.current?.(course)) { e.preventDefault(); return true; }
                   const at = jumpAnchorRef.current ? parseAnchorHref(m[2]) : null;
                   if (at != null && jumpAnchorRef.current?.(at)) { e.preventDefault(); return true; }
                   const safe = safeExternalUrl(m[2]);
@@ -577,7 +611,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
       }),
     });
     viewRef.current = view;
-    pathwayReadyRef.current?.((markdown) => {
+    insertReadyRef.current?.((markdown) => {
       const selection = view.state.selection.main;
       const before = view.state.sliceDoc(0, selection.from);
       const after = view.state.sliceDoc(selection.to);
@@ -606,13 +640,24 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
     return () => {
       host.removeEventListener('mousedown', rememberPressed, true);
       host.removeEventListener('wheel', routeWheel);
-      pathwayReadyRef.current?.(null);
+      insertReadyRef.current?.(null);
       jumpReadyRef.current?.(null);
       viewRef.current = null;
       view.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 设置页改格式键：不重建编辑器，只热替换 keymap 这一格
+  useEffect(() => {
+    const onChanged = () => {
+      viewRef.current?.dispatch({
+        effects: formatCompartment.reconfigure(formatKeymapOf(getBindings())),
+      });
+    };
+    window.addEventListener(KEYBINDING_EVENT, onChanged);
+    return () => window.removeEventListener(KEYBINDING_EVENT, onChanged);
+  }, [formatCompartment]);
 
   // 外部切换笔记时同步内容（程序化替换不回写 onChange，避免误标 dirty）
   useEffect(() => {
@@ -774,19 +819,19 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
     { label: '↺', title: '撤销（Ctrl/⌘+Z）', run: (v) => undo(v) },
     { label: '↻', title: '重做（Ctrl/⌘+Shift+Z 或 Ctrl+Y）', run: (v) => redo(v) },
     {
-      label: <b>B</b>, title: `加粗（${FORMAT_KEYS.bold.labelMac}，再按一次取消）`,
+      label: <b>B</b>, title: `加粗（${compactBinding(bindings.bold)}，再按一次取消）`,
       run: (v) => applyMark(v, MARK_BOLD),
     },
     {
-      label: '==', title: `高亮（${FORMAT_KEYS.highlight.labelMac}，再按一次取消）`,
+      label: '==', title: `高亮（${compactBinding(bindings.highlight)}，再按一次取消）`,
       run: (v) => applyMark(v, MARK_HIGHLIGHT),
     },
     {
-      label: '{{}}', title: `挖空（${FORMAT_KEYS.cloze.labelMac}，再按一次取消）：复习时被遮住，翻面后显示`,
+      label: '{{}}', title: `挖空（${compactBinding(bindings.cloze)}，再按一次取消）：复习时被遮住，翻面后显示`,
       run: (v) => applyCloze(v),
     },
     {
-      label: <i>I</i>, title: `斜体（${FORMAT_KEYS.italic.labelMac}，再按一次取消）`,
+      label: <i>I</i>, title: `斜体（${compactBinding(bindings.italic)}，再按一次取消）`,
       run: (v) => applyMark(v, MARK_ITALIC),
     },
     {
@@ -800,7 +845,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
     { label: '⇥', title: '缩进一层（Tab）', run: (v) => indentMore(v) },
     { label: '⇤', title: '反缩进（Shift+Tab）', run: (v) => indentLess(v) },
     {
-      label: '[[', title: `插入双链（${FORMAT_KEYS.wiki.labelMac}），接着输入笔记名可自动补全`,
+      label: '[[', title: `插入双链（${compactBinding(bindings.wiki)}），接着输入笔记名可自动补全`,
       run: (v) => applyWikiLink(v),
     },
     {
@@ -862,7 +907,7 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
 
   /** 选中文字后的右键菜单：格式一栏（另一种施加方式是快捷键），都不需要手打标记符 */
   const CTX_ACTIONS: Array<{ label: string; keys: string; run: (v: EditorView) => void }> =
-    FORMAT_ACTIONS.map((a) => ({ label: a.name, keys: a.key.label, run: a.run }));
+    FORMAT_ACTIONS.map((a) => ({ label: a.name, keys: compactBinding(bindings[a.id] ?? a.key.cm), run: a.run }));
 
   /** 接管了系统右键菜单，就得把它最常用的三项补回来，否则选中文字后点不到复制/粘贴 */
   const CTX_EDIT: Array<{ label: string; keys: string; run: (v: EditorView) => void }> = [
@@ -992,7 +1037,18 @@ export default function Editor({ value, onChange, linkNames = [], onOpenLink, on
         >
           <IconEye />
         </button>
-        <span className="cm-toolbar-hint muted">选中文字后右键，或按 {FORMAT_ACTIONS.map((a) => `${a.key.labelMac} ${a.name}`).join(' / ')}（标记符不会显示在正文里）</span>
+        {onRecite && (
+          <button
+            className="cm-tool-btn"
+            data-tip="背诵：整屏只留这篇笔记，{{挖空}} 被遮住，点一下揭开（空格逐条揭，Esc 退出）"
+            aria-label="背诵开关"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onRecite}
+          >
+            背
+          </button>
+        )}
+        <span className="cm-toolbar-hint muted">选中文字后右键，或按 {FORMAT_ACTIONS.map((a) => `${compactBinding(bindings[a.id] ?? a.key.cm)} ${a.name}`).join(' / ')}（标记符不会显示在正文里）</span>
       </div>
       <div className="editor-host" ref={hostRef} />
       {menuAt && (

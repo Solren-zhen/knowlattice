@@ -1,0 +1,512 @@
+/* ============================================================================
+   交互动效（第 2、3、4、5 项）：共享元素转场 / 趋势折线 / 底部抽屉
+   全部沿用既有令牌；静止态不加 transform、不跑动画。
+   ============================================================================ */
+
+/* ---- 1. 共享元素转场（第 2、3 项）----
+   由 core/viewMorph.ts 在点击那一刻给来源元素临时命名：工具栏胶囊 → 搜索面板、
+   列表行 → 笔记标题。尺寸与圆角由浏览器自动插值（999px → 20px 不需要逆圆角公式）。 */
+::view-transition-group(qs-morph) {
+  animation-duration: 340ms;
+  animation-timing-function: var(--ease-out);
+}
+::view-transition-group(note-title) {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-out);
+}
+/* 背景（含浮层遮罩）退得快一点：主角是那个形变的元素，不是整屏 */
+::view-transition-old(root) { animation: 140ms var(--ease-in) both vt-fade-out; }
+::view-transition-new(root) { animation: 220ms var(--ease-out) both vt-fade-in; }
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-fade-in { from { opacity: 0; } }
+/* 形变期间压掉面板自己的入场动画：形态层已经在把位置与尺寸算到终点，
+   再叠一个 pop-in 会让「落位」看起来抖两下。 */
+.morphing .qs-overlay,
+.morphing .qs-modal { animation: none; }
+
+/* ---- 2. 趋势折线（第 4 项）---- */
+.trend { display: flex; flex-direction: column; gap: 8px; }
+.trend-readout {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: var(--fs-caption); color: var(--text-2);
+}
+.trend-readout b {
+  font-family: var(--font-mono); font-size: var(--fs-display); font-weight: 700; line-height: 1;
+  color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+.trend-readout .trend-sep { color: var(--border-strong); }
+.trend-readout .trend-day {
+  margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  color: var(--accent); font-weight: 600;
+}
+.trend-plot {
+  position: relative; border-radius: var(--r-sm);
+  cursor: ew-resize; touch-action: pan-y;
+}
+.trend-plot svg { display: block; width: 100%; height: auto; }
+.trend-plot:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+.trend-baseline { stroke: var(--border); stroke-width: 1; }
+.trend-line { stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.trend-dot { fill: var(--accent); opacity: 0.55; }
+/* 选中的点做成「空心圆环」：与实心点区分开，又不用再画一层指示圆 */
+.trend-dot.is-active { opacity: 1; fill: var(--bg-raised); stroke: var(--accent); stroke-width: 2; }
+.trend-cursor { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
+.trend-axis {
+  display: flex; justify-content: space-between; margin-top: 4px;
+  font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+
+/* ---- 3. 底部抽屉（第 5 项）---- */
+.sheet-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(8, 9, 13, 0.5); backdrop-filter: blur(8px);
+  animation: fade-in var(--t-fast) var(--ease);
+}
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 101;
+  height: 94vh; display: flex; flex-direction: column;
+  will-change: transform;
+}
+.sheet-panel {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong); border-bottom: none;
+  border-radius: 20px 20px 0 0;
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+}
+.sheet-handle {
+  display: flex; align-items: center; justify-content: center;
+  height: 28px; flex-shrink: 0; cursor: grab; touch-action: none;
+}
+.sheet-handle::before {
+  content: ''; width: 36px; height: 4px; border-radius: 999px; background: var(--border-strong);
+}
+.sheet.is-dragging .sheet-handle { cursor: grabbing; }
+.sheet-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* 抽屉里的搜索面板：外框（圆角、描边、阴影）交给抽屉，面板自己退成一块纯内容区 */
+.sheet .qs-modal {
+  width: 100%; height: 100%; max-height: none;
+  border: none; border-radius: 0; box-shadow: none; animation: none;
+}
+
+/* ---- 4. 降级：系统减少动态效果 / html.no-morph ----
+   转场与动画全部让位，功能不变（抽屉照样能拖能关，只是不再有过渡）。 */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none !important; }
+  .sheet { will-change: auto; }
+}
+html.no-morph ::view-transition-group(*),
+html.no-morph ::view-transition-old(root),
+html.no-morph ::view-transition-new(root) { animation: none !important; }
+
+/* ============================================================ 考试中心 + 薄弱点可视化 */
+.exam-panel { max-width: 720px; }
+.exam-panel .panel__body.quiz-body { max-height: min(72vh, 720px); }
+.exam-timer { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent); margin-left: 8px; }
+.exam-timer.low { color: var(--danger); }
+
+.exam-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.exam-mode { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; padding: 14px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-raised); cursor: pointer; color: var(--text); }
+.exam-mode:hover:not(:disabled) { border-color: var(--border-accent); background: var(--accent-soft); }
+.exam-mode:disabled { opacity: .5; cursor: not-allowed; }
+.exam-mode b { font-size: 15px; }
+.exam-mode .muted { font-size: 12px; }
+
+.exam-bankrow { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.exam-bankrow select { flex: 1; max-width: 460px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--text); }
+
+.exam-palette { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+.exam-dot { width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--bg-raised); color: var(--muted); font-size: 12px; cursor: pointer; }
+.exam-dot.done { background: var(--accent-soft); border-color: var(--border-accent); color: var(--accent); }
+.exam-dot.cur { outline: 2px solid var(--accent-ring); border-color: var(--accent); color: var(--text); font-weight: 700; }
+
+.exam-chapters { margin: 12px 0; }
+.exam-chapters h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.exam-chapter-row { display: grid; grid-template-columns: minmax(80px, 1.4fr) 4fr auto; gap: 8px; align-items: center; margin-bottom: 5px; font-size: 13px; }
+.exam-chapter-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exam-chapter-track { height: 8px; border-radius: 4px; background: var(--panel-deep); overflow: hidden; }
+.exam-chapter-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+.exam-chapter-fill.low { background: var(--danger); }
+.exam-chapter-pct { font-variant-numeric: tabular-nums; color: var(--muted); }
+.exam-delta { margin: 6px 0; }
+
+.exam-week-bars, .dash-daily-dots { display: flex; gap: 5px; }
+.exam-week-cell, .dash-daily-dot { width: 16px; height: 16px; border-radius: 4px; background: var(--panel-deep); }
+.exam-week-cell.done, .dash-daily-dot.done { background: var(--success); }
+.exam-week-cell.partial, .dash-daily-dot.partial { background: var(--warn-border); }
+.exam-week-cell.today { outline: 2px solid var(--accent-ring); }
+
+.exam-hot, .exam-tags, .exam-week, .exam-history { margin: 14px 0; }
+.exam-hot h4, .exam-tags h4, .exam-week h4, .exam-history h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+.exam-hot-row, .exam-history-row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 8px; border-radius: 8px; font-size: 13px; }
+.exam-hot-row:nth-child(odd), .exam-history-row:nth-child(odd) { background: var(--panel); }
+.exam-hot-name, .exam-history-bank { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exam-history-score { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.exam-history-score.low { color: var(--danger); }
+.exam-tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.exam-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border-strong); white-space: nowrap; }
+.exam-tag--new { color: var(--muted); }
+.exam-tag--weak { color: var(--danger-text); border-color: rgba(220, 38, 38, .3); background: var(--danger-soft); }
+.exam-tag--solid { color: var(--success-text); border-color: rgba(16, 185, 129, .3); }
+.exam-tag--learning { color: var(--amber-text); }
+.exam-tag--highfreq { color: var(--accent); border-color: var(--border-accent); background: var(--accent-soft); }
+.exam-tag-list--diff { margin-top: 6px; }
+.exam-tag--diff-easy { color: var(--success-text); }
+.exam-tag--diff-medium { color: var(--amber-text); }
+.exam-tag--diff-hard { color: var(--danger-text); }
+.exam-tag--diff-unknown { color: var(--muted); }
+
+.quiz-tagrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; }
+
+/* 薄弱点雷达图 */
+.dash-weak { margin: 14px 0; }
+.dash-weak h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.dash-weak-body { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.dash-radar { width: 168px; height: 168px; flex: none; }
+.radar-ring { fill: none; stroke: var(--border-strong); stroke-width: .8; }
+.radar-spoke { stroke: var(--border); stroke-width: .8; }
+.radar-area { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+.radar-dot { fill: var(--accent); }
+.dash-weak-systems { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 200px; }
+.dash-sys-row { display: grid; grid-template-columns: minmax(70px, 1.2fr) 3fr auto; gap: 8px; align-items: center; font-size: 13px; }
+.dash-sys-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-sys-track { height: 8px; border-radius: 4px; background: var(--panel-deep); overflow: hidden; }
+.dash-sys-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+.dash-sys-fill.low { background: var(--danger); }
+.dash-sys-pct { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dash-weak-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: 13px; }
+.dash-weak-chip { padding: 2px 8px; border-radius: 999px; background: var(--danger-soft); color: var(--danger-text); }
+
+/* 成就（学习统计页）：21 个的网格。未解锁压暗、图标去色、给进度条；
+   本次新解锁的加一圈主色辉光（与同时弹出的 toast 呼应）。
+   等级不另设色相 —— 本项目的色板是单一极光靛蓝族，只靠 --accent 的深浅表达层级。 */
+.dash-ach { margin: 14px 0; }
+.dash-ach h4 { margin: 0 0 8px; font-size: 13px; color: var(--muted); display: flex; align-items: baseline; gap: 8px; }
+.dash-ach-count { font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.dash-ach-empty { margin: 0 0 8px; font-size: var(--fs-caption); line-height: 1.7; }
+.dash-ach-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+.dash-ach-item {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 9px 10px; border-radius: var(--r-md);
+  border: 1px solid var(--border); background: var(--bg-raised);
+  opacity: 0.55; transition: var(--tr-interact);
+}
+.dash-ach-item.on { opacity: 1; border-color: var(--border-accent); background: var(--accent-soft); }
+.dash-ach-item.fresh { box-shadow: var(--glow-accent); }
+.dash-ach-icon { font-size: 17px; line-height: 1.2; filter: grayscale(1); }
+.dash-ach-item.on .dash-ach-icon { filter: none; }
+.dash-ach-name { font-size: var(--fs-control); font-weight: 500; }
+.dash-ach-desc { font-size: var(--fs-micro); line-height: 1.4; }
+.dash-ach-track { display: block; height: 3px; margin-top: 3px; border-radius: 999px; background: var(--panel-deep); overflow: hidden; }
+.dash-ach-track > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.dash-ach-near { margin: 8px 0 0; font-size: var(--fs-caption); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dash-ach-near-chip { padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+/* 减少动态效果：成就格子的过渡是纯颜色/透明度，保留；只压掉新解锁的辉光脉冲 */
+@media (prefers-reduced-motion: reduce) {
+  .dash-ach-item.fresh { box-shadow: 0 0 0 1px var(--accent); }
+}
+
+/* 考试中心入口条（学习统计页） */
+/* 今天做什么：一行三项，数字大字在前。不做卡片——它上面刚有一排统计卡，
+   再来一排方块就分不清哪个是「现在要动手」的。 */
+.dash-today {
+  display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap;
+  margin: 12px 0; padding: 10px 12px;
+  border: 1px dashed var(--border-strong); border-radius: 12px;
+}
+.dash-today-label { align-self: center; font-size: var(--fs-caption); letter-spacing: .08em; }
+.dash-today-item {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel);
+  font-size: var(--fs-caption); color: var(--muted);
+  cursor: pointer; transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.dash-today-item b { font-size: 1.15em; color: var(--text); font-variant-numeric: tabular-nums; }
+.dash-today-item:hover:not(:disabled) { border-color: var(--border-accent); color: var(--text); }
+.dash-today-item:disabled { opacity: .55; cursor: default; }
+.dash-today-item.hot { border-color: var(--border-accent); }
+.dash-today-item.hot b { color: var(--accent); }
+.dash-today-item.done b { color: var(--success); }
+
+.dash-exam-center { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px; margin: 12px 0; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-raised); }
+.dash-exam-center-main { display: flex; flex-direction: column; flex: 1; min-width: 180px; }
+
+/* ============================================================================
+   交互动效编排 v2（有质感的高级动效）
+   ----------------------------------------------------------------------------
+   目标：把「界面出现」从瞬时切换变成有质量的编排——重物上浮、错峰落位、
+   指针物理、主操作扫过一道光。全部只动 transform / opacity / translate，
+   不触发重排；统一走 --ease-glide / --ease-spring 两条自定义曲线，
+   取代 linear / ease-in-out 的默认感（来源：high-end-visual-design 的运动编排
+   与 gpt-taste 的 hover 物理）。静止态一律不产生 transform。
+
+   安全设计：只有 <html class="motion-ready">（main.tsx 在允许动效时挂上）才进入
+   隐藏初态，且 core/motionChoreography.ts 有 1.6s 安全网与 reduced-motion 兜底——
+   JS 失效、IO 不触发、观察漏网都不会把内容永久藏起来。
+   ============================================================================ */
+
+/* ---- 1. 编排令牌 ---- */
+:root {
+  --ease-glide: cubic-bezier(0.32, 0.72, 0, 1);   /* 长位移：起步沉稳、收尾干净 */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1); /* 小元素落位：一点点回弹 */
+  --t-enter: 420ms;      /* 面板入场 */
+  --t-reveal: 560ms;     /* 视口内显现 */
+  --stagger-step: 55ms;  /* 错峰间隔 */
+  --reveal-shift: 12px;  /* 显现上浮距离 */
+  --reveal-scale: 0.99;  /* 显现起始缩放（几乎读不出，只让落位更「实」） */
+  /* JS 内联写入的变量在这里留默认值：无动效时 translate 退回 0，
+     同时让审计脚本的「令牌必须先定义」检查成立。 */
+  --reveal-i: 0;
+  --mag-x: 0px;
+  --mag-y: 0px;
+}
+
+/* ---- 2. 视口显现：错峰上浮（IntersectionObserver 驱动，不用 scroll 监听）----
+   延迟 = 序号 × 间隔，序号由 core/motionChoreography.ts 按 [data-stagger] 顺序写入。 */
+html.motion-ready [data-reveal] {
+  opacity: 0;
+  transform: translateY(var(--reveal-shift)) scale(var(--reveal-scale));
+  transition:
+    opacity var(--t-reveal) var(--ease-glide) calc(var(--reveal-i) * var(--stagger-step)),
+    transform var(--t-reveal) var(--ease-glide) calc(var(--reveal-i) * var(--stagger-step));
+}
+html.motion-ready [data-reveal].is-revealed {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---- 3. 面板入场：上浮 + 轻微放大，软着陆 ----
+   注意 .qs-modal（Ctrl+K 快速搜索）**不在**这里：它是 100+/天的键盘开关，
+   按 AUDIT.md §1 的频率表「命令面板：永不动画」（Raycast 同款做法），
+   所以它没有任何入场动画。
+   它必须用 :not(.qs-modal) 排除 —— Ctrl+K 的元素是 `class="panel qs-modal"`
+   （QuickSearch.tsx:162），只从选择器里摘掉 .qs-modal 是没用的，.panel 仍然命中。
+   .notice-panel 是独立的 class（SafetyNotice.tsx:36），不带 .panel。
+   另：这三类元素上曾各有一条更早的 animation 声明（pop-in / modal-in），
+   与下面这条同权重且被其覆盖，从未生效，已删除。 */
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.972); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.panel:not(.qs-modal), .notice-panel {
+  animation: panel-in var(--t-enter) var(--ease-glide);
+}
+/* 形变转场期间压掉入场：形态层已在把位置与尺寸算到终点，再叠一个 panel-in 会抖两下 */
+.morphing .panel, .morphing .notice-panel { animation: none; }
+
+/* ---- 4. 指针物理：主按钮磁吸（core/motionChoreography.ts 写 --mag-x/--mag-y）----
+   用独立的 translate 属性而不是 transform：把 transform 留给 :hover / :active 的
+   抬升与按压，两者互不覆盖（属性生效顺序 translate → rotate → scale → transform）。 */
+[data-magnet] { translate: var(--mag-x) var(--mag-y); }
+
+/* ---- 5. 图标动能（主按钮扫光已下线）----
+   原先这里有一条 600ms 的主按钮扫光（--t-sheen），每次 hover 都播一遍、
+   不传达任何状态，且是全文件最长的时长，已删除。
+   .btn-primary 的 position / overflow / isolation 保留：::after 是 inset:0 的
+   绝对定位按下涟漪，需要父级 position: relative。 */
+.btn-primary { position: relative; overflow: hidden; isolation: isolate; }
+
+/* 带图标的按钮：hover 时图标轻微上抬放大，给出「可点」的动能 */
+.btn > svg, .btn-small > svg, .btn-icon > svg { transition: transform var(--t-fast) var(--ease-spring); }
+.btn:hover > svg, .btn-small:hover > svg { transform: translateY(-1px) scale(1.08); }
+
+/* ---- 6. 导航轨 hover：只保留状态指示（底色 / 文字色 / 阴影）----
+   导航轨属于「每天数十次」的高频面（AUDIT.md §1 频率表：删掉或大幅削减）。
+   这里原先同时跑三个动效 —— 按钮抬升、图标放大到 1.1、标签侧移 2px，
+   其中图标用的是过冲 1.4 的 --ease-spring，也是全应用唯一 scale-on-hover 的地方。
+   位移已全部移除；按下态（.rail-btn:active）保留，它传达的是状态而非装饰。 */
+.rail--expanded .rail-label {
+  transition: color var(--t-fast) var(--ease);
+}
+
+/* ---- 7. 降级：系统「减少动态效果」或 <html class="no-motion"> ----
+   内容一律照常可见，只是不再动。延迟必须显式清零：全局兜底只压 animation-duration，
+   压不住 transition-delay，否则显现项要等半秒才浮现。 */
+@media (prefers-reduced-motion: reduce) {
+  html.motion-ready [data-reveal] { opacity: 1; transform: none; transition: none; }
+  .panel, .notice-panel { animation: none; }
+  [data-magnet] { translate: none; }
+  /* 只保留仍在使用的图标动能（.btn / .btn-small，第 004 项没删它们）。
+     这里原有三条已随之失效的声明，已一并删除：
+       .btn-primary::before { transition: none }        —— 扫光已在 005 删除
+       .rail-btn:hover svg { transform: none }          —— 位移已在 004 删除
+       .rail--expanded .rail-btn:hover .rail-label …    —— 同上 */
+  .btn:hover > svg,
+  .btn-small:hover > svg { transform: none; }
+}
+html.no-motion [data-reveal] { opacity: 1; transform: none; transition: none; }
+html.no-motion .panel,
+html.no-motion .qs-modal,
+html.no-motion .notice-panel { animation: none; }
+html.no-motion [data-magnet] { translate: none; }
+
+/* ============================================================================
+   交互动效编排 v3：签名级交互
+   1) 导航轨「墨迹」滑动指示器（core/navIndicator.ts 放置）
+   2) 数字滚动（core/countUp.ts 驱动，无 CSS）
+   3) 图表绘制入场（transform-only：柱 scaleY / 条 scaleX / 雷达缩放）
+   4) 主题切换圆形揭示（View Transitions）
+   5) 主操作「按钮里的按钮」尾随图标
+   6) 反馈气泡 / 确认框弹簧落位
+   ============================================================================ */
+
+/* ---- 1. 导航轨滑动指示器 ----
+   一枚共享元素在 .rail-scroll 内跟随当前 .on 按钮的位置滑动（弹簧）。
+   不覆盖 .on 按钮自身的底色，只接管原本「每个按钮一条」的左侧竖条：
+   挂 html.nav-ink 后隐藏各按钮自己的 ::before，避免两条同时出现。 */
+.rail-scroll { position: relative; }
+.rail-indicator {
+  position: absolute; left: 0; top: 0; width: 3.5px; height: 20px; z-index: 2;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  opacity: 0; pointer-events: none;
+  will-change: transform;
+}
+.rail-indicator.on { opacity: 1; transition: opacity var(--t-fast) var(--ease); }
+html.nav-ink .rail-btn.on::before { display: none; }
+
+/* ---- 3. 图表绘制入场 ----
+   只在「已显现」的容器里跑，避免动画在元素还隐藏时就已放完。全部走 transform。 */
+.dash-bar { transform-origin: bottom center; }
+.dash-calib-fill, .dash-sys-fill, .exam-chapter-fill { transform-origin: left center; }
+.dash-radar { transform-origin: 50% 50%; }
+html.motion-ready [data-reveal].is-revealed .dash-bar {
+  animation: grow-y var(--t-reveal) var(--ease-glide) backwards;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+@keyframes grow-y { from { transform: scaleY(0); } }
+html.motion-ready [data-reveal].is-revealed .dash-calib-fill,
+html.motion-ready [data-reveal].is-revealed .dash-sys-fill {
+  animation: grow-x var(--t-reveal) var(--ease-glide) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+@keyframes grow-x { from { transform: scaleX(0); } }
+html.motion-ready [data-reveal].is-revealed .dash-radar {
+  animation: radar-in var(--t-enter) var(--ease-spring) backwards;
+}
+@keyframes radar-in { from { opacity: 0; transform: scale(0.9); } }
+
+/* ---- 4. 主题切换圆形揭示 ---- */
+:root { --theme-x: 50%; --theme-y: 50%; }
+html.theme-switching::view-transition-old(root) { animation: none; }
+html.theme-switching::view-transition-new(root) { animation: theme-reveal 560ms var(--ease-glide); }
+@keyframes theme-reveal {
+  from { clip-path: circle(0% at var(--theme-x) var(--theme-y)); }
+  to   { clip-path: circle(150% at var(--theme-x) var(--theme-y)); }
+}
+
+/* ---- 5. 主按钮「按钮里的按钮」尾随图标 ---- */
+.btn-trail {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex: none; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  transition: transform var(--t-med) var(--ease-spring), background-color var(--t-fast) var(--ease);
+}
+.btn-primary:hover .btn-trail { transform: translate(2px, -1px) scale(1.06); background: rgba(255, 255, 255, 0.3); }
+
+/* ---- 6. 反馈气泡 / 确认框：弹簧落位 ---- */
+.mv-toast.on { transition: opacity 200ms var(--ease-out), transform var(--t-med) var(--ease-spring); }
+.mv-confirm-overlay.on .mv-confirm { transition: transform var(--t-med) var(--ease-spring); }
+
+/* ---- 7. 降级 ---- */
+@media (prefers-reduced-motion: reduce) {
+  .rail-indicator.on { transition: none; }
+  html.motion-ready [data-reveal].is-revealed .dash-bar,
+  html.motion-ready [data-reveal].is-revealed .dash-calib-fill,
+  html.motion-ready [data-reveal].is-revealed .dash-sys-fill,
+  html.motion-ready [data-reveal].is-revealed .dash-radar { animation: none; }
+  html.theme-switching::view-transition-new(root) { animation: none; }
+  .btn-primary:hover .btn-trail { transform: none; }
+}
+html.no-motion .rail-indicator.on { transition: none; }
+html.no-motion [data-reveal] .dash-bar,
+html.no-motion [data-reveal] .dash-calib-fill,
+html.no-motion [data-reveal] .dash-sys-fill,
+html.no-motion [data-reveal] .dash-radar { animation: none; }
+html.no-motion .btn-primary:hover .btn-trail { transform: none; }
+
+/* ============================================================================
+   交互动效编排 v4：跟随式动效（指针跟光 + 选择滑动）
+   ----------------------------------------------------------------------------
+   1) 指针跟光：core/hoverGlow.ts 把指针在元素内的局部坐标写进 --glow-x / --glow-y，
+      这里只负责画一块柔光。用 background-image 而不是伪元素：.tree-row.active 的竖条、
+      .dash-card 的描边环已经占了 ::before，背景图层与既有的 background-color 分层共存，
+      互不覆盖，也不需要给行加 position:relative。
+   2) 选择滑动：core/selectionGlide.ts 在每个匹配容器里放一枚 .glide-ink，活动项的高亮
+      由它滑过去（键盘 ↑↓ / 指针划过都算）。挂 html.glide-ink-on 后隐藏活动项自己的底色，
+      避免「墨迹 + 底色」两层重叠。
+   两条都只动 background-image / transform，不触发重排；开关由 motionPrefs 决定，
+   减少动态效果时跟光不出现（JS 不写坐标）、墨迹落位不做过渡（全局兜底 + 下面显式声明）。
+   ============================================================================ */
+
+:root {
+  /* JS 内联写入前的默认值：无动效时坐标退回中心，柔光居中、稳定可见 */
+  --glow-x: 50%;
+  --glow-y: 50%;
+  --glow-size: 240px;   /* 柔光半径 */
+  --glow-tint: 20%;     /* 柔光强度（相对强调色） */
+  --glow-paint: radial-gradient(
+    var(--glow-size) circle at var(--glow-x) var(--glow-y),
+    color-mix(in srgb, var(--accent) var(--glow-tint), transparent),
+    transparent 72%
+  );
+}
+
+/* ---- 1. 指针跟光 ---- */
+.qs-item[data-glow-on],
+.tree-row[data-glow-on],
+.todo-item[data-glow-on],
+.todo-side__item[data-glow-on],
+[data-glow][data-glow-on] {
+  background-image: var(--glow-paint);
+}
+/* 活动/选中行用 background 简写写了整条背景，会把自己的 background-image 清成 none；
+   这几条同特异性、位置更靠后，把柔光重新叠回去（底色仍由各自规则决定）。 */
+.tree-row.file.active[data-glow-on],
+.todo-item.sel[data-glow-on],
+.todo-side__item.active[data-glow-on],
+.qs-item.active[data-glow-on] {
+  background-image: var(--glow-paint);
+}
+
+/* ---- 2. 选择滑动 ---- */
+.qs-results,
+.todo-side__group { position: relative; }
+.glide-ink {
+  position: absolute; left: 0; top: 0; z-index: 0;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--border-accent);
+  box-shadow: 0 2px 10px var(--accent-soft);
+  opacity: 0; pointer-events: none;
+  will-change: transform;
+  /* transform-origin 必须是左上角：core/selectionGlide.ts 现在用 translate + scale
+     表达位置与尺寸，若原点在中心，scale 会把墨迹从中心放大而整体跑偏。 */
+  transform-origin: 0 0;
+  /* 只过渡 transform 与 opacity：width / height 是布局属性，
+     键盘 ↑↓ 每切一次都会触发一次布局 + 绘制（第 012 项）。 */
+  transition:
+    transform var(--t-med) var(--ease-spring),
+    opacity var(--t-fast) var(--ease);
+}
+.todo-side__group .glide-ink { border-radius: var(--r-sm); }
+.glide-ink.on { opacity: 1; }
+/* 内容压在墨迹之上 */
+html.glide-ink-on .qs-results .qs-item,
+html.glide-ink-on .todo-side__group .todo-side__item { position: relative; z-index: 1; }
+/* 活动项自己不再画底色，只留文字强调：高亮由墨迹这一层提供 */
+html.glide-ink-on .qs-results .qs-item.active,
+html.glide-ink-on .todo-side__group .todo-side__item.active {
+  background: transparent; border-color: transparent; box-shadow: none;
+}
+
+/* ---- 3. 降级 ---- */
+@media (prefers-reduced-motion: reduce) {
+  .glide-ink { transition: none; }
+}
+html.no-motion .glide-ink { transition: none; }

@@ -19,6 +19,7 @@ import { hasChosenVault, getStoredVaultDir, storeVaultDir, pickVaultFolder, auth
 import { migrateIndexedDbToFolder } from '../storage/migrateToFolder';
 import { parseFrontmatterCached } from './parser';
 import { rebuildLinkIndex, updateLinksForPath, backlinks, type LinkIndex } from './linkIndex';
+import { collectBacklinkHits } from './backlinks';
 import { exportSrsState, importSrsState } from './srs';
 import { exportQbanks, importQbanks } from './qbank';
 import { exportQuestionStats, importQuestionStats } from './qbankStats';
@@ -44,11 +45,30 @@ import { exportPomodoros, importPomodoros } from './pomodoro';
 import { pushSnapshot } from './history';
 import { repairMarkdown, type MarkdownRepairChange } from './markdownRepair';
 import { exportPathwayTemplates, importPathwayTemplates } from './pathwayTemplates';
+import { exportDrillBackup, importDrillBackup } from './wordDrill';
+import { exportMastery, importMastery } from './tutor';
+import { exportDayNotes, importDayNotes } from './studyCalendar';
+import { exportExcerpts, importExcerpts } from './pdfExcerpts';
+import { exportMedRef, importMedRef } from './medRefStore';
+import { exportAchievements, importAchievements } from './achievementStore';
+import { exportBindings, importBindings } from './keybindings';
+import { exportStudyLog, importStudyLog } from './studyLog';
+import { exportGeneratedCards, importGeneratedCards } from './generatedCards';
 import { attachmentCandidates, basenameIndex } from './imageRef';
 import { splitHeadingAnchor } from './outline';
 import { enqueueWrite } from './writeQueue';
 import { planMerge, formatConflictStamp, pickNewObjectKeys, pickNewListItems, type ExistingFile } from './restoreMerge';
 import { toast } from './feedback';
+import { tauriErrorText } from '../storage/tauriError';
+
+/**
+ * 备份恢复完成后向视图层广播的事件名。
+ *
+ * 恢复会直接改写一批存储键（AI 会话/偏好、词组、快捷键……），而常驻面板往往在挂载时
+ * 读过一次、之后只写不读——不通知的话，面板下一次持久化会用内存里的旧态把恢复内容
+ * 整体覆盖回去。core 不能 import views，事件名只能在这里定义、视图层 import。
+ */
+export const BACKUP_RESTORED_EVENT = 'knowlattice-backup-restored';
 
 export interface TreeNode {
   name: string;
@@ -151,7 +171,7 @@ function prepareTauriVault(): Promise<void> {
       if (dir) adapter = new TauriAdapter(dir);
     }
     await authorizeVaultDir(getStoredVaultDir()).catch((e) => {
-      console.warn('vault 目录授权失败（将依赖上次会话的授权）：', e);
+      console.warn('vault 目录授权失败（将依赖上次会话的授权）：', tauriErrorText(e));
     });
     try {
       const r = await migrateIndexedDbToFolder(adapter);
@@ -364,6 +384,97 @@ async function mergeListStore(
   const { fresh, added, kept } = pickNewListItems(incoming, existingKeys, keyOf);
   if (added > 0) await apply(fresh);
   return { name, added, kept };
+}
+
+/** 直读一个 localStorage JSON 值（备份导出用）：缺键 / 坏 JSON / 无存储环境返回 undefined */
+function exportRawJson(key: string): unknown {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? undefined : JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+/** AI 助手会话的最小形状校验（与 views/agentChat.loadSessions 同口径：id 字符串 + items 数组） */
+function isAgentSession(s: unknown): s is { id: string; items: unknown[] } {
+  return !!s && typeof s === 'object'
+    && typeof (s as { id?: unknown }).id === 'string'
+    && Array.isArray((s as { items?: unknown }).items);
+}
+
+/**
+ * AI 助手会话备份恢复：按会话 id「只补不覆盖」。
+ * 会话的常规持久化在 views/agentChat（core 不得 import views），这里按同一校验口径直接
+ * 操作原始键；本地坏 JSON 当空表处理——恢复只补新会话，绝不因本地数据损坏而报错中断。
+ */
+function mergeAgentSessions(incoming: unknown): StoreMerge {
+  const NAME = 'AI 助手会话';
+  const KEY = 'knowlattice-ai-agent-sessions';
+  if (!Array.isArray(incoming)) return { name: NAME, added: 0, kept: 0 };
+  const valid = incoming.filter(isAgentSession);
+  let current: Array<{ id: string; items: unknown[] }> = [];
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) current = parsed.filter(isAgentSession);
+    }
+  } catch { /* 本地坏 JSON 当空表 */ }
+  const have = new Set(current.map((s) => s.id));
+  const fresh = valid.filter((s) => !have.has(s.id));
+  const kept = valid.length - fresh.length;
+  if (fresh.length === 0) return { name: NAME, added: 0, kept };
+  try {
+    localStorage.setItem(KEY, JSON.stringify([...current, ...fresh]));
+  } catch {
+    return { name: NAME, added: 0, kept }; // 配额满：会话不写入，静默降级与各 importer 一致
+  }
+  return { name: NAME, added: fresh.length, kept };
+}
+
+/** AI 助手偏好备份恢复：逐键「只补不覆盖」（现有键保留，只补本地没有的键） */
+function mergeAgentPrefs(incoming: unknown): StoreMerge {
+  const NAME = 'AI 助手偏好';
+  const KEY = 'knowlattice-ai-agent-prefs';
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return { name: NAME, added: 0, kept: 0 };
+  const inc = incoming as Record<string, unknown>;
+  let current: Record<string, unknown> = {};
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) current = parsed as Record<string, unknown>;
+    }
+  } catch { /* 同上 */ }
+  const freshEntries = Object.entries(inc).filter(([k]) => !(k in current));
+  const total = Object.keys(inc).length;
+  if (freshEntries.length === 0) return { name: NAME, added: 0, kept: total };
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ ...current, ...Object.fromEntries(freshEntries) }));
+  } catch {
+    return { name: NAME, added: 0, kept: total };
+  }
+  return { name: NAME, added: freshEntries.length, kept: total - freshEntries.length };
+}
+
+/**
+ * 用户等价词组备份恢复：string[][] 没有身份键，按整值处理——本地已有就保留现有值
+ * （只补不覆盖的保守语义），本地没有才整块写入。
+ */
+function mergeMedSynonyms(incoming: unknown): StoreMerge {
+  const NAME = '等价词组';
+  const KEY = 'knowlattice.medSynonyms';
+  if (!Array.isArray(incoming)) return { name: NAME, added: 0, kept: 0 };
+  let exists = false;
+  try { exists = localStorage.getItem(KEY) !== null; } catch { /* 无存储环境 */ }
+  if (exists) return { name: NAME, added: 0, kept: incoming.length };
+  try {
+    localStorage.setItem(KEY, JSON.stringify(incoming));
+  } catch {
+    return { name: NAME, added: 0, kept: incoming.length };
+  }
+  return { name: NAME, added: incoming.length, kept: 0 };
 }
 
 /**
@@ -885,9 +996,11 @@ export function useVault() {
       console.error('PDF 书架备份失败：', e);
     }
     const files = [...fileMap].map(([path, content]) => ({ path, content }));
+    // 短文历史只在备份时加载：静态引入会把整套写作/精读逻辑塞进主包（体积预算会红）
+    const { loadStoryArchive } = await import('./wordStory');
     const payload = {
       app: 'knowlattice',
-      version: 15,
+      version: 18,
       exportedAt: new Date().toISOString(),
       files,
       // v2 起随备份保存 SRS 复习调度进度（旧版备份无此字段，导入时自动跳过）
@@ -940,6 +1053,24 @@ export function useVault() {
       videoClips: exportClips(),
       // v15：PDF 书架正文与阅读进度
       pdfBooks,
+      // v16：补齐此前只活在 localStorage、换设备就丢的用户数据
+      wordDrill: exportDrillBackup(),
+      // v18：单词工坊生成短文的历史（独立存储键，不属于练习记录）
+      wordStories: loadStoryArchive(),
+      tutorMastery: exportMastery(),
+      dayNotes: exportDayNotes(),
+      pdfExcerpts: exportExcerpts(),
+      medRef: exportMedRef(),
+      achievements: exportAchievements(),
+      keybindings: exportBindings(),
+      studyLog: exportStudyLog(),
+      generatedCards: exportGeneratedCards(),
+      // v17：补上 AI 助手会话与偏好、用户等价词组——最后一批换设备就丢的 localStorage 用户数据。
+      // 三者没有 core 层导出器（会话/偏好的读写方在 views/agentChat，core 不能反向依赖 views），
+      // 按各存储的原始 JSON 格式直读；坏 JSON / 缺键时字段为 undefined，导入端按缺字段跳过。
+      agentSessions: exportRawJson('knowlattice-ai-agent-sessions'),
+      agentPrefs: exportRawJson('knowlattice-ai-agent-prefs'),
+      medSynonyms: exportRawJson('knowlattice.medSynonyms'),
     };
     const blob = new Blob([JSON.stringify(payload)], {
       type: 'application/json',
@@ -985,6 +1116,19 @@ export function useVault() {
       vocab?: unknown;
       videoClips?: unknown;
       pdfBooks?: unknown;
+      wordDrill?: unknown;
+      wordStories?: unknown;
+      tutorMastery?: unknown;
+      dayNotes?: unknown;
+      pdfExcerpts?: unknown;
+      medRef?: unknown;
+      achievements?: unknown;
+      keybindings?: unknown;
+      studyLog?: unknown;
+      generatedCards?: unknown;
+      agentSessions?: unknown;
+      agentPrefs?: unknown;
+      medSynonyms?: unknown;
     };
     // 兼容旧版以 medvault 命名的备份：两版文件结构一致，只有 app 字段不同
     if ((data.app !== 'knowlattice' && data.app !== 'medvault') || !Array.isArray(data.files)) {
@@ -1180,6 +1324,64 @@ export function useVault() {
       } catch (e) {
         console.error('PDF 书架恢复失败：', e);
       }
+    }
+
+    /* v16 起补齐的「只活在 localStorage」的用户数据。v15 及更早备份没有这些字段：逐个 if 把关，
+       缺字段直接跳过，旧备份照旧恢复成功。全部只补不覆盖。 */
+    if (data.wordDrill) {
+      const merged = importDrillBackup(data.wordDrill);
+      storeMerges.push({ name: '单词工坊', added: merged.added, kept: merged.kept });
+    }
+    if (data.wordStories) {
+      const { importStoryArchiveBackup } = await import('./wordStory');
+      const merged = importStoryArchiveBackup(data.wordStories);
+      storeMerges.push({ name: '单词工坊短文', added: merged.added, kept: merged.kept });
+    }
+    if (data.tutorMastery) {
+      const merged = importMastery(data.tutorMastery);
+      storeMerges.push({ name: '导师掌握度', added: merged.added, kept: merged.kept });
+    }
+    if (data.dayNotes) {
+      const merged = importDayNotes(data.dayNotes);
+      storeMerges.push({ name: '每日小结', added: merged.added, kept: merged.kept });
+    }
+    if (data.pdfExcerpts) {
+      const merged = importExcerpts(data.pdfExcerpts);
+      storeMerges.push({ name: 'PDF 摘录', added: merged.added, kept: merged.kept });
+    }
+    if (data.medRef) {
+      const merged = importMedRef(data.medRef);
+      storeMerges.push({ name: '医学速查', added: merged.added, kept: merged.kept });
+    }
+    if (data.achievements) {
+      const merged = importAchievements(data.achievements);
+      storeMerges.push({ name: '成就', added: merged.added, kept: merged.kept });
+    }
+    if (data.keybindings) {
+      const merged = importBindings(data.keybindings);
+      storeMerges.push({ name: '快捷键', added: merged.added, kept: merged.kept });
+    }
+    if (data.studyLog) {
+      const merged = importStudyLog(data.studyLog);
+      storeMerges.push({ name: '每日学习流水', added: merged.added, kept: merged.kept });
+    }
+    if (data.generatedCards) {
+      const merged = importGeneratedCards(data.generatedCards);
+      storeMerges.push({ name: '错题复习卡', added: merged.added, kept: merged.kept });
+    }
+    // v17 起补上 AI 助手会话与偏好、用户等价词组；旧备份无这些字段时跳过，全部只补不覆盖。
+    if (data.agentSessions) {
+      storeMerges.push(mergeAgentSessions(data.agentSessions));
+    }
+    if (data.agentPrefs) {
+      storeMerges.push(mergeAgentPrefs(data.agentPrefs));
+    }
+    if (data.medSynonyms) {
+      storeMerges.push(mergeMedSynonyms(data.medSynonyms));
+    }
+    // 上面的合并直接写存储键；广播给常驻面板重读，否则它们的内存态会把恢复内容覆盖回去
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(BACKUP_RESTORED_EVENT));
     }
 
     // 并入内存缓存 + 增量更新链接索引（新增的与冲突另存的都算「这次写进去的」）
@@ -1615,6 +1817,20 @@ export function useVault() {
     // docs 变化即重算：保存/删除他人笔记改变了 incoming 时，这里也要刷新
   }, [currentPath, docs, linkIndex]);
 
+  /**
+   * 反链明细：位置 + 上下文 + 是否失效。
+   *
+   * `currentBacklinks` 只给路径（老调用方继续用），这里是同一批数据的富投影：
+   * 关联面板要显示「引用在原文的哪一句」，以及「名字写错了、本该指向你」的那几条。
+   * 索引与解析器复用同一份（linkIndex / resolveLink），不另建一套。
+   */
+  const backlinkHits = useMemo(() => {
+    if (!currentPath) return [];
+    const content = docs.get(currentPath) ?? '';
+    const title = content ? getMeta(currentPath, content).title : '';
+    return collectBacklinkHits(currentPath, docs, resolveLink, title ? [title] : []);
+  }, [currentPath, docs, resolveLink]);
+
   return {
     loaded,
     loadError,
@@ -1628,6 +1844,8 @@ export function useVault() {
     setCurrentPath,
     currentContent,
     currentBacklinks,
+    /** 关联面板用的反链明细（含上下文与失效标记） */
+    backlinkHits,
     resolveLink,
     allLinkNames,
     save,

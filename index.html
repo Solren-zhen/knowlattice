@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#4f46e5" />
     <link rel="manifest" href="./manifest.webmanifest" />
@@ -10,6 +10,18 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- 液态玻璃折射滤镜（定义放这里，避免运行时注入造成一帧「没有折射」的闪烁）。
+         feTurbulence 生成低频起伏，再用 feDisplacementMap 把玻璃背后的画面推开：
+         这是 backdrop-filter 唯一能做出「厚度」的方式。
+         只在 core/liquidGlass.ts 判定支持且帧率够时才会被引用。 -->
+    <svg class="lg-filter-defs" aria-hidden="true" focusable="false" width="0" height="0">
+      <defs>
+        <filter id="lg-refract" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.006 0.01" numOctaves="1" seed="7" result="ripple" />
+          <feDisplacementMap in="SourceGraphic" in2="ripple" scale="20" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </defs>
+    </svg>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

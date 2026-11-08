@@ -1,0 +1,357 @@
+/* ============================================================ 知识首页（最近使用）
+   首页不做功能目录：功能清单只有左侧导航轨一份。这里三块——「继续」（最近笔记 + 到期/错题）、
+   「最近使用」（最多 8 个去处，auto-fill 排满一行）、底部键盘提示。
+   入口用与「继续」同一套卡片语言（面板底 + 细边），只有图标底色区分，不给每个功能配一种颜色。 */
+/* 首页内容比视口矮时垂直居中（不再贴着顶部、把空白全留在下半屏）；
+   内容超高时 safe 回退到顶部，不会像普通 center 那样裁掉标题。 */
+.welcome-stage:has(.home-stage) { align-items: safe center; }
+.home-stage {
+  /* 只做水平居中，不做垂直居中：地图比旧 hero 高，垂直 auto 边距在溢出时会裁掉顶部标题。
+     内容从舞台顶部开始排，超出的部分由 .welcome-stage 正常滚动。 */
+  width: min(1040px, 100%); margin: 0 auto;
+  padding: 36px 28px 40px;
+  display: flex; flex-direction: column; gap: 24px;
+  text-align: left;
+  /* 三列→两列按**可用宽度**切换，而不是窗口宽度：
+     导航轨展开 + 目录卡片打开时，1100px 的窗口只剩 ~550px，按视口切会强行塞三列并把说明截断。 */
+  container-type: inline-size;
+}
+.home-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 18px; flex-wrap: wrap;
+}
+.home-title {
+  margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.025em;
+  color: var(--text); line-height: 1.2; text-wrap: balance;
+}
+.home-sub { margin: 6px 0 0; font-size: var(--fs-control); color: var(--muted); }
+/* 副标题第二行：品牌英文标语，比中文那行小一号、字距拉开，读起来是同一块而不是两个标题 */
+.home-sub__en {
+  display: block; margin-top: 4px;
+  font-size: var(--fs-micro); font-weight: 550;
+  letter-spacing: 0.06em; opacity: 0.75;
+}
+.home-search {
+  display: inline-flex; align-items: center; gap: 8px; width: auto; flex: 0 0 auto;
+  padding: 9px 18px; border-radius: 999px; white-space: nowrap;
+}
+
+.home-recents, .home-feats-sec { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.home-sec-title {
+  margin: 0; font-size: var(--fs-micro); font-weight: 650;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+}
+.home-recents__list {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+}
+.home-recent {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  min-width: 0; padding: 9px 13px; font: inherit; text-align: left; color: inherit;
+  background: var(--panel-glass-strong); border: 1px solid var(--border);
+  border-radius: var(--r-md); cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.home-recent:hover { background: var(--accent-soft); border-color: var(--border-accent); }
+.home-recent__title {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-body); font-weight: 600; color: var(--text);
+}
+.home-recent__path {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-micro); color: var(--muted);
+}
+.home-empty { margin: 0; font-size: var(--fs-caption); color: var(--muted); }
+.home-resume { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+
+/* 最近使用：一行放 4 个（容器 ≥ 760px），窄容器自动折成 3 / 2 列，不用容器查询逐档写规则 */
+.home-feats {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.home-feat {
+  display: flex; align-items: center; gap: 9px; min-width: 0;
+  padding: 9px 12px; font: inherit; text-align: left; color: inherit;
+  background: var(--panel-glass-strong); border: 1px solid var(--border);
+  border-radius: var(--r-md); cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.home-feat:hover { background: var(--accent-soft); border-color: var(--border-accent); }
+.home-feat:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 1px; }
+.home-feat__icon {
+  flex: 0 0 22px; width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 7px; background: var(--accent-soft); color: var(--accent);
+}
+.home-feat__label {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-body); font-weight: 550; color: var(--text);
+}
+
+/* 工作台：首页下半屏不再是背景——学习概览 / 今日待办 / 快捷操作三张卡。
+   auto-fit 让窄容器自动从三列折成两列、一列，不需要逐档写断点。
+   container-type 只为下面那条容器查询服务：同样「两列」，卡片宽度随目录开合变化，
+   按窗口宽度写死断点会时对时错。 */
+.home-wb { display: flex; flex-direction: column; gap: 9px; min-width: 0; container-type: inline-size; }
+.home-wb__grid {
+  display: grid; gap: 10px; min-height: 190px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+/* 放不下第三列（3×240 + 2×10）时「快捷操作」会独占第二行、右边空一大块：
+   让它铺满整行，四个按钮随之排成一行（.home-wb__actions 的 auto-fit 自动跟上）。 */
+@container (max-width: 739px) {
+  .home-wb__grid > :last-child { grid-column: 1 / -1; }
+}
+.home-wb__card {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  padding: 13px 14px;
+  background: var(--panel-glass-strong); border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.home-wb__head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.home-wb__title {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: var(--fs-control); font-weight: 650; color: var(--text);
+}
+.home-wb__title em {
+  font-style: normal; font-size: var(--fs-micro); font-weight: 650;
+  color: var(--accent); background: var(--accent-soft);
+  padding: 1px 7px; border-radius: 999px;
+}
+.home-wb__link {
+  margin-left: auto; flex: none; padding: 2px 0; border: 0; background: none;
+  color: var(--accent); font: inherit; font-size: var(--fs-micro); cursor: pointer; border-radius: 4px;
+}
+.home-wb__link:hover { text-decoration: underline; }
+.home-wb__link:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+
+.home-wb__kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.home-wb__kpi { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.home-wb__kpi b { font-size: 19px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.15; }
+.home-wb__kpi span { font-size: var(--fs-micro); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 图表吃掉卡片剩余高度：工作台被撑高时，柱状图跟着长高，而不是在底部留一条细线 */
+.home-wb__chart { display: flex; align-items: flex-end; gap: 5px; flex: 1 1 auto; min-height: 64px; margin-top: auto; }
+.home-wb__bar {
+  flex: 1; min-width: 0; height: 100%;
+  display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 3px;
+}
+.home-wb__bar i {
+  display: block; width: 100%; max-width: 22px; border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent) 70%, transparent),
+    color-mix(in srgb, var(--accent) 30%, transparent));
+}
+.home-wb__bar span { font-size: 9px; line-height: 1; color: var(--muted); }
+
+.home-wb__todos {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; justify-content: center; gap: 8px;
+  flex: 1 1 auto;
+}
+.home-wb__todo { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.home-wb__check {
+  flex: none; width: 15px; height: 15px; padding: 0;
+  border: 1.5px solid var(--border-strong); border-radius: 50%;
+  background: transparent; cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.home-wb__check:hover { border-color: var(--accent); background: var(--accent-soft); }
+.home-wb__check:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 1px; }
+.home-wb__todo-text {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-caption); color: var(--text);
+}
+.home-wb__due { margin-left: auto; flex: none; font-size: var(--fs-micro); color: var(--muted); }
+.home-wb__due.is-overdue { color: var(--danger-text); }
+.home-wb__empty {
+  margin: auto 0; align-self: center; max-width: 32ch; text-align: center;
+  font-size: var(--fs-caption); color: var(--muted); line-height: 1.65;
+}
+
+.home-wb__actions {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-auto-rows: auto; gap: 6px; align-content: center; flex: 1 1 auto;
+}
+.home-wb__actions button {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 8px 10px; font: inherit; font-size: var(--fs-caption); font-weight: 550;
+  text-align: left; color: var(--text); cursor: pointer;
+  background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--r-sm);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.home-wb__actions button:hover { background: var(--accent-soft); border-color: var(--border-accent); color: var(--accent); }
+.home-wb__actions button:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 1px; }
+.home-wb__actions button svg { flex: none; }
+/* 快捷操作下方的模式说明：导师陪练与 AI 笔记共用面板，用一行字讲清差别 */
+.home-wb__hint {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.home-keys {
+  display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0;
+  padding-top: 15px; border-top: 1px solid var(--border);
+  font-size: var(--fs-caption); color: var(--muted);
+}
+.home-keys span { display: inline-flex; align-items: center; gap: 6px; }
+.home-keys kbd { box-shadow: none; }
+
+@media (max-width: 640px) {
+  .home-stage { padding: 22px 16px 30px; gap: 20px; }
+  .home-title { font-size: 22px; }
+  .home-head { align-items: flex-start; }
+}
+
+/* ── 母主题 + 分支面板 ────────────────────────────────────────────────
+   五个母主题是两态唯一的内容：收起态露图标，展开态带文字。条目不在轨上，
+   指到母主题才从右侧浮出——两态装的东西因此永远一致（以前的收起态只露 8 项、
+   展开态列 19 项，收起就等于把一半功能藏了）。 */
+.rail-group { display: flex; flex-direction: column; align-items: center; width: 100%; flex-shrink: 0; }
+.rail--expanded .rail-group { align-items: stretch; }
+/* 母主题按钮的「当前组」态：淡底延续到图标——
+   之前只换 --panel-deep 底色，用户看不出「我现在就在这一组里」。 */
+.rail-group-btn.on {
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+  color: var(--accent);
+}
+/* 母主题图标语义色调：--rail-tint 由 Rail 按组注入（Rail.tsx GROUP_TINTS）。
+   静默时染 55%，hover/当前组加深到全色——克制的色彩锚点，不动底色。 */
+.rail-group-btn > svg { color: color-mix(in srgb, var(--rail-tint, currentColor) 40%, var(--muted)); }
+.rail-group-btn:hover > svg,
+.rail-group-btn.on > svg { color: var(--rail-tint, var(--text)); }
+.rail-group-btn.is-open { background: var(--panel-deep); color: var(--text); box-shadow: var(--shadow-xs); }
+/* 展开态：母主题是「组标题」，比条目重一档；条目是内容，轻回去 */
+.rail--expanded .rail-group-btn { height: 36px; }
+.rail--expanded .rail-group-btn .rail-label { font-weight: 650; letter-spacing: 0.01em; }
+.rail-group-caret {
+  display: none; position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+  width: 0; height: 0; opacity: 0.45;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform var(--t-fast) var(--ease);
+}
+.rail--expanded .rail-group-caret { display: block; }
+.rail-group-btn[aria-expanded='true'] .rail-group-caret { transform: translateY(-50%) rotate(90deg); }
+
+/* 窄屏抽屉：母主题下原地展开（触屏没有悬停） */
+/* 手风琴展开区：左侧一条细线标出层级，几组同时摊开时边界清楚 */
+.rail-inline {
+  display: flex; flex-direction: column; align-self: stretch; gap: 2px;
+  margin: 3px 0 7px 13px; padding: 3px 0 4px 7px;
+  border-left: 1px solid var(--border-strong);
+  animation: rail-inline-in 140ms var(--ease);
+}
+@keyframes rail-inline-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+.rail--expanded .rail-inline .rail-btn {
+  height: 30px; padding-left: 24px; gap: 9px;
+  font-size: var(--fs-control); color: var(--text-2);
+}
+.rail--expanded .rail-inline .rail-btn > svg { width: 16px; height: 16px; flex: 0 0 16px; }
+.rail--expanded .rail-inline .rail-btn:hover { background: var(--panel-deep); color: var(--text); }
+.rail--expanded .rail-inline .rail-btn.on { color: var(--accent); }
+
+/* 分支面板：position: fixed，锚点是母按钮的屏幕坐标。.rail-scroll 是滚动容器，
+   绝对定位会被它的 overflow 裁掉，所以不能用 absolute。 */
+.rail-branch {
+  position: fixed; z-index: 60; min-width: 178px; padding: 6px;
+  background: var(--panel-glass-strong);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg), var(--glass-shine);
+  animation: rail-branch-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* 引线：母按钮与面板之间那道 8px 缺口上压一条 1px 横线，
+   读起来是「从这一组长出来的」，而不是又一个浮窗 */
+.rail-branch::before {
+  content: ''; position: absolute; left: -8px; top: 19px;
+  width: 8px; height: 1px; background: var(--glass-border);
+  transform-origin: left center;
+  animation: rail-line-grow 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes rail-line-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.rail-branch-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 3px 8px 6px; color: var(--muted);
+  font-size: var(--fs-micro); font-weight: 650; letter-spacing: 0.06em;
+}
+/* 头部右端放条目数：不用数就知道这组有多大 */
+.rail-branch-count { font-variant-numeric: tabular-nums; opacity: 0.7; letter-spacing: 0; }
+.rail-branch-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 32px;
+  padding: 0 8px; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-2);
+  font: inherit; font-size: var(--fs-caption); text-align: left; white-space: nowrap;
+  cursor: pointer; transition: var(--tr-interact);
+}
+/* .rail-label 全局是 display:none（给收起态图标列用），这里得显式打开 */
+.rail-branch-item .rail-label { display: inline; }
+.rail-branch-item > svg { width: 17px; height: 17px; flex: 0 0 17px; }
+.rail-branch-item:hover,
+.rail-branch-item:focus-visible { background: var(--accent-soft); color: var(--accent); }
+.rail-branch-item:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--accent); }
+.rail-branch-item.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+/* 行尾的小箭头只在指向/聚焦时出现，表示「点了会过去」 */
+.rail-branch-item::after {
+  content: ''; flex: 0 0 5px; width: 5px; height: 5px; margin-left: auto;
+  border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-2px, 2px); opacity: 0; transition: var(--tr-interact);
+}
+.rail-branch-item:hover::after,
+.rail-branch-item:focus-visible::after { opacity: 0.6; transform: rotate(45deg) translate(0, 0); }
+@keyframes rail-branch-in {
+  from { opacity: 0; transform: translateX(-6px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail-branch { animation: none; }
+  .rail-branch::before { animation: none; }
+}
+
+/* 组与组之间留一点节奏：五组等距堆成一列时读不出「这是五类」 */
+.rail-scroll > .rail-home { margin-bottom: 8px; }
+.rail-group + .rail-group { margin-top: 4px; }
+/* 展开态再用一条内缩细线分组：纯间距读不出「边界」，一条线就够 */
+.rail--expanded .rail-group + .rail-group {
+  margin-top: 0; padding-top: 7px; border-top: 1px solid var(--border);
+}
+/* 国风展开态的「界栏」：线装书栏线的抽象——中线略实、两端收锋，比实线 border 轻一档 */
+[data-theme='guofeng'] .rail--expanded .rail-group + .rail-group {
+  border-top: 0;
+  background: linear-gradient(90deg, transparent, rgba(214, 205, 188, 0.18) 30%, rgba(214, 205, 188, 0.18) 70%, transparent);
+  background-size: calc(100% - 20px) 1px;
+  background-position: 10px 0;
+  background-repeat: no-repeat;
+}
+
+/* 收起态：组内条目数 + 当前位置压成点阵（灰阶、不占宽；当前项那一粒变成一小段横线）。
+   展开态不显示它——那时条目本身就摊在轨上了。 */
+.rail-group-dots {
+  position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px;
+}
+.rail--expanded .rail-group-dots { display: none; }
+/* 点阵是「这组里有几项、当前在第几项」的唯一提示。2px 在 42px 按钮上几乎不可见，
+   提到 3px、间距 4px：眯眼可见，又不喧宾夺主；当前项的短横线同步加粗。 */
+.rail-group-dots i { width: 3px; height: 3px; border-radius: 50%; background: color-mix(in srgb, var(--muted) 55%, transparent); transition: var(--tr-interact); }
+.rail-group-dots i.on { width: 7px; height: 3px; border-radius: 2px; background: var(--accent); }
+.rail-group-btn:hover .rail-group-dots i { background: var(--muted); }
+.rail-group-btn:hover .rail-group-dots i.on { background: var(--accent); }
+
+/* 一键导师：快捷操作里唯一的强调色入口，与普通动作区分开但不喧宾夺主 */
+.home-wb__actions .home-wb__tutor {
+  border-color: var(--border-accent);
+  background: linear-gradient(135deg, var(--accent-soft) 0%,
+    color-mix(in srgb, var(--accent-soft) 40%, var(--bg-raised)) 100%);
+  color: var(--accent);
+  font-weight: 650;
+}
+.home-wb__actions .home-wb__tutor:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}

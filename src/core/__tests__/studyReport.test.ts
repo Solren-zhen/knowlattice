@@ -96,6 +96,29 @@ function body(r: StudyReport, heading: string): string {
   return s.body;
 }
 
+describe('studyReport · 顶部指标卡', () => {
+  it('空数据：正确率写 — 而不是 0%，语气为 muted', () => {
+    const r = buildStudyReport(input());
+    expect(r.metrics.map((m) => m.label)).toEqual(['已作答', '正确率', '到期复习卡', '薄弱章节', '错题']);
+    const acc = r.metrics.find((m) => m.label === '正确率');
+    expect(acc?.value).toBe(EMPTY);
+    expect(acc?.tone).toBe('muted');
+  });
+
+  it('有作答：指标与正文同一个数（不另算一套），并标记语气', () => {
+    const r = buildStudyReport(input({
+      banks: [bankOf('甲库', [qOf('q1'), qOf('q2')])],
+      stats: { 甲库: { q1: stat(0), q2: stat(1) } },
+    }));
+    const value = (label: string) => r.metrics.find((m) => m.label === label)?.value;
+    expect(value('已作答')).toBe('2 / 2');
+    expect(value('正确率')).toBe(fmtPct(0.5));
+    // 与正文同源：正文里的「按题正确率：xx%」必须和卡片一致
+    expect(body(r, '题目练习')).toContain(`按题正确率：${value('正确率')}`);
+    expect(r.metrics.find((m) => m.label === '正确率')?.tone).toBe('bad');
+  });
+});
+
 describe('studyReport · 数据不足时绝不编造数字', () => {
   it('空数据：不崩、明说不足、正文里没有 NaN / undefined / 0%', () => {
     const r = buildStudyReport(input());
@@ -300,7 +323,7 @@ describe('studyReport · 口径与既有聚合一致', () => {
   it('复习计划：距考试天数走 daysUntilExam（本地日历日），并按既有函数算收紧后的上限', () => {
     const r = buildStudyReport(input({
       cards: [cardOf('甲'), cardOf('乙')],
-      plan: { examDate: '2026-01-20', examLabel: '甲考试', dailyCap: 8 },
+      plan: { examDate: '2026-01-20', examLabel: '甲考试', dailyCap: 8, newLimit: 0 },
       now: NOW,
     }));
 
@@ -314,11 +337,11 @@ describe('studyReport · 口径与既有聚合一致', () => {
   });
 
   it('考试当天与考试已过：说法与既有面板一致，不再按天数摊分', () => {
-    const today = buildStudyReport(input({ plan: { examDate: '2026-01-15', examLabel: '', dailyCap: 0 } }));
+    const today = buildStudyReport(input({ plan: { examDate: '2026-01-15', examLabel: '', dailyCap: 0, newLimit: 0 } }));
     expect(today.data.daysUntilExam).toBe(0);
     expect(today.highlights).toContain('考试就是今天');
 
-    const past = buildStudyReport(input({ plan: { examDate: '2026-01-10', examLabel: '', dailyCap: 0 } }));
+    const past = buildStudyReport(input({ plan: { examDate: '2026-01-10', examLabel: '', dailyCap: 0, newLimit: 0 } }));
     expect(past.data.daysUntilExam).toBe(-5);
     expect(past.highlights).toContain('考试已过 5 天');
     expect(body(past, '下一步建议')).not.toContain('平摊');

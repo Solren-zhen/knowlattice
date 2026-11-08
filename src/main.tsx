@@ -14,6 +14,13 @@ import { initNavIndicator } from './core/navIndicator'
 import { initCountUp } from './core/countUp'
 import { initHoverGlow } from './core/hoverGlow'
 import { initSelectionGlide } from './core/selectionGlide'
+import { initKnowledgeField } from './core/knowledgeField'
+import { initLiquidGlass } from './core/liquidGlass'
+import { setBiliProxyBase, setBiliProxyToken, setBiliProxyIssue } from './core/biliPlay'
+import { isTauri } from './storage/tauriEnv'
+import { tauriErrorText } from './storage/tauriError'
+import { hydrateSecureApiKey } from './core/secureCredentials'
+import { toast } from './core/feedback'
 
 // 旧版 medvault-* 标识 → knowlattice-*：localStorage 同步迁移，须早于 initTheme / initFont。
 migrateLocalStorage()
@@ -39,6 +46,12 @@ initCountUp()
 // 同样是开关式单例：不允许动效 / 无精确定位指针时内部直接让位，调用处不用判断。
 initHoverGlow()
 initSelectionGlide()
+// 知识星图背景：Canvas 绘制的缓慢漂移节点网络（30fps 封顶）。
+// 同样是开关式单例：减少动效 / 纯触摸设备时只画一帧静图，调用处不用判断。
+initKnowledgeField()
+// 液态玻璃折射：backdrop-filter 引用 SVG 位移滤镜，逐像素、较贵。
+// 支持性 + 2s 帧率哨兵都在模块内部判断，调用处不用管。
+initLiquidGlass()
 
 // 注销已注册的 Service Worker：它会缓存旧资源、让浏览器一直读到旧版本。
 // 这里只做注销，不注册 SW（要部署到 GitHub Pages 想离线/可安装时再开下面那段）。
@@ -55,8 +68,41 @@ if ('serviceWorker' in navigator) {
 //   })
 // }
 
+// 安装版没有 Vite 的 /bili-proxy；让 Tauri 把本机代理端口与令牌交给前端。
+// 失败不阻塞启动——视频笔记会显示取流错误，其余功能照常可用。
+async function prepareBiliProxy(): Promise<void> {
+  if (!isTauri()) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const status = await invoke<{ ok: boolean; baseUrl: string; token: string; error: string }>('bili_proxy_status')
+    setBiliProxyBase(status.ok ? status.baseUrl : '')
+    setBiliProxyToken(status.ok ? status.token : '')
+    setBiliProxyIssue(status.ok ? '' : (status.error || 'B 站代理未启动'))
+  } catch (error) {
+    setBiliProxyBase('')
+    setBiliProxyToken('')
+    setBiliProxyIssue(tauriErrorText(error))
+  }
+}
+
+/** 超时兜底：任何一步挂住都不能让整个应用停在白屏（IDB 被别的标签页阻塞是最常见的一种）。 */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  return Promise.race([
+    promise,
+    new Promise<undefined>((resolve) => { setTimeout(() => resolve(undefined), ms) }),
+  ])
+}
+
+async function bootstrap(): Promise<boolean> {
+  const migrated = await withTimeout(migrateIndexedDb().then(() => true), 8000)
+  await withTimeout(hydrateSecureApiKey(), 3000)
+  await withTimeout(prepareBiliProxy(), 3000)
+  return migrated === true
+}
+
 // IndexedDB 迁移须早于 vault / 历史 / PDF 首次打开新库，否则会读到空库；迁移失败也照常渲染。
-void migrateIndexedDb().finally(() => {
+// bootstrap 三步各自吞错、理论不会 reject，但挂载兜底不能少：宁可带着提示进入应用，也不白屏。
+function mount() {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       {/* 兜住懒加载分块取不到（本地服务关掉后最容易发生）：没有它整棵树被卸载 → 白屏，
@@ -66,4 +112,21 @@ void migrateIndexedDb().finally(() => {
       </ErrorBoundary>
     </StrictMode>,
   )
-})
+}
+
+void bootstrap()
+  .then((migrated) => {
+    mount()
+    if (!migrated) {
+      // 8 秒超时后应用已按现有数据渲染：此时迁移可能还没建出新库，视图层先 open 新库
+      // 会让本轮迁移中断（旧库只在成功后删除、数据不会丢）。旧库数据会在**下次启动**
+      // 重试迁移时补上，所以这里必须把「重启才会回来」说清楚，别让用户以为数据没了。
+      setTimeout(() => {
+        toast('本地数据迁移超时：本次会话可能暂时看不到旧版数据；重启应用会自动重试迁移，数据不会丢。', 'err', 10000)
+      }, 800)
+    }
+  })
+  .catch((error) => {
+    mount()
+    toast(`启动检查失败：${tauriErrorText(error)}`, 'err', 8000)
+  })

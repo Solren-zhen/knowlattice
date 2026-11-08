@@ -11,15 +11,12 @@
  */
 import { normalizeQuestions } from './qbank';
 import type { QuizQuestion } from './qbank';
+import { asRecord } from './record';
 
 /** 内容包的 format 标记；与导出侧 out/index.json 的 format 字段同值 */
 export const CONTENT_PACK_FORMAT = 'kq.pack.v1';
 
 export type ContentPackRole = 'index' | 'unit' | 'bundle' | 'unknown';
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-}
 
 /** 合集（bundle）：把整个包的几十个单元塞进一个文件。
  *  存在理由——「选一整个文件夹」依赖 webkitdirectory，某些环境里拿不到文件列表，

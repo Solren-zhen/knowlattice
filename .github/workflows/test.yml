@@ -1,0 +1,59 @@
+name: 测试
+
+# 每次推送与 PR 都跑：lint → 单测 → 构建 → 真实浏览器冒烟。
+# 之前只有 bench / 打包 / 部署三条流水线，单测与 e2e 只在本地跑——
+# 「本地绿、换台机器红」这类问题（超时预算、平台差异、缺文件）发现得太晚。
+on:
+  push:
+    branches: [main, master, work]
+    paths-ignore:
+      - '**.md'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 静态检查
+        run: npm run lint
+      - name: 单元测试
+        run: npm run test
+      - name: 构建（含 vendor 完整性校验与产物断言）
+        run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 安装 Chromium
+        run: npx playwright install --with-deps chromium
+      - name: 冒烟（真实浏览器）
+        run: npm run test:e2e
+      - name: 失败时留档
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

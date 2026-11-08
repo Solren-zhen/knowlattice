@@ -7,6 +7,7 @@ import { useEsc, escThenClose } from './useEsc';
 import { parseFrontmatterCached } from '../core/parser';
 import { IconTag, IconClose } from './icons';
 import { clickable } from './a11y';
+import PanelOverlay from './PanelOverlay';
 
 interface Props {
   docs: Map<string, string>;
@@ -49,7 +50,7 @@ export default function TagBrowser({ docs, onOpenPath, onClose }: Props) {
   };
 
   return (
-    <div className="panel-backdrop mistake-overlay" onClick={onClose}>
+    <PanelOverlay tone="mistakes" onClose={onClose}>
       <div className="panel mistake-panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel__head mistake-header">
           <span className="panel__title mistake-title"><IconTag /> 标签 <span className="muted">· {tags.length} 个</span></span>
@@ -114,6 +115,6 @@ export default function TagBrowser({ docs, onOpenPath, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </PanelOverlay>
   );
 }
