@@ -69,6 +69,14 @@ export interface QuizQuestion {
    * `chapter` 仍是主章节、语义完全不变；本字段是**可选增量**，只在真的给了多章节时才出现。
    */
   chapters?: string[];
+  /**
+   * 作者标称难度：1 = 简单 / 2 = 适中 / 3 = 困难。可选增量字段。
+   *
+   * 和 FSRS 的难度不是一回事：`stat.difficulty`（1~10）是模型对**做过的题**的估计，
+   * 命题人从没说过这题难不难。没有标称就没法做「标称 vs 实测」的校准——
+   * 只剩拿模型估计去校准模型估计，等于没校准。未标注的题不带这个键，也就不参与校准。
+   */
+  difficulty?: 1 | 2 | 3;
   /** 关联笔记名（走 resolveLink 解析，错题本/打开笔记直达） */
   note?: string;
   /** 逐选项批注：下标与 options 对齐，空串表示该选项没写。只在作答后可见可写 */
@@ -446,6 +454,7 @@ export function normalizeQuestions(raw: unknown): QuizQuestion[] {
     const audioDur = typeof audioDurRaw === 'number' && audioDurRaw > 0 ? audioDurRaw : undefined;
     const explanation = firstOf<string>(src, ['explanation', '解析', '解释']);
     const chapter = firstOf<string>(src, ['chapter', '章节', '科目']);
+    const declared = difficultyFrom(firstOf<unknown>(src, ['difficulty', 'level', '难度', '难度等级']));
     // 一题多章节（可选增量）：只在真的解析出 ≥2 个章节时才带上这个键，形状与既有题一致
     const chapters = chaptersFrom(src);
     const note = firstOf<string>(src, ['note', '笔记', '相关笔记']);
@@ -471,6 +480,8 @@ export function normalizeQuestions(raw: unknown): QuizQuestion[] {
       // 否则多章节的题会因为 chapter 为空而整章消失在掌握度热力图与错题归位里。
       chapter: chapter ? String(chapter) : (chapters[0] ?? undefined),
       ...(chapters.length >= 2 ? { chapters } : {}),
+      // 标称难度只在作者真标了的时候出现：旧题库解析出来的键集合一个字不差
+      ...(declared ? { difficulty: declared } : {}),
       note: note ? String(note).trim() : undefined,
       image: image && String(image).trim() ? String(image).trim() : undefined,
       // 共用题干题组：普通题**不带这些键**，既有对象的形状与既有单测完全不变
@@ -698,6 +709,21 @@ function columnOptions(r: Record<string, unknown>): string[] {
   return out;
 }
 
+/** 标称难度：只认 1~3 与「易/简单、中/适中、难/困难」这几档；别的写法当没标，不猜 */
+function difficultyFrom(v: unknown): 1 | 2 | 3 | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    const n = Math.round(v);
+    return n >= 1 && n <= 3 ? (n as 1 | 2 | 3) : undefined;
+  }
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim();
+  if (/^[123]$/.test(s)) return Number(s) as 1 | 2 | 3;
+  if (/^(易|简单|容易|easy)$/i.test(s)) return 1;
+  if (/^(中|适中|中等|一般|medium|normal)$/i.test(s)) return 2;
+  if (/^(难|困难|较难|hard|difficult)$/i.test(s)) return 3;
+  return undefined;
+}
+
 /** Excel/CSV（SheetJS sheet_to_json 的结果：对象行数组）→ 题目。
  *  表头可用中文/英文：题干/题目/stem、答案/correct、解析、章节、笔记，选项列见 columnOptions。 */
 export function rowsToQuestions(rows: Array<Record<string, unknown>>): QuizQuestion[] {
@@ -713,6 +739,7 @@ export function rowsToQuestions(rows: Array<Record<string, unknown>>): QuizQuest
     explanation: firstOf<string>(r, ['explanation', '解析', '解释']),
     explanations: firstOf<unknown>(r, ['explanations', 'jiexiArr', '解析集', '多解']),
     chapter: firstOf<string>(r, ['chapter', '章节', '科目']),
+    difficulty: firstOf<unknown>(r, ['difficulty', 'level', '难度', '难度等级']),
     note: firstOf<string>(r, ['note', '笔记', '相关笔记']),
   }));
   return normalizeQuestions(mapped); // 无有效题会抛错

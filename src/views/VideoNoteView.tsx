@@ -9,22 +9,43 @@
  * 不做的两件事写在这里免得后面又找：站内 OCR（没有离线引擎）、抖音直链抓取（要第三方接口）。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from '../core/feedback';
-import { getBiliProxyIssue } from '../core/biliPlay';
+import { confirmBox, toast } from '../core/feedback';
+import { getBiliProxyIssue, type BiliPart } from '../core/biliPlay';
 import { formatTime, parseTimestamp } from '../core/subtitle';
+import { BACKUP_RESTORED_EVENT } from '../core/vault';
 import {
   addClip,
   anchorMarkdown,
+  clearVideoHistory,
   clipRange,
   clipMarkdown,
   clipsFor,
   formatClipRange,
+  getVideoHistoryItem,
+  isLocalMediaKey,
   loadClips,
+  loadVideoHistory,
+  loadVideoRate,
   loopNext,
+  markClipsInserted,
   removeClip,
+  removeVideoHistory,
+  renameVideoHistory,
+  saveVideoRate,
+  togglePinVideoHistory,
+  updateClip,
+  updateVideoHistoryProgress,
+  VIDEO_RATES,
   type VideoClip,
+  type VideoHistoryEntry,
 } from '../core/videoNotes';
-import { bilibiliEmbed, parseBilibili, parseVideoSource, withStart } from '../core/videoSource';
+import {
+  bilibiliEmbed,
+  parseBilibili,
+  parseVideoSource,
+  withStart,
+  type VideoSourceKind,
+} from '../core/videoSource';
 import BiliPlayer from './BiliPlayer';
 
 interface Props {
@@ -45,6 +66,18 @@ interface Props {
   onPick: () => void;
   /** 粘一个链接进来（B 站 / 抖音 / 网盘 / 直链） */
   onUrl: (url: string) => void;
+  /** 从观看历史里重新打开一个视频 */
+  onOpenHistory?: (entry: VideoHistoryEntry) => void;
+  /** 当前正在编辑的笔记路径（用于回写视频↔笔记关联） */
+  currentNotePath?: string | null;
+  /** 从视频历史里直接打开关联笔记 */
+  onOpenNote?: (path: string) => void;
+  /** 向外暴露快捷键动作（插时间点 / 快退快进 / 播放暂停） */
+  onRegisterActions?: (actions: {
+    insertAnchor: () => void;
+    seekBy: (delta: number) => void;
+    togglePlay: () => void;
+  } | null) => void;
   onInsert: (markdown: string) => boolean;
   onAttach: (name: string, blob: Blob) => Promise<string | null>;
   /** 当前视频关联到的课程（B 站分P 与课程笔记/工坊通过 bvid + page 对上） */
@@ -132,6 +165,10 @@ export default function VideoNoteView({
   onSeekConsumed,
   onPick,
   onUrl,
+  onOpenHistory,
+  currentNotePath,
+  onOpenNote,
+  onRegisterActions,
   onInsert,
   onAttach,
   course,
@@ -154,6 +191,12 @@ export default function VideoNoteView({
   const [a, setA] = useState<number | null>(null);
   const [b, setB] = useState<number | null>(null);
   const [clips, setClips] = useState<VideoClip[]>(loadClips);
+  const [history, setHistory] = useState<VideoHistoryEntry[]>(loadVideoHistory);
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [biliMeta, setBiliMeta] = useState<{ title: string; parts: BiliPart[] } | null>(null);
+  const [rate, setRate] = useState<number>(() => getVideoHistoryItem(media)?.playbackRate ?? loadVideoRate());
+  const lastSavedSecRef = useRef(-1);
+  const latestTimeRef = useRef({ now: 0, duration: 0 });
   const [label, setLabel] = useState('');
   const [tags, setTags] = useState('');
   const [query, setQuery] = useState('');
@@ -174,11 +217,25 @@ export default function VideoNoteView({
   /**
    * 解析播放来源。**优先用 src**：media 可能是片段归组键（'bili:BV…:p2'），
    * 拿它去解析会得到「本地文件」，于是本地播放器拿一个文件名去请求 → 404 → 什么都不播。
+   * 从历史点开未加载的本地文件时（src 为空且 media 是复合键），也不拿它喂给 <video>。
    */
-  const effective = src || media;
+  const isUnloadedLocal = !src && isLocalMediaKey(media);
+  const effective = isUnloadedLocal ? '' : (src || media);
   const source = useMemo(() => parseVideoSource(effective), [effective]);
   const canSeek = source.seekable || (source.kind === 'bilibili' && nativeBili && nativeReady);
   const visible = useMemo(() => clipsFor(clips, media, query), [clips, media, query]);
+  const clipCountByMedia = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of clips) map.set(c.media, (map.get(c.media) ?? 0) + 1);
+    return map;
+  }, [clips]);
+  const filteredHistory = useMemo(() => {
+    const q = historyQuery.trim().toLowerCase();
+    if (!q) return history;
+    return history.filter((item) =>
+      `${item.title} ${item.url} ${item.media} ${kindLabel(item.kind)}`.toLowerCase().includes(q),
+    );
+  }, [history, historyQuery]);
   const manualSeconds = parseTimestamp(manual);
   const activeClipId = useMemo(() => {
     const hit = visible.find((clip) => (
@@ -221,33 +278,76 @@ export default function VideoNoteView({
     onSeekConsumed?.();
   }, [seekTo, source.kind, source.seekable, onSeekConsumed]);
 
+  const saveProgress = useCallback((sec: number, dur?: number) => {
+    if (!media) return;
+    const floored = Math.max(0, Math.floor(sec));
+    const cleanDur = dur != null && Number.isFinite(dur) && dur > 0 ? Math.floor(dur) : undefined;
+    if (floored === lastSavedSecRef.current && cleanDur == null) return;
+    lastSavedSecRef.current = floored;
+    setHistory(updateVideoHistoryProgress(media, { lastTime: floored, duration: cleanDur }));
+  }, [media]);
+
+  useEffect(() => {
+    const reload = () => {
+      setClips(loadClips());
+      setHistory(loadVideoHistory());
+    };
+    window.addEventListener(BACKUP_RESTORED_EVENT, reload);
+    return () => window.removeEventListener(BACKUP_RESTORED_EVENT, reload);
+  }, []);
+
+  useEffect(() => () => {
+    if (!media) return;
+    const { now: t, duration: dur } = latestTimeRef.current;
+    if (t >= 1) {
+      updateVideoHistoryProgress(media, {
+        lastTime: Math.floor(t),
+        duration: Number.isFinite(dur) && dur > 0 ? Math.floor(dur) : undefined,
+      });
+    }
+  }, [media]);
+
   /** 播放位置同步 + A-B 循环。timeupdate 约 4 次/秒，足够且比逐帧便宜。 */
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     const sync = () => {
       setNow(v.currentTime);
+      latestTimeRef.current = { now: v.currentTime, duration: v.duration || 0 };
+      if (Math.abs(Math.floor(v.currentTime) - lastSavedSecRef.current) >= 5) {
+        saveProgress(v.currentTime, v.duration);
+      }
       const back = loopNext(v.currentTime, a, b);
       if (back != null) v.currentTime = back;
     };
     const meta = () => {
       setDuration(v.duration || 0);
+      v.playbackRate = rate;
+      latestTimeRef.current = { now: v.currentTime, duration: v.duration || 0 };
+      if (Number.isFinite(v.duration) && v.duration > 0) {
+        saveProgress(v.currentTime, v.duration);
+      }
       const pending = pendingSeekRef.current;
       if (pending == null) return;
       pendingSeekRef.current = null;
       v.currentTime = Math.max(0, pending);
       void v.play().catch(() => undefined);
     };
+    const flush = () => saveProgress(v.currentTime, v.duration);
     const fail = () => setBroken(true);
     v.addEventListener('timeupdate', sync);
     v.addEventListener('loadedmetadata', meta);
+    v.addEventListener('pause', flush);
+    v.addEventListener('seeked', flush);
     v.addEventListener('error', fail);
     return () => {
       v.removeEventListener('timeupdate', sync);
       v.removeEventListener('loadedmetadata', meta);
+      v.removeEventListener('pause', flush);
+      v.removeEventListener('seeked', flush);
       v.removeEventListener('error', fail);
     };
-  }, [a, b, canSeek]);
+  }, [a, b, canSeek, rate, saveProgress]);
 
   const seek = useCallback((t: number) => {
     const v = videoRef.current;
@@ -256,9 +356,29 @@ export default function VideoNoteView({
     setNow(v.currentTime);
   }, []);
 
-  /** 记锚点用的秒数：能读进度用真实位置，读不到用用户手填的 */
+  const changeRate = useCallback((nextRate: number) => {
+    const safe = saveVideoRate(nextRate);
+    setRate(safe);
+    const v = videoRef.current;
+    if (v) v.playbackRate = safe;
+    if (media) {
+      setHistory(updateVideoHistoryProgress(media, { playbackRate: safe }));
+    }
+  }, [media]);
+
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) void v.play().catch(() => undefined);
+    else v.pause();
+  }, []);
+
+  /** 记锚点用的秒数：能读进度直接取播放器实时位置（避免刚 seek 后状态还没刷），读不到用用户手填的 */
   const anchorSeconds = (): number | null => {
-    if (canSeek) return Math.floor(now);
+    if (canSeek) {
+      const t = videoRef.current?.currentTime;
+      return Math.floor(t != null && Number.isFinite(t) ? t : now);
+    }
     if (manualSeconds == null) {
       toast('这个来源读不到播放位置：先在上面填时间（如 12:34）', 'info', 5200);
       return null;
@@ -277,8 +397,33 @@ export default function VideoNoteView({
       toast('先打开一篇笔记，再记时间点', 'info');
       return;
     }
+    if (media && currentNotePath) {
+      setHistory(updateVideoHistoryProgress(media, { notePath: currentNotePath }));
+    }
     toast(`已记下 ${formatTime(sec)}`, 'ok', 2200);
   };
+
+  const actionsImplRef = useRef({
+    insertAnchor: () => {},
+    seekBy: (_delta: number) => {},
+    togglePlay: () => {},
+  });
+  useEffect(() => {
+    actionsImplRef.current = {
+      insertAnchor,
+      seekBy: (delta: number) => seek((videoRef.current?.currentTime ?? now) + delta),
+      togglePlay,
+    };
+  });
+  useEffect(() => {
+    if (!onRegisterActions) return;
+    onRegisterActions({
+      insertAnchor: () => actionsImplRef.current.insertAnchor(),
+      seekBy: (delta: number) => actionsImplRef.current.seekBy(delta),
+      togglePlay: () => actionsImplRef.current.togglePlay(),
+    });
+    return () => onRegisterActions(null);
+  }, [onRegisterActions]);
 
   const saveClip = () => {
     if (!media) {
@@ -370,11 +515,22 @@ export default function VideoNoteView({
     setClips(r.clips);
   }, []);
 
+  const editClip = useCallback((id: string, nextLabel: string, nextTags: string[]) => {
+    const r = updateClip(id, { label: nextLabel, tags: nextTags });
+    setClips(r.clips);
+    if (!r.ok) toast('修改没写进本机存储', 'err');
+  }, []);
+
   const insertVisibleClips = () => {
     if (visible.length === 0) return;
     if (!onInsert(visible.map(clipMarkdown).join('\n'))) {
       toast('先打开一篇笔记，片段才能插进去', 'info');
       return;
+    }
+    const marked = markClipsInserted(visible.map((c) => c.id));
+    setClips(marked.clips);
+    if (media && currentNotePath) {
+      setHistory(updateVideoHistoryProgress(media, { notePath: currentNotePath }));
     }
     toast(`已插入 ${visible.length} 条片段`, 'ok', 1800);
   };
@@ -384,8 +540,13 @@ export default function VideoNoteView({
       toast('先打开一篇笔记，片段才能插进去', 'info');
       return;
     }
+    const marked = markClipsInserted([clip.id]);
+    setClips(marked.clips);
+    if (media && currentNotePath) {
+      setHistory(updateVideoHistoryProgress(media, { notePath: currentNotePath }));
+    }
     toast(`已插入 ${formatClipRange(clip)}`, 'ok', 1800);
-  }, [onInsert]);
+  }, [onInsert, media, currentNotePath]);
 
   const loopClip = useCallback((clip: VideoClip) => {
     if (clip.end == null) return;
@@ -406,9 +567,72 @@ export default function VideoNoteView({
     source.kind === 'bilibili' ? parseBilibili(source.pageUrl ?? effective) : null;
   const markNativeReady = useCallback((video: HTMLVideoElement) => {
     setNativeReady(true);
+    video.playbackRate = rate;
     setNow(video.currentTime);
-    setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+    const dur = Number.isFinite(video.duration) ? video.duration : 0;
+    setDuration(dur);
+    latestTimeRef.current = { now: video.currentTime, duration: dur };
+    if (dur > 0) saveProgress(video.currentTime, dur);
+  }, [rate, saveProgress]);
+  const handleBiliMeta = useCallback((meta: { title: string; part?: string; duration?: number; parts?: BiliPart[] }) => {
+    setBiliMeta({ title: meta.title, parts: meta.parts ?? [] });
+    const fullTitle = meta.part ? `${meta.title} · ${meta.part}` : meta.title;
+    if (!fullTitle) return;
+    if (media) {
+      setHistory(updateVideoHistoryProgress(media, {
+        title: fullTitle,
+        duration: meta.duration,
+      }));
+    }
+  }, [media]);
+  const switchBiliPage = useCallback((nextPage: number) => {
+    if (!bili) return;
+    const id = bili.bvid ?? bili.aid;
+    if (!id) return;
+    onUrl(`https://www.bilibili.com/video/${id}?p=${nextPage}`);
+  }, [bili, onUrl]);
+  const openHistoryItem = useCallback((entry: VideoHistoryEntry) => {
+    if (entry.media === media && canSeek && entry.lastTime != null) {
+      seek(entry.lastTime);
+      return;
+    }
+    if (onOpenHistory) {
+      onOpenHistory(entry);
+      return;
+    }
+    if (entry.url) {
+      onUrl(entry.url);
+    } else {
+      onPick();
+    }
+  }, [media, canSeek, seek, onOpenHistory, onUrl, onPick]);
+  const togglePinHistoryItem = useCallback((targetMedia: string) => {
+    setHistory(togglePinVideoHistory(targetMedia));
   }, []);
+  const renameHistoryItem = useCallback((targetMedia: string, nextTitle: string) => {
+    setHistory(renameVideoHistory(targetMedia, nextTitle));
+  }, []);
+  const deleteHistoryItem = useCallback((targetMedia: string) => {
+    setHistory(removeVideoHistory(targetMedia));
+    void import('../storage/videoHandles').then((m) => m.removeLocalVideoHandle(targetMedia));
+  }, []);
+  const clearHistoryList = useCallback(async () => {
+    const ok = await confirmBox({
+      title: '清空视频历史？',
+      detail: '将清除所有观看历史记录（已收藏的片段和笔记里的锚点不会受影响）。',
+      okText: '清空',
+      danger: true,
+    });
+    if (!ok) return;
+    setHistory(clearVideoHistory());
+    setHistoryQuery('');
+    void import('../storage/videoHandles').then((m) => m.clearLocalVideoHandles());
+  }, []);
+  const biliTitleDisplay = biliMeta
+    ? (biliMeta.parts.length > 1 && bili
+      ? `${biliMeta.title} · P${bili.page}${biliMeta.parts.find((p) => p.page === bili.page)?.part ? ` ${biliMeta.parts.find((p) => p.page === bili.page)!.part}` : ''}`
+      : biliMeta.title)
+    : null;
   /** iframe 要跳到的秒数：锚点请求优先；点片段时上层会清掉 seekTo，于是用 frameAt */
   const frameTarget = useMemo(
     () => (source.kind === 'bilibili' && seekTo != null ? Math.floor(seekTo) : frameAt),
@@ -443,7 +667,11 @@ export default function VideoNoteView({
             <span aria-hidden="true" />
           </button>
         )}
-        <b className="vn__title">{title || source.title || '视频笔记'}</b>
+        <b className="vn__title">
+          {course
+            ? (title || source.title || '视频笔记')
+            : (biliTitleDisplay || title || source.title || '视频笔记')}
+        </b>
         {canSeek ? (
           <span className="vn__time">
             {formatTime(now)}
@@ -513,6 +741,7 @@ export default function VideoNoteView({
           onSeekConsumed={onSeekConsumed}
           videoRef={videoRef}
           onReady={markNativeReady}
+          onMeta={handleBiliMeta}
           onFallback={() => setNativeBili(false)}
         />
       ) : source.kind === 'bilibili' && bili ? (
@@ -536,9 +765,63 @@ export default function VideoNoteView({
           // 不设 crossOrigin：跨域直链缺 CORS 头时，设了它连播放都会被拒。
           // 取帧失败（画布被污染）由 capture() 的 catch 提示用户。
         />
+      ) : isUnloadedLocal ? (
+        <div className="vn__empty vn__empty--local">
+          <p>本地视频「{title || media.split('|')[0]}」需要重新选择原文件才能播放；下方已列出它的收藏片段。</p>
+          <button type="button" className="btn-small vn__capture" onClick={onPick}>重新选择文件</button>
+        </div>
       ) : (
         <div className="vn__empty">
-          {source.note || '还没有视频。点「本地文件」选一个，或在上面的输入框粘贴 B 站 / 抖音 / 网盘 / mp4 直链后按「打开链接」。'}
+          <p>{source.note || '还没有视频。点「本地文件」选一个，或在上面的输入框粘贴 B 站 / 抖音 / 网盘 / mp4 直链后按「打开链接」。'}</p>
+          {!effective && history.length > 0 && (
+            <div className="vn__empty-recent">
+              <span className="vn__hint">最近观看：</span>
+              {history.slice(0, 3).map((item) => (
+                <button
+                  key={item.media}
+                  type="button"
+                  className="btn-small"
+                  onClick={() => openHistoryItem(item)}
+                  title={item.url || item.title}
+                >
+                  {item.title}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {source.kind === 'bilibili' && bili && biliMeta && biliMeta.parts.length > 1 && (
+        <div className="vn__row vn__parts">
+          <button
+            type="button"
+            className="btn-small"
+            disabled={bili.page <= 1}
+            onClick={() => switchBiliPage(bili.page - 1)}
+          >
+            上一P
+          </button>
+          <select
+            className="vn__part-select"
+            aria-label="选择分P"
+            value={bili.page}
+            onChange={(e) => switchBiliPage(Number(e.currentTarget.value))}
+          >
+            {biliMeta.parts.map((p) => (
+              <option key={p.cid} value={p.page}>
+                P{p.page}{p.part ? ` · ${p.part}` : ''}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn-small"
+            disabled={bili.page >= biliMeta.parts.length}
+            onClick={() => switchBiliPage(bili.page + 1)}
+          >
+            下一P
+          </button>
         </div>
       )}
 
@@ -617,7 +900,12 @@ export default function VideoNoteView({
       )}
 
       {canSeek && (
-        <Foldable onToggle={onFoldToggle} id="controls" title="播放控制" hint={a != null || b != null ? 'A-B 已设' : undefined}>
+        <Foldable
+          onToggle={onFoldToggle}
+          id="controls"
+          title="播放控制"
+          hint={a != null || b != null ? `A-B 已设 · ${rate}x` : rate !== 1 ? `${rate}x` : undefined}
+        >
         <div className="vn__row vn__controls">
           <button className="btn-small" onClick={() => seek(now - 3)}>−3 秒</button>
           <button className="btn-small" onClick={() => seek(now + 3)}>+3 秒</button>
@@ -635,6 +923,19 @@ export default function VideoNoteView({
           >
             清除循环
           </button>
+          <div className="vn__rates" role="group" aria-label="播放倍速">
+            {VIDEO_RATES.map((r) => (
+              <button
+                key={r}
+                type="button"
+                className={`btn-small vn__rate${rate === r ? ' is-on' : ''}`}
+                aria-pressed={rate === r}
+                onClick={() => changeRate(r)}
+              >
+                {r}x
+              </button>
+            ))}
+          </div>
         </div>
         </Foldable>
       )}
@@ -694,7 +995,48 @@ export default function VideoNoteView({
         onJump={jumpClip}
         onInsert={insertClipNote}
         onLoop={loopClip}
+        onEdit={editClip}
         onRemove={deleteClip}
+      />
+      </Foldable>
+
+      <Foldable
+        onToggle={onFoldToggle}
+        id="history"
+        title="视频历史"
+        hint={history.length > 0 ? `${history.length} 个` : undefined}
+      >
+      {history.length > 0 && (
+        <div className="vn__library-head">
+          <input
+            className="vn__input vn__input--search"
+            value={historyQuery}
+            placeholder="搜历史视频标题或链接"
+            aria-label="搜索历史视频"
+            onChange={(e) => setHistoryQuery(e.target.value)}
+          />
+          <span className="vn__count">{filteredHistory.length}</span>
+          <button
+            type="button"
+            className="btn-small danger"
+            onClick={() => void clearHistoryList()}
+          >
+            清空
+          </button>
+        </div>
+      )}
+
+      <VideoHistoryList
+        items={filteredHistory}
+        totalCount={history.length}
+        query={historyQuery}
+        activeMedia={media}
+        clipCountByMedia={clipCountByMedia}
+        onOpen={openHistoryItem}
+        onPin={togglePinHistoryItem}
+        onRename={renameHistoryItem}
+        onOpenNote={onOpenNote}
+        onRemove={deleteHistoryItem}
       />
       </Foldable>
       </div>
@@ -720,60 +1062,291 @@ function uniqueFrameName(base: string, taken?: (p: string) => boolean): string {
  * 几十条片段的表格每秒被重建四次——看着只是「有点钝」，实际是白白跑满主线程。
  * 清单只依赖 clips 与两个稳定回调，与 `now` 无关。
  */
-const ClipList = memo(function ClipList({ clips, activeId, canLoop, onJump, onInsert, onLoop, onRemove }: {
+const ClipList = memo(function ClipList({ clips, activeId, canLoop, onJump, onInsert, onLoop, onEdit, onRemove }: {
   clips: VideoClip[];
   activeId: string | null;
   canLoop: boolean;
   onJump: (clip: VideoClip) => void;
   onInsert: (clip: VideoClip) => void;
   onLoop: (clip: VideoClip) => void;
+  onEdit: (id: string, label: string, tags: string[]) => void;
   onRemove: (id: string) => void;
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editTags, setEditTags] = useState('');
+
+  const beginEdit = (clip: VideoClip) => {
+    setEditingId(clip.id);
+    setEditLabel(clip.label);
+    setEditTags(clip.tags.join(' '));
+  };
+  const commitEdit = (id: string) => {
+    const tagList = editTags.split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean);
+    onEdit(id, editLabel.trim(), tagList);
+    setEditingId(null);
+  };
+
   return (
     <ul className="vn__clips">
-      {clips.map((c) => (
-        <li key={c.id} className={c.id === activeId ? 'is-active' : undefined}>
-          <button className="vn__jump" onClick={() => onJump(c)}>
-            <span className="vn__clip-dot" aria-hidden="true" />
-            {formatClipRange(c)}
-          </button>
-          <div className="vn__clip-copy">
-            <span className="vn__label">{c.label || '（无备注）'}</span>
-            {c.tags.length > 0 && (
-              <span className="vn__tags">
-                {c.tags.map((tag) => <span key={tag} className="vn__tag">{tag}</span>)}
-              </span>
-            )}
-          </div>
-          <span className="spacer" />
-          <div className="vn__clip-actions">
-            {canLoop && c.end != null && (
-              <button
-                className="btn-small"
-                aria-label={`把片段 A-B 循环设为 ${formatClipRange(c)}`}
-                onClick={() => onLoop(c)}
-              >
-                循环
-              </button>
-            )}
-            <button
-              className="btn-small"
-              aria-label={`把片段 ${formatClipRange(c)} 插入笔记`}
-              onClick={() => onInsert(c)}
-            >
-              入笔记
+      {clips.map((c) => {
+        const isEditing = editingId === c.id;
+        return (
+          <li key={c.id} className={c.id === activeId ? 'is-active' : undefined}>
+            <button className="vn__jump" onClick={() => onJump(c)}>
+              <span className="vn__clip-dot" aria-hidden="true" />
+              {formatClipRange(c)}
             </button>
-            <button
-              className="btn-small danger"
-              aria-label={`删除片段 ${formatClipRange(c)}`}
-              onClick={() => onRemove(c.id)}
-            >
-              删
-            </button>
-          </div>
-        </li>
-      ))}
+            {isEditing ? (
+              <div className="vn__clip-edit">
+                <input
+                  className="vn__input vn__input--inline"
+                  value={editLabel}
+                  placeholder="片段备注"
+                  aria-label="编辑片段备注"
+                  onChange={(e) => setEditLabel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitEdit(c.id);
+                    else if (e.key === 'Escape') setEditingId(null);
+                  }}
+                />
+                <input
+                  className="vn__input vn__input--inline"
+                  value={editTags}
+                  placeholder="标签，空格分隔"
+                  aria-label="编辑片段标签"
+                  onChange={(e) => setEditTags(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitEdit(c.id);
+                    else if (e.key === 'Escape') setEditingId(null);
+                  }}
+                />
+                <div className="vn__row">
+                  <button type="button" className="btn-small vn__capture" onClick={() => commitEdit(c.id)}>保存</button>
+                  <button type="button" className="btn-small" onClick={() => setEditingId(null)}>取消</button>
+                </div>
+              </div>
+            ) : (
+              <div className="vn__clip-copy">
+                <span className="vn__label">
+                  {c.label || '（无备注）'}
+                  {c.inserted ? <span className="vn__clip-inserted">已入笔记</span> : null}
+                </span>
+                {c.tags.length > 0 && (
+                  <span className="vn__tags">
+                    {c.tags.map((tag) => <span key={tag} className="vn__tag">{tag}</span>)}
+                  </span>
+                )}
+              </div>
+            )}
+            <span className="spacer" />
+            {!isEditing && (
+              <div className="vn__clip-actions">
+                {canLoop && c.end != null && (
+                  <button
+                    className="btn-small"
+                    aria-label={`把片段 A-B 循环设为 ${formatClipRange(c)}`}
+                    onClick={() => onLoop(c)}
+                  >
+                    循环
+                  </button>
+                )}
+                <button
+                  className="btn-small"
+                  aria-label={`编辑片段 ${formatClipRange(c)}`}
+                  onClick={() => beginEdit(c)}
+                >
+                  改
+                </button>
+                <button
+                  className="btn-small"
+                  aria-label={`把片段 ${formatClipRange(c)} 插入笔记`}
+                  onClick={() => onInsert(c)}
+                >
+                  入笔记
+                </button>
+                <button
+                  className="btn-small danger"
+                  aria-label={`删除片段 ${formatClipRange(c)}`}
+                  onClick={() => onRemove(c.id)}
+                >
+                  删
+                </button>
+              </div>
+            )}
+          </li>
+        );
+      })}
       {clips.length === 0 && <li className="vn__hint">还没有收藏。播放到关键处点「收藏片段」。</li>}
+    </ul>
+  );
+});
+
+function kindLabel(kind: VideoSourceKind): string {
+  switch (kind) {
+    case 'bilibili': return 'B站';
+    case 'local': return '本地';
+    case 'direct': return '直链';
+    case 'douyin': return '抖音';
+    case 'netdisk': return '网盘';
+    case 'page': return '网页';
+    default: return '其他';
+  }
+}
+
+function formatHistoryDate(ts: number): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  if (
+    d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate()
+  ) {
+    return `今天 ${hh}:${mm}`;
+  }
+  return `${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm}`;
+}
+
+function noteBaseName(path: string): string {
+  return path.replace(/\.md$/i, '').split('/').pop() || path;
+}
+
+const VideoHistoryList = memo(function VideoHistoryList({
+  items,
+  totalCount,
+  query,
+  activeMedia,
+  clipCountByMedia,
+  onOpen,
+  onPin,
+  onRename,
+  onOpenNote,
+  onRemove,
+}: {
+  items: VideoHistoryEntry[];
+  totalCount: number;
+  query: string;
+  activeMedia: string;
+  clipCountByMedia: Map<string, number>;
+  onOpen: (entry: VideoHistoryEntry) => void;
+  onPin: (media: string) => void;
+  onRename: (media: string, title: string) => void;
+  onOpenNote?: (path: string) => void;
+  onRemove: (media: string) => void;
+}) {
+  const [renamingMedia, setRenamingMedia] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+
+  const beginRename = (item: VideoHistoryEntry) => {
+    setRenamingMedia(item.media);
+    setRenameDraft(item.title);
+  };
+  const commitRename = (media: string) => {
+    const trimmed = renameDraft.trim();
+    if (trimmed) onRename(media, trimmed);
+    setRenamingMedia(null);
+  };
+
+  return (
+    <ul className="vn__history">
+      {items.map((item) => {
+        const clipCount = clipCountByMedia.get(item.media) ?? 0;
+        const isRenaming = renamingMedia === item.media;
+        const progress = item.lastTime != null && item.lastTime > 0
+          ? `看到 ${formatTime(item.lastTime)}${item.duration ? ` / ${formatTime(item.duration)}` : ''}`
+          : item.duration
+            ? `时长 ${formatTime(item.duration)}`
+            : '';
+        return (
+          <li key={item.media} className={item.media === activeMedia ? 'is-active' : undefined}>
+            {isRenaming ? (
+              <div className="vn__history-rename">
+                <input
+                  className="vn__input vn__input--inline"
+                  value={renameDraft}
+                  placeholder="输入视频名称"
+                  aria-label="重命名历史视频"
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename(item.media);
+                    else if (e.key === 'Escape') setRenamingMedia(null);
+                  }}
+                />
+                <button type="button" className="btn-small vn__capture" onClick={() => commitRename(item.media)}>保存</button>
+                <button type="button" className="btn-small" onClick={() => setRenamingMedia(null)}>取消</button>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="vn__history-open"
+                  onClick={() => onOpen(item)}
+                  title={item.url || item.title}
+                >
+                  <div className="vn__history-top">
+                    {item.pinned ? <span className="vn__history-pin">置顶</span> : null}
+                    <span className="vn__history-kind">{kindLabel(item.kind)}</span>
+                    <span className="vn__history-title">{item.title}</span>
+                  </div>
+                  <div className="vn__history-meta">
+                    {progress ? <span>{progress}</span> : null}
+                    {clipCount > 0 ? <span>{clipCount} 片段</span> : null}
+                    {item.playbackRate && item.playbackRate !== 1 ? <span>{item.playbackRate}x</span> : null}
+                    <span>{formatHistoryDate(item.at)}</span>
+                  </div>
+                </button>
+                <div className="vn__history-actions">
+                  {item.notePath && onOpenNote ? (
+                    <button
+                      type="button"
+                      className="btn-small"
+                      aria-label={`打开关联笔记 ${noteBaseName(item.notePath)}`}
+                      title={`打开关联笔记：${item.notePath}`}
+                      onClick={() => onOpenNote(item.notePath!)}
+                    >
+                      笔记
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={`btn-small${item.pinned ? ' vn__pin-on' : ''}`}
+                    aria-pressed={!!item.pinned}
+                    aria-label={`${item.pinned ? '取消置顶' : '置顶'} ${item.title}`}
+                    onClick={() => onPin(item.media)}
+                  >
+                    {item.pinned ? '已置顶' : '置顶'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-small"
+                    aria-label={`重命名 ${item.title}`}
+                    onClick={() => beginRename(item)}
+                  >
+                    改名
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-small danger"
+                    aria-label={`从历史移除 ${item.title}`}
+                    onClick={() => onRemove(item.media)}
+                  >
+                    删
+                  </button>
+                </div>
+              </>
+            )}
+          </li>
+        );
+      })}
+      {totalCount === 0 && (
+        <li className="vn__hint">还没有观看记录。打开本地视频或粘贴链接后会自动记在这里。</li>
+      )}
+      {totalCount > 0 && items.length === 0 && (
+        <li className="vn__hint">没有匹配「{query.trim()}」的视频。</li>
+      )}
     </ul>
   );
 });

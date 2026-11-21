@@ -30,7 +30,14 @@ import { exportVocabState, importVocabState } from './vocab';
 import { exportTodos, importTodos } from './todos';
 import { exportCardEdits, importCardEdits } from './cardEdits';
 import { exportNoteMedia, importNoteMedia } from './noteMedia';
-import { exportClips, importClips } from './videoNotes';
+import {
+  exportClips,
+  exportNoteVideos,
+  exportVideoHistory,
+  importClips,
+  importNoteVideos,
+  importVideoHistory,
+} from './videoNotes';
 import { findOrphanAttachments as findOrphans } from './attachmentOrphans';
 import { exportNoteStyles, importNoteStyles } from './mindmapNodeStyles';
 import { exportMarks, importMarks } from './mindmapMarks';
@@ -1051,6 +1058,8 @@ export function useVault() {
       // 重点，只活在 localStorage 里。锚点写在正文里能随笔记走，片段不随备份走就会整批消失，
       // 而且笔记里的 `#vn=` 锚点还在、片段清单却是空的，比彻底没有更让人困惑。
       videoClips: exportClips(),
+      videoHistory: exportVideoHistory(),
+      noteVideos: exportNoteVideos(),
       // v15：PDF 书架正文与阅读进度
       pdfBooks,
       // v16：补齐此前只活在 localStorage、换设备就丢的用户数据
@@ -1115,6 +1124,8 @@ export function useVault() {
       daily?: unknown;
       vocab?: unknown;
       videoClips?: unknown;
+      videoHistory?: unknown;
+      noteVideos?: unknown;
       pdfBooks?: unknown;
       wordDrill?: unknown;
       wordStories?: unknown;
@@ -1315,6 +1326,17 @@ export function useVault() {
         (it) => (typeof it.id === 'string' ? it.id : undefined),
         (p) => importClips(p),
       ));
+    }
+    if (data.videoHistory) {
+      const cur = exportVideoHistory();
+      storeMerges.push(await mergeListStore(
+        '视频历史', data.videoHistory, new Set(cur.map((h) => h.media)),
+        (it) => (typeof it.media === 'string' ? it.media : undefined),
+        (p) => importVideoHistory(p),
+      ));
+    }
+    if (data.noteVideos) {
+      storeMerges.push(await mergeObjectStore('笔记视频关联', data.noteVideos, exportNoteVideos(), (p) => { importNoteVideos(p); }));
     }
     if (data.pdfBooks) {
       try {

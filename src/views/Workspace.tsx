@@ -19,8 +19,18 @@ import OutlinePanel from './OutlinePanel';
 import ChapterAnnotations from './ChapterAnnotations';
 // 音频条 + 字幕轨：打开笔记就可能用到，依赖很小（core/subtitle + icons），不单独拆 chunk
 import MediaTrack from './MediaTrack';
-import VideoNoteView from './VideoNoteView';
+const VideoNoteView = lazy(() => import('./VideoNoteView'));
+import {
+  bindNoteVideo,
+  getVideoForNote,
+  getVideoHistoryItem,
+  recordVideoHistory,
+  resumeSeconds,
+  updateVideoHistoryProgress,
+  type VideoHistoryEntry,
+} from '../core/videoNotes';
 import { mediaKeyOf, parseBilibili, parseVideoSource, withStart } from '../core/videoSource';
+import type { LocalFileHandleLike } from '../storage/videoHandles';
 import { buildCards } from '../core/srsCards';
 import { getMistake, loadMistakes, reasonCounts } from '../core/mistakes';
 import { loadBanks } from '../core/qbank';
@@ -73,6 +83,8 @@ const CourseWorkshopView = lazy(() => import('./CourseWorkshopView'));
 // 资料生成：素材 → AI 大纲 → 分节讲义（anydoc/ mammoth / pdfjs 都懒加载在 core 内部）
 const MatGenView = lazy(() => import('./MatGenView'));
 const WordDrillView = lazy(() => import('./WordDrillView'));
+// 手机笔记同步：选择章节目录里的笔记 → 二维码 → 手机只读阅读。
+const NoteSyncPanel = lazy(() => import('./NoteSyncPanel'));
 // 思维导图懒加载（mind-elixir 依赖较大，打开时才加载）
 const MindMapView = lazy(() => import('./MindMapView'));
 // 重依赖视图懒加载：force-graph / mammoth+xlsx / PDF.js 都很大，按需加载
@@ -92,6 +104,7 @@ const ImportView = lazy(() => import('./ImportView'));
 const HistoryPanel = lazy(() => import('./HistoryPanel'));
 import AiPanel from './AiPanel';
 import type { QuoteSelection } from './agentChat';
+import SelectionAsk from './SelectionAsk';
 // AI 笔记（pi-agent-core）与智能草稿（pdfjs + OCR，近 1MB）都很大：静态引入会把它们塞进首屏包。
 // 与其余面板同一口径：打开时才下载各自 chunk。
 const AiAgentPanel = lazy(() => import('./AiAgentPanel'));
@@ -353,6 +366,11 @@ export default function Workspace() {
    * 选完本地文件再粘一个 B 站链接就把旧的漏掉了（那条路径直接 setVideoSrc 覆盖）。
    */
   const videoBlobRef = useRef<string | null>(null);
+  const videoActionsRef = useRef<{
+    insertAnchor: () => void;
+    seekBy: (delta: number) => void;
+    togglePlay: () => void;
+  } | null>(null);
   const releaseVideoBlob = useCallback(() => {
     const prev = videoBlobRef.current;
     videoBlobRef.current = null;
@@ -365,21 +383,39 @@ export default function Workspace() {
    * 打开视频面板。给了 file 就换成 blob 地址（本地文件不走网络）；
    * 不给则只把面板叫出来，让用户点「换视频」。
    */
-  const openVideo = (file?: File) => {
+  const openVideo = (file?: File, handle?: LocalFileHandleLike) => {
     if (file) {
       releaseVideoBlob();
       const url = URL.createObjectURL(file);
       videoBlobRef.current = url;
-      setVideoSrc(url);
-      videoPageRef.current = null;
       // 片段归属键：浏览器 file API 拿不到真实路径，只用文件名会让两个目录下同名、
       // 内容不同的视频共用同一份片段清单（点进去跳到另一个视频）。
       // 加上大小与修改时间后碰撞概率接近零，同一次选同一个文件仍然稳定。
-      setVideoMedia(`${file.name}|${file.size}|${file.lastModified}`);
+      const media = `${file.name}|${file.size}|${file.lastModified}`;
+      const prev = getVideoHistoryItem(media);
+      const notePath = vault.currentPath ?? undefined;
+      recordVideoHistory({ media, url: '', title: file.name, kind: 'local', notePath });
+      if (notePath) bindNoteVideo(notePath, media);
+      if (handle) void import('../storage/videoHandles').then((m) => m.saveLocalVideoHandle(media, handle));
+      setVideoSrc(url);
+      videoPageRef.current = null;
+      setVideoMedia(media);
       setVideoTitle(file.name);
-      setVideoSeek(null);
+      setVideoSeek(resumeSeconds(prev));
     }
     panels.open('video');
+  };
+
+  /** 挑选本地视频：支持 File System Access API 时顺手存句柄，不支持则退回隐藏 input */
+  const pickLocalVideo = async () => {
+    const { pickLocalVideoWithHandle } = await import('../storage/videoHandles');
+    const picked = await pickLocalVideoWithHandle();
+    if (picked === 'unsupported') {
+      videoInputRef.current?.click();
+      return;
+    }
+    if (!picked) return;
+    openVideo(picked.file, picked.handle);
   };
 
   /**
@@ -388,14 +424,46 @@ export default function Workspace() {
    */
   const openVideoUrl = (url: string, opts: { title?: string; seekTo?: number | null } = {}) => {
     const source = parseVideoSource(url);
+    const media = mediaKeyOf(source, url);
+    const prev = getVideoHistoryItem(media);
+    const title = opts.title || prev?.title || source.title;
+    const canonicalUrl = source.pageUrl ?? source.playUrl ?? url.trim();
+    const notePath = vault.currentPath ?? undefined;
+    recordVideoHistory({ media, url: canonicalUrl, title, kind: source.kind, notePath });
+    if (notePath) bindNoteVideo(notePath, media);
     videoPageRef.current = source.pageUrl;
     releaseVideoBlob();
     setVideoSrc(source.playUrl ?? source.pageUrl ?? url);
-    setVideoMedia(mediaKeyOf(source, url));
-    setVideoTitle(opts.title || source.title);
-    setVideoSeek(opts.seekTo ?? null);
+    setVideoMedia(media);
+    setVideoTitle(title);
+    setVideoSeek(opts.seekTo !== undefined ? opts.seekTo : resumeSeconds(prev));
     panels.open('video');
     if (source.note) toast(source.note, 'info', 6000);
+  };
+
+  /** 从视频历史里重新打开：链接直接跳回上次进度；本地文件先尝试从 IndexedDB 句柄直开，拿不到再提示重选 */
+  const openHistoryVideo = async (entry: VideoHistoryEntry, seekOverride?: number | null) => {
+    const targetSeek = seekOverride !== undefined ? seekOverride : resumeSeconds(entry);
+    if (entry.url) {
+      openVideoUrl(entry.url, { title: entry.title, seekTo: targetSeek });
+      return;
+    }
+    const { openLocalVideoFromHandle } = await import('../storage/videoHandles');
+    const restored = await openLocalVideoFromHandle(entry.media);
+    if (restored) {
+      openVideo(restored);
+      if (targetSeek != null) setVideoSeek(targetSeek);
+      return;
+    }
+    releaseVideoBlob();
+    videoPageRef.current = null;
+    setVideoSrc(null);
+    setVideoMedia(entry.media);
+    setVideoTitle(entry.title);
+    setVideoSeek(targetSeek ?? null);
+    recordVideoHistory({ media: entry.media, url: '', title: entry.title, kind: entry.kind });
+    panels.open('video');
+    toast('本地视频需重新选择文件才能播放（已切换到它的片段库）', 'info', 4500);
   };
 
   /** 课程工坊的分P「▶」/ 课程笔记里的 `#cw=`：关掉工坊，在视频栏打开对应分P */
@@ -405,7 +473,7 @@ export default function Workspace() {
       .filter(Boolean)
       .join(' · ');
     panels.close('course');
-    openVideoUrl(url, { title: title || undefined, seekTo: target.seconds ?? null });
+    openVideoUrl(url, { title: title || undefined, seekTo: target.seconds });
     return true;
   };
 
@@ -417,8 +485,11 @@ export default function Workspace() {
   };
 
   /**
-   * 点笔记里的锚点：能读进度的直接跳；B站在面板里重载 iframe；抖音/网盘开浏览器定位。
-   * 什么都没选中时只把面板叫出来——此时点锚点不该悄悄开一个新标签页。
+   * 点笔记里的锚点：
+   * 1. 当前已加载了可跳视频 → 直接跳转；
+   * 2. 当前已加载了外部页来源 → 在浏览器打开并带时间参数；
+   * 3. 当前没加载视频 → 先查该笔记绑定的历史视频或 frontmatter `source` 自动拉起并跳转；
+   * 4. 实在没有关联来源 → 只打开面板并提示。
    */
   const jumpVideoAnchor = (seconds: number): boolean => {
     const source = parseVideoSource(videoSrc ?? '');
@@ -431,6 +502,23 @@ export default function Workspace() {
     if (page) {
       window.open(withStart(page, seconds), '_blank', 'noopener');
       return true;
+    }
+    const boundMedia = getVideoForNote(vault.currentPath);
+    const boundEntry = boundMedia ? getVideoHistoryItem(boundMedia) : undefined;
+    if (boundEntry) {
+      void openHistoryVideo(boundEntry, seconds);
+      return true;
+    }
+    if (vault.currentPath && draft != null) {
+      const parsed = parseFrontmatterCached(vault.currentPath, draft);
+      const fmSource = typeof parsed.meta.source === 'string' ? parsed.meta.source.trim() : '';
+      if (fmSource) {
+        const fmParsed = parseVideoSource(fmSource);
+        if (fmParsed.kind !== 'unknown') {
+          openVideoUrl(fmSource, { title: parsed.title || undefined, seekTo: seconds });
+          return true;
+        }
+      }
     }
     openVideo();
     toast('已打开视频面板（锚点 ' + seconds + ' 秒）：先选视频或粘贴链接', 'info', 5200);
@@ -565,6 +653,28 @@ export default function Workspace() {
       if (matchesBinding(e, keys.print)) {
         e.preventDefault();
         printCurrentNote();
+        return;
+      }
+      if (videoActionsRef.current) {
+        if (matchesBinding(e, keys.videoAnchor)) {
+          e.preventDefault();
+          videoActionsRef.current.insertAnchor();
+          return;
+        }
+        if (matchesBinding(e, keys.videoBack)) {
+          e.preventDefault();
+          videoActionsRef.current.seekBy(-3);
+          return;
+        }
+        if (matchesBinding(e, keys.videoForward)) {
+          e.preventDefault();
+          videoActionsRef.current.seekBy(3);
+          return;
+        }
+        if (matchesBinding(e, keys.videoToggle)) {
+          e.preventDefault();
+          videoActionsRef.current.togglePlay();
+        }
       }
     };
     window.addEventListener('keydown', handler);
@@ -1812,6 +1922,7 @@ export default function Workspace() {
               onCreate={handleCreate}
               onExport={exportBackup}
               onExportFolder={() => vault.exportMdFolder()}
+              onSyncNotes={isTauri() ? () => openOnly('noteSync', () => panels.open('noteSync')) : undefined}
               onImport={(t) => vault.importBackup(t)}
               onImportMd={(files) => vault.importMdFiles(files)}
               autoRepairReport={vault.autoRepair}
@@ -2434,9 +2545,24 @@ export default function Workspace() {
           onClose={() => panels.close('course')}
           onToast={toast}
           docs={vault.docs}
-          onSave={vault.save}
-          createNote={vault.createNote}
-          onOpenNote={(path) => vault.setCurrentPath(path)}
+          onSave={async (path, content) => {
+            await vault.save(path, content);
+            if (editRef.current.vault.currentPath === path) {
+              setDraft(content);
+              setDirty(false);
+            }
+          }}
+          createNote={async (dir, title, content) => {
+            flushDraft();
+            const path = await vault.createNote(dir, title, content);
+            setDraft(content);
+            setDirty(false);
+            pushRecent(path);
+            return path;
+          }}
+          onOpenNote={(path) => {
+            if (editRef.current.vault.currentPath !== path) openNote(path);
+          }}
           onOpenVideo={openCourseVideo}
           onCourseMeta={rememberCourse}
           initialBvid={courseInitialBvid}
@@ -2559,26 +2685,41 @@ export default function Workspace() {
              * 实测会把它撑到 908px 宽、越过整栏 288px 跑出窗口，之后分隔条也一起失效。
              */
             <div className="video-note-wrap">
-              <VideoNoteView
-                key={videoMedia}
-                src={videoSrc}
-                media={videoMedia}
-                title={videoTitle}
-                seekTo={videoSeek}
-                onSeekConsumed={() => setVideoSeek(null)}
-                onPick={() => videoInputRef.current?.click()}
-                onUrl={openVideoUrl}
-                course={videoCourse}
-                onOpenCourseNote={(path) => openNote(path)}
-                onOpenCourse={openCourseFromVideo}
-                onInsert={(md) => { const ins = editorInsertRef.current; if (!ins) return false; ins(md); return true; }}
-                onAttach={(name, blob) => vault.saveAttachment(name, blob)}
-                hasAttachment={(path) => vault.hasAttachment(path)}
-                // 标题栏拖动 = 移动整栏（transform 写在 .dock-col 上）；双击标题栏复位
-                onDragStart={dockDrag.onHandlePointerDown}
-                onDragReset={dockDrag.reset}
-                onClose={() => panels.close('video')}
-              />
+              <Suspense fallback={<div className="loading">视频笔记加载中…</div>}>
+                <VideoNoteView
+                  key={videoMedia}
+                  src={videoSrc}
+                  media={videoMedia}
+                  title={videoTitle}
+                  seekTo={videoSeek}
+                  onSeekConsumed={() => setVideoSeek(null)}
+                  onPick={() => { void pickLocalVideo(); }}
+                  onUrl={openVideoUrl}
+                  onOpenHistory={(entry) => { void openHistoryVideo(entry); }}
+                  currentNotePath={vault.currentPath}
+                  onOpenNote={(path) => openNote(path)}
+                  onRegisterActions={(actions) => { videoActionsRef.current = actions; }}
+                  course={videoCourse}
+                  onOpenCourseNote={(path) => openNote(path)}
+                  onOpenCourse={openCourseFromVideo}
+                  onInsert={(md) => {
+                    const ins = editorInsertRef.current;
+                    if (!ins) return false;
+                    ins(md);
+                    if (vault.currentPath && videoMedia) {
+                      bindNoteVideo(vault.currentPath, videoMedia);
+                      updateVideoHistoryProgress(videoMedia, { notePath: vault.currentPath });
+                    }
+                    return true;
+                  }}
+                  onAttach={(name, blob) => vault.saveAttachment(name, blob)}
+                  hasAttachment={(path) => vault.hasAttachment(path)}
+                  // 标题栏拖动 = 移动整栏（transform 写在 .dock-col 上）；双击标题栏复位
+                  onDragStart={dockDrag.onHandlePointerDown}
+                  onDragReset={dockDrag.reset}
+                  onClose={() => panels.close('video')}
+                />
+              </Suspense>
             </div>
           )}
           {/* AI 笔记在上沿挂分隔条：与视频同开时它就落在两块之间（互换高度），单开时就是它自己的上沿 */}
@@ -2629,6 +2770,8 @@ export default function Workspace() {
           />
         </div>
       )}
+      {/* 全局划词：正文/复习卡/思维导图里选中一段 → 浮出「问 AI」，带进对话当引用 */}
+      <SelectionAsk path={vault.currentPath} onAsk={askAgent} />
       {panels.is('notice') && <SafetyNotice onClose={() => panels.close('notice')} />}
       {panels.is('draft') && (
         <Suspense fallback={<div className="loading">草稿生成器加载中…</div>}>
@@ -2757,6 +2900,17 @@ export default function Workspace() {
             />
           </Suspense>
         </div>
+      )}
+
+      {panels.is('noteSync') && (
+        <Suspense fallback={null}>
+          <NoteSyncPanel
+            docs={vault.docs}
+            paths={notePaths}
+            initialPath={vault.currentPath}
+            onClose={() => panels.close('noteSync')}
+          />
+        </Suspense>
       )}
 
       {/* 桌宠：fixed 定位，不参与 .app 的 flex 布局，也不挡面板遮罩 */}

@@ -220,7 +220,8 @@ export default function ReviewView({ paths, docs, resolve, onOpenLink, readFile,
   const backText = card ? card.back ?? card.body : '';
   // 挖空只影响呈现，不动卡键（见 core/cloze.ts 的设计约束）
   const clozeCount = countCloze(backText);
-  const clozeMasked = clozeCount ? maskCloze(backText) : backText;
+  // 传入 {{＿＿＿}} 让 Preview 渲染成 .cloze-blank 胶囊（定宽不泄密、视觉与背诵模式统一）
+  const clozeMasked = clozeCount ? maskCloze(backText, '{{＿＿＿}}') : backText;
   const backRevealed = clozeCount ? revealCloze(backText) : backText;
   const hasMnemonic = /口诀:[ \t]*\S/.test(backText);
   const showMnemonicOnly = hasMnemonic && !revealed;

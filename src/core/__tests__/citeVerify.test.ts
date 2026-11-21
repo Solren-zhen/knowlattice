@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as pageAnchorModule from '../pageAnchor';
 import {
-  foldLigatures, lookupQuote, normalizeForCite, parseCitations, verifyCitations, verifyQuote,
+  foldLigatures, groupCitations, lookupQuote, normalizeForCite, parseCitations, verifyCitations, verifyQuote,
 } from '../citeVerify';
 
 /** 统计剥离页码锚点的调用次数：证明核验缓存确实把「每条引用 × 每篇笔记」的重复剥离消掉 */
@@ -167,5 +167,34 @@ describe('核验缓存', () => {
     const r = verifyCitations('“原始结论是心输出量增加”〔P1〕', after)[0];
     expect(r.status).toBe('not_found');
     expect(r.hits).toBe(0);
+  });
+});
+
+describe('groupCitations（重复引用闸门）', () => {
+  it('同一句同一本书引多次只留一条，并记下次数', () => {
+    const docs = new Map([['甲.md', '甲状腺激素由滤泡上皮细胞分泌。']]);
+    const raw = verifyCitations(
+      '“由滤泡上皮细胞分泌”〔《甲》 P12〕；再说一遍“由滤泡上皮细胞分泌”〔《甲》 P12〕；“由滤泡上皮细胞分泌”〔P12〕',
+      docs,
+    );
+    expect(raw).toHaveLength(3);
+    const grouped = groupCitations(raw);
+    // 前两条键相同（同书同名原文）合并成一条；第三条没书名，是另一个键
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0].repeats).toBe(2);
+    expect(grouped[0].status).toBe('exact');
+    expect(grouped[1].repeats).toBe(1);
+  });
+  it('合并取第一条的页码：重复引用页码不一致时以第一次出现的为准', () => {
+    const docs = new Map([['甲.md', '甲状腺激素由滤泡上皮细胞分泌。']]);
+    const grouped = groupCitations(
+      verifyCitations('“由滤泡上皮细胞分泌”〔《甲》 P12〕；“由滤泡上皮细胞分泌”〔《甲》 P34〕', docs),
+    );
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].page).toBe(12);
+    expect(grouped[0].repeats).toBe(2);
+  });
+  it('空输入返回空数组（面板据此不渲染徽标行）', () => {
+    expect(groupCitations([])).toEqual([]);
   });
 });

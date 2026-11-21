@@ -21,6 +21,7 @@ import {
   saveAccount,
   topQuality,
   type BiliAccount,
+  type BiliPart,
   type BiliPlayInfo,
   type BiliView,
 } from '../core/biliPlay'
@@ -36,6 +37,8 @@ interface Props {
   videoRef: React.RefObject<HTMLVideoElement | null>
   /** 原生播放器已挂载且元数据可读（上层据此开放进度、锚点与 A-B 控件） */
   onReady?: (video: HTMLVideoElement) => void
+  /** 取到 B 站稿件信息（真实标题、分P名、时长与完整分P表） */
+  onMeta?: (meta: { title: string; part?: string; duration?: number; parts?: BiliPart[] }) => void
   /** 原生播放不可用（比如没走 dev 代理）时，退回内嵌播放器 */
   onFallback: (reason: string) => void
 }
@@ -50,9 +53,13 @@ export default function BiliPlayer({
   onSeekConsumed,
   videoRef,
   onReady,
+  onMeta,
   onFallback,
 }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const pendingSeekRef = useRef<number | null>(null)
+  const onMetaRef = useRef(onMeta)
+  onMetaRef.current = onMeta
   /**
    * 请求序号：每次取地址自增，回来时对不上就整段丢弃。
    * 切分P / 切画质会并发两三次请求，先发的若后回来会把界面覆盖成过期结果
@@ -83,8 +90,14 @@ export default function BiliPlayer({
         const v = await fetchView(bvid, acc)
         if (reqId !== reqIdRef.current) return
         setView(v)
-        const target =
-          v.parts.find((x) => x.page === page)?.cid ?? v.cid
+        const partObj = v.parts.find((x) => x.page === page) ?? v.parts[0]
+        onMetaRef.current?.({
+          title: v.title,
+          part: v.parts.length > 1 ? partObj?.part : undefined,
+          duration: partObj?.duration ?? v.duration,
+          parts: v.parts,
+        })
+        const target = partObj?.cid ?? v.cid
         const p = await fetchPlayurl(bvid, target, acc, qn ?? 127)
         if (reqId !== reqIdRef.current) return
         setInfo(p)
@@ -186,11 +199,15 @@ export default function BiliPlayer({
     }
   }, [videoRef, info])
 
-  /** 点笔记里的锚点 */
+  /** 点笔记里的锚点或历史续播：元数据未就绪时排队，避免初始跳转被浏览器的 readyState=0 吞掉 */
   useEffect(() => {
     if (seekTo == null) return
     const v = videoRef.current
-    if (!v) return
+    if (!v || v.readyState < 1) {
+      pendingSeekRef.current = seekTo
+      return
+    }
+    pendingSeekRef.current = null
     v.currentTime = Math.max(0, seekTo)
     onSeekConsumed?.()
   }, [seekTo, onSeekConsumed, videoRef, info])
@@ -208,7 +225,16 @@ export default function BiliPlayer({
             src={src}
             controls
             playsInline
-            onLoadedMetadata={(e) => onReady?.(e.currentTarget)}
+            onLoadedMetadata={(e) => {
+              const video = e.currentTarget
+              const pending = pendingSeekRef.current
+              if (pending != null) {
+                pendingSeekRef.current = null
+                video.currentTime = Math.max(0, pending)
+                onSeekConsumed?.()
+              }
+              onReady?.(video)
+            }}
             // 不设 crossOrigin：CDN 不带 CORS 头时设了它连播放都会被拒；取帧失败由上层提示
           />
           {info?.audio ? <audio ref={audioRef} src={proxied(info.audio.url, 'audio')} preload="auto" /> : null}

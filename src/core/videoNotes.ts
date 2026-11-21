@@ -11,6 +11,7 @@
  * 它和 noteMedia 一样是「用户一条条攒出来的记录」，不随备份走就会在换设备时无声消失。
  */
 import { formatTime } from './subtitle';
+import type { VideoSourceKind } from './videoSource';
 
 export const ANCHOR_PREFIX = '#vn=';
 
@@ -54,6 +55,8 @@ export interface VideoClip {
   label: string;
   tags: string[];
   at: number;
+  /** 是否已插入到某篇笔记正文（用于去重提示） */
+  inserted?: boolean;
 }
 
 export const CLIPS_KEY = 'knowlattice-video-clips';
@@ -107,6 +110,7 @@ export function importClips(raw: unknown): number {
       end: v.end == null ? null : Math.max(0, Math.round(v.end)),
       label: typeof v.label === 'string' ? v.label : '',
       tags: v.tags.filter((t) => typeof t === 'string'),
+      ...(v.inserted === true ? { inserted: true } : {}),
     });
     added += 1;
   }
@@ -173,6 +177,39 @@ export function removeClip(id: string): { clips: VideoClip[]; ok: boolean } {
   return { clips, ok: save(clips) };
 }
 
+/** 更新已有片段的备注、标签或已插入状态。 */
+export function updateClip(
+  id: string,
+  patch: { label?: string; tags?: string[]; inserted?: boolean },
+): { clips: VideoClip[]; ok: boolean } {
+  const clips = loadClips();
+  const idx = clips.findIndex((c) => c.id === id);
+  if (idx < 0) return { clips, ok: true };
+  const cur = clips[idx];
+  const nextItem: VideoClip = {
+    ...cur,
+    ...(patch.label !== undefined ? { label: patch.label } : {}),
+    ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
+    ...(patch.inserted !== undefined ? { inserted: patch.inserted } : {}),
+  };
+  const next = clips.slice();
+  next[idx] = nextItem;
+  return { clips: next, ok: save(next) };
+}
+
+/** 批量标记片段已插入笔记（只有实际发生变化时才写盘）。 */
+export function markClipsInserted(ids: string[]): { clips: VideoClip[]; ok: boolean } {
+  const target = new Set(ids);
+  const clips = loadClips();
+  let changed = false;
+  const next = clips.map((c) => {
+    if (!target.has(c.id) || c.inserted) return c;
+    changed = true;
+    return { ...c, inserted: true };
+  });
+  return { clips: next, ok: changed ? save(next) : true };
+}
+
 /** 面板只列当前视频的片段；`query` 匹配标签、备注与时间文字。 */
 export function clipsFor(clips: VideoClip[], media: string, query = ''): VideoClip[] {
   const q = query.trim().toLowerCase();
@@ -212,4 +249,378 @@ export function loopNext(current: number, a: number | null, b: number | null): n
   const to = Math.max(a, b);
   if (current >= to) return from;
   return null;
+}
+
+export interface VideoHistoryEntry {
+  /** 视频标识（与 VideoClip.media 同一口径，作为去重键） */
+  media: string;
+  /** 可重新打开的原始链接（本地文件 blob 不跨会话持久化，存空串） */
+  url: string;
+  /** 展示标题 */
+  title: string;
+  /** 来源类型 */
+  kind: VideoSourceKind;
+  /** 最近打开时间戳（ms） */
+  at: number;
+  /** 上次播放位置（秒，取整；仅可读进度的视频有） */
+  lastTime?: number;
+  /** 视频总时长（秒，取整） */
+  duration?: number;
+  /** 是否置顶（置顶条目不参与 LRU 淘汰） */
+  pinned?: boolean;
+  /** 最近配合编辑的笔记路径 */
+  notePath?: string;
+  /** 上次使用的播放倍速 */
+  playbackRate?: number;
+}
+
+export const VIDEO_HISTORY_KEY = 'knowlattice-video-history';
+export const NOTE_VIDEO_KEY = 'knowlattice-note-video';
+export const VIDEO_RATE_KEY = 'knowlattice-video-rate';
+export const MAX_VIDEO_HISTORY = 30;
+export const VIDEO_RATES = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+
+const VALID_KINDS = new Set<string>([
+  'local',
+  'direct',
+  'bilibili',
+  'douyin',
+  'netdisk',
+  'page',
+  'unknown',
+]);
+
+function isHistoryEntry(v: unknown): v is VideoHistoryEntry {
+  const h = v as VideoHistoryEntry;
+  return (
+    !!h &&
+    typeof h.media === 'string' &&
+    h.media.trim().length > 0 &&
+    typeof h.url === 'string' &&
+    typeof h.title === 'string' &&
+    typeof h.kind === 'string' &&
+    VALID_KINDS.has(h.kind) &&
+    Number.isFinite(h.at)
+  );
+}
+
+function normalizeHistoryEntry(raw: VideoHistoryEntry): VideoHistoryEntry {
+  const out: VideoHistoryEntry = {
+    media: raw.media.trim(),
+    url: raw.url.trim(),
+    title: raw.title.trim() || raw.media.trim(),
+    kind: raw.kind,
+    at: Number.isFinite(raw.at) ? raw.at : Date.now(),
+  };
+  if (raw.lastTime != null && Number.isFinite(raw.lastTime) && raw.lastTime >= 0) {
+    out.lastTime = Math.floor(raw.lastTime);
+  }
+  if (raw.duration != null && Number.isFinite(raw.duration) && raw.duration > 0) {
+    out.duration = Math.floor(raw.duration);
+  }
+  if (raw.pinned === true) out.pinned = true;
+  if (typeof raw.notePath === 'string' && raw.notePath.trim()) {
+    out.notePath = raw.notePath.trim();
+  }
+  if (raw.playbackRate != null && Number.isFinite(raw.playbackRate) && raw.playbackRate > 0) {
+    out.playbackRate = raw.playbackRate;
+  }
+  return out;
+}
+
+function sortAndTrimHistory(list: VideoHistoryEntry[]): VideoHistoryEntry[] {
+  const pinned = list.filter((x) => x.pinned).sort((a, b) => b.at - a.at).slice(0, MAX_VIDEO_HISTORY);
+  const restSlots = Math.max(0, MAX_VIDEO_HISTORY - pinned.length);
+  const unpinned = list.filter((x) => !x.pinned).sort((a, b) => b.at - a.at).slice(0, restSlots);
+  return [...pinned, ...unpinned];
+}
+
+function saveHistory(list: VideoHistoryEntry[]): boolean {
+  try {
+    localStorage.setItem(VIDEO_HISTORY_KEY, JSON.stringify(list));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 读取视频观看历史（置顶优先，其余按最近打开倒序，最多 MAX_VIDEO_HISTORY 条）。 */
+export function loadVideoHistory(): VideoHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(VIDEO_HISTORY_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return sortAndTrimHistory(parsed.filter(isHistoryEntry).map(normalizeHistoryEntry));
+  } catch {
+    return [];
+  }
+}
+
+/** 按 media 查找单条观看历史。 */
+export function getVideoHistoryItem(media: string): VideoHistoryEntry | undefined {
+  if (!media) return undefined;
+  return loadVideoHistory().find((item) => item.media === media);
+}
+
+/** 记录一次打开视频：按 media 去重并置顶，保留已有播放进度、置顶状态、关联笔记与更完整的标题。 */
+export function recordVideoHistory(
+  entry: Omit<VideoHistoryEntry, 'at'> & { at?: number },
+  now = Date.now(),
+): VideoHistoryEntry[] {
+  const media = entry.media.trim();
+  const cur = loadVideoHistory();
+  if (!media) return cur;
+  const prev = cur.find((item) => item.media === media);
+  const nextItem: VideoHistoryEntry = {
+    media,
+    url: entry.url.trim() || prev?.url || '',
+    title: entry.title.trim() || prev?.title || media,
+    kind: entry.kind ?? prev?.kind ?? 'unknown',
+    at: entry.at ?? now,
+    ...(entry.lastTime != null && Number.isFinite(entry.lastTime) && entry.lastTime >= 0
+      ? { lastTime: Math.floor(entry.lastTime) }
+      : prev?.lastTime != null
+        ? { lastTime: prev.lastTime }
+        : {}),
+    ...(entry.duration != null && Number.isFinite(entry.duration) && entry.duration > 0
+      ? { duration: Math.floor(entry.duration) }
+      : prev?.duration != null
+        ? { duration: prev.duration }
+        : {}),
+    ...((entry.pinned ?? prev?.pinned) ? { pinned: true } : {}),
+    ...((entry.notePath?.trim() || prev?.notePath)
+      ? { notePath: entry.notePath?.trim() || prev?.notePath }
+      : {}),
+    ...((entry.playbackRate ?? prev?.playbackRate) != null
+      ? { playbackRate: entry.playbackRate ?? prev?.playbackRate }
+      : {}),
+  };
+  const next = sortAndTrimHistory([nextItem, ...cur.filter((item) => item.media !== media)]);
+  saveHistory(next);
+  return next;
+}
+
+/** 更新已有视频的播放进度、总时长、标题、关联笔记或倍速（仅在字段确实变化时写盘）。 */
+export function updateVideoHistoryProgress(
+  media: string,
+  patch: {
+    lastTime?: number;
+    duration?: number;
+    title?: string;
+    notePath?: string;
+    playbackRate?: number;
+  },
+): VideoHistoryEntry[] {
+  const cur = loadVideoHistory();
+  const idx = cur.findIndex((item) => item.media === media);
+  if (idx < 0) return cur;
+  const target = cur[idx];
+  const updated: VideoHistoryEntry = { ...target };
+  let changed = false;
+
+  if (patch.lastTime != null && Number.isFinite(patch.lastTime) && patch.lastTime >= 0) {
+    const sec = Math.floor(patch.lastTime);
+    if (updated.lastTime !== sec) {
+      updated.lastTime = sec;
+      changed = true;
+    }
+  }
+  if (patch.duration != null && Number.isFinite(patch.duration) && patch.duration > 0) {
+    const dur = Math.floor(patch.duration);
+    if (updated.duration !== dur) {
+      updated.duration = dur;
+      changed = true;
+    }
+  }
+  if (patch.title) {
+    const nextTitle = patch.title.trim();
+    if (nextTitle && updated.title !== nextTitle) {
+      updated.title = nextTitle;
+      changed = true;
+    }
+  }
+  if (patch.notePath) {
+    const nextNote = patch.notePath.trim();
+    if (nextNote && updated.notePath !== nextNote) {
+      updated.notePath = nextNote;
+      changed = true;
+    }
+  }
+  if (patch.playbackRate != null && Number.isFinite(patch.playbackRate) && patch.playbackRate > 0) {
+    if (updated.playbackRate !== patch.playbackRate) {
+      updated.playbackRate = patch.playbackRate;
+      changed = true;
+    }
+  }
+  if (!changed) return cur;
+  const next = cur.slice();
+  next[idx] = updated;
+  saveHistory(next);
+  return next;
+}
+
+/** 置顶 / 取消置顶某条观看历史。 */
+export function togglePinVideoHistory(media: string): VideoHistoryEntry[] {
+  const cur = loadVideoHistory();
+  const idx = cur.findIndex((item) => item.media === media);
+  if (idx < 0) return cur;
+  const updated: VideoHistoryEntry = { ...cur[idx] };
+  if (updated.pinned) delete updated.pinned;
+  else updated.pinned = true;
+  const next = sortAndTrimHistory(cur.map((item, i) => (i === idx ? updated : item)));
+  saveHistory(next);
+  return next;
+}
+
+/** 重命名历史视频标题。 */
+export function renameVideoHistory(media: string, title: string): VideoHistoryEntry[] {
+  const trimmed = title.trim();
+  if (!trimmed) return loadVideoHistory();
+  return updateVideoHistoryProgress(media, { title: trimmed });
+}
+
+/** 移除单条观看历史。 */
+export function removeVideoHistory(media: string): VideoHistoryEntry[] {
+  const next = loadVideoHistory().filter((item) => item.media !== media);
+  saveHistory(next);
+  return next;
+}
+
+/** 清空全部观看历史。 */
+export function clearVideoHistory(): VideoHistoryEntry[] {
+  try {
+    localStorage.removeItem(VIDEO_HISTORY_KEY);
+  } catch {
+    /* 隐私模式忽略 */
+  }
+  return [];
+}
+
+/** 导出全部观看历史（备份用）。 */
+export function exportVideoHistory(): VideoHistoryEntry[] {
+  return loadVideoHistory().map((item) => ({ ...item }));
+}
+
+/** 从备份恢复观看历史：只补不覆盖（同 media 保留本地记录）。 */
+export function importVideoHistory(raw: unknown): number {
+  if (!Array.isArray(raw)) return 0;
+  const cur = loadVideoHistory();
+  const seen = new Set(cur.map((item) => item.media));
+  const next = cur.slice();
+  let added = 0;
+  for (const v of raw) {
+    if (!isHistoryEntry(v)) continue;
+    const item = normalizeHistoryEntry(v);
+    if (seen.has(item.media)) continue;
+    seen.add(item.media);
+    next.push(item);
+    added += 1;
+  }
+  if (added > 0) {
+    saveHistory(sortAndTrimHistory(next));
+  }
+  return added;
+}
+
+/** 读取「笔记路径 → 视频标识」映射。 */
+export function loadNoteVideoMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(NOTE_VIDEO_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (k.trim() && typeof v === 'string' && v.trim()) out[k.trim()] = v.trim();
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function getVideoForNote(notePath: string | null | undefined): string | null {
+  const p = notePath?.trim();
+  if (!p) return null;
+  return loadNoteVideoMap()[p] ?? null;
+}
+
+/** 绑定笔记与视频（不改变无关条目）。 */
+export function bindNoteVideo(notePath: string, media: string): Record<string, string> {
+  const p = notePath.trim();
+  const m = media.trim();
+  const cur = loadNoteVideoMap();
+  if (!p || !m || cur[p] === m) return cur;
+  const next = { ...cur, [p]: m };
+  try {
+    localStorage.setItem(NOTE_VIDEO_KEY, JSON.stringify(next));
+  } catch {
+    /* 隐私模式忽略 */
+  }
+  return next;
+}
+
+export function exportNoteVideos(): Record<string, string> {
+  return { ...loadNoteVideoMap() };
+}
+
+/** 从备份恢复笔记视频关联：只补不覆盖。 */
+export function importNoteVideos(raw: unknown): number {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 0;
+  const cur = loadNoteVideoMap();
+  let added = 0;
+  const next = { ...cur };
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const key = k.trim();
+    if (!key || typeof v !== 'string' || !v.trim() || key in cur) continue;
+    next[key] = v.trim();
+    added += 1;
+  }
+  if (added > 0) {
+    try {
+      localStorage.setItem(NOTE_VIDEO_KEY, JSON.stringify(next));
+    } catch {
+      /* 忽略 */
+    }
+  }
+  return added;
+}
+
+/** 读取默认播放倍速（默认 1x）。 */
+export function loadVideoRate(): number {
+  try {
+    const raw = localStorage.getItem(VIDEO_RATE_KEY);
+    if (!raw) return 1;
+    const n = Number(JSON.parse(raw));
+    return Number.isFinite(n) && n > 0 && n <= 4 ? n : 1;
+  } catch {
+    return 1;
+  }
+}
+
+export function saveVideoRate(rate: number): number {
+  const safe = Number.isFinite(rate) && rate > 0 && rate <= 4 ? rate : 1;
+  try {
+    localStorage.setItem(VIDEO_RATE_KEY, JSON.stringify(safe));
+  } catch {
+    /* 忽略 */
+  }
+  return safe;
+}
+
+/** 判断 media 是否是本地文件的复合键（`文件名|大小|修改时间`）。 */
+export function isLocalMediaKey(media: string): boolean {
+  return /^.+\|\d+\|\d+$/.test(media);
+}
+
+/** 计算适合续播的起始秒数；接近结尾（距末尾不足 2 秒）或 0 秒时不续播。 */
+export function resumeSeconds(
+  entry: Pick<VideoHistoryEntry, 'lastTime' | 'duration'> | null | undefined,
+): number | null {
+  if (!entry || entry.lastTime == null || entry.lastTime <= 0) return null;
+  if (entry.duration != null && entry.duration > 0 && entry.lastTime >= entry.duration - 2) {
+    return null;
+  }
+  return entry.lastTime;
 }

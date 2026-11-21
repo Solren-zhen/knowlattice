@@ -589,3 +589,21 @@ body.is-col-drag, body.is-col-drag * { cursor: col-resize !important; user-selec
   .editor-toolbar .toolbar-divider,
   .editor-toolbar .word-count { display: none; }
 }
+
+/* 全局划词「问 AI」：浮在选区上方的小按钮（SelectionAsk.tsx）。
+   层级要高于遮罩(86)：否则在整屏面板里选中文字时，按钮被半透明压住、看得见点不到。 */
+.sel-ask {
+  position: fixed;
+  z-index: 88;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-accent);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: var(--fs-caption);
+  line-height: 1.4;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 28%);
+}
+.sel-ask:hover { color: var(--accent); border-color: var(--accent); }

@@ -215,16 +215,42 @@
 [data-theme='guofeng'] .home-feat,
 [data-theme='guofeng'] .panel,
 [data-theme='guofeng'] .quiz-panel,
+[data-theme='guofeng'] .mistake-panel,
+[data-theme='guofeng'] .notice-panel,
+[data-theme='guofeng'] .note-sync,
 [data-theme='guofeng'] .convert-panel,
 [data-theme='guofeng'] .draft-panel,
 [data-theme='guofeng'] .recite-panel,
-[data-theme='guofeng'] .sheet-panel {
+[data-theme='guofeng'] .sheet-panel,
+[data-theme='guofeng'] .img-picker__card,
+[data-theme='guofeng'] .img-lib__lightbox-body,
+[data-theme='guofeng'] .anatomy-panel,
+[data-theme='guofeng'] .anatomy-note-card,
+[data-theme='guofeng'] .mindmap-panel {
   background: var(--bg-raised);
   background-image: none;
   border-color: var(--border);
   box-shadow: var(--shadow-sm);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
+}
+[data-theme='guofeng'] .panel.panel--full,
+[data-theme='guofeng'] .mindmap-overlay.panel--full {
+  background: color-mix(in srgb, var(--bg) 93%, transparent);
+  background-image: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+[data-theme='guofeng'] .panel .wd-side,
+[data-theme='guofeng'] .panel .wd-story__paper,
+[data-theme='guofeng'] .panel .dash-ach-item,
+[data-theme='guofeng'] .panel .opt:not(.right):not(.wrong):not(.on),
+[data-theme='guofeng'] .note-sync .note-sync__list {
+  background: var(--bg-raised);
+  background-image: none;
+  border-color: var(--border);
+  box-shadow: none;
 }
 [data-theme='guofeng'] .home-wb__card {
   border-top: 2px solid color-mix(in srgb, var(--text) 72%, transparent);
@@ -266,14 +292,31 @@
   background: var(--accent-soft);
   border-color: var(--border-accent);
 }
-[data-theme='guofeng'] .panel-backdrop {
+[data-theme='guofeng'] .panel-backdrop,
+[data-theme='guofeng'] .notice-overlay,
+[data-theme='guofeng'] .mistake-overlay,
+[data-theme='guofeng'] .graph-overlay {
   background: var(--lg-scrim);
   backdrop-filter: blur(6px) saturate(110%);
   -webkit-backdrop-filter: blur(6px) saturate(110%);
 }
-[data-theme='guofeng'] .panel__head {
+[data-theme='guofeng'] .panel__head,
+[data-theme='guofeng'] .quiz-header,
+[data-theme='guofeng'] .mistake-header,
+[data-theme='guofeng'] .review-header,
+[data-theme='guofeng'] .notice-header,
+[data-theme='guofeng'] .anatomy-header,
+[data-theme='guofeng'] .mindmap-header {
   background: var(--bg-raised);
+  background-image: none;
   border-bottom-color: var(--border);
+}
+[data-theme='guofeng'] .review-scope {
+  background: var(--panel);
+  border-bottom-color: var(--border);
+}
+[data-theme='guofeng'] .quiz-footer {
+  background: linear-gradient(180deg, transparent, var(--bg-raised) 36%);
 }
 [data-theme='guofeng'] .editor-toolbar {
   background: var(--bg-raised);
@@ -287,6 +330,9 @@
 /* ---- 大标题：衬线；数字用衬线字阶，正文仍是系统字 ---- */
 [data-theme='guofeng'] .home-title,
 [data-theme='guofeng'] .panel__title,
+[data-theme='guofeng'] .quiz-title,
+[data-theme='guofeng'] .mistake-title,
+[data-theme='guofeng'] .wd-idle__title,
 [data-theme='guofeng'] .preview.placeholder .hero-title,
 [data-theme='guofeng'] .sc-head h2 {
   font-family: var(--font-display);
@@ -390,4 +436,14 @@
 [data-theme='guofeng'] .rail-home > svg,
 [data-theme='guofeng'] .rail-home > img {
   filter: sepia(0.9) saturate(1.15) hue-rotate(118deg) brightness(0.92);
+}
+
+/* 挖空：纸墨下撤掉玻璃顶边白高光，保持宣纸哑光质感 */
+[data-theme='guofeng'] .preview.md-recite .cloze-blank:not([data-revealed]) {
+  background-color: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+[data-theme='guofeng'] .preview.md-recite .cloze-blank:not([data-revealed]):hover {
+  background-color: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
 }

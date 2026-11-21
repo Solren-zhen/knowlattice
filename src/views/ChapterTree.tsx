@@ -12,7 +12,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { ImportResult, TreeNode } from '../core/vault';
 import { NOTE_TYPE_LABELS, type NoteType } from '../core/parser';
-import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore, IconTrash, IconImage, IconSearch, IconClose } from './icons';
+import { IconPlus, IconBackup, IconRestore, IconChevron, IconFolder, IconFolderIn, IconBatch, IconMore, IconTrash, IconImage, IconSearch, IconClose, IconLink } from './icons';
 import { loadTreeOpenDirs, saveTreeOpenDirs } from '../core/treeState';
 import { toast, confirmBox } from '../core/feedback';
 import { tauriErrorText } from '../storage/tauriError';
@@ -42,6 +42,8 @@ interface Props {
   onCreate: (dir: string, title: string, type?: NoteType) => void;
   onExport: () => Promise<void>;
   onExportFolder: () => Promise<number>;
+  /** 打开「发送笔记到手机」的选择面板 */
+  onSyncNotes?: () => void;
   onImport: (text: string) => Promise<ImportResult>;
   /** 导入 md 文件夹（webkitdirectory 选择目录，相对路径入库） */
   onImportMd: (files: Array<{ path: string; content: string }>) => Promise<ImportResult>;
@@ -225,7 +227,7 @@ const Row = memo(function Row({
   );
 });
 
-export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExport, onExportFolder, onImport, onImportMd, onImportPack, onUnifiedImport, onDownloadExamplePack, onMigrateFromBrowser, onChangeVaultFolder, vaultDir, autoRepairReport, onRemove, onFindOrphanAttachments, onRemoveAttachments, attachmentImageCount, onOpenImageLibrary, newNoteSignal }: Props) {
+export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExport, onExportFolder, onSyncNotes, onImport, onImportMd, onImportPack, onUnifiedImport, onDownloadExamplePack, onMigrateFromBrowser, onChangeVaultFolder, vaultDir, autoRepairReport, onRemove, onFindOrphanAttachments, onRemoveAttachments, attachmentImageCount, onOpenImageLibrary, newNoteSignal }: Props) {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
   /* 首页「新建笔记」快捷入口：信号一变就展开新建表单。
@@ -759,6 +761,11 @@ export default function ChapterTree({ tree, currentPath, onOpen, onCreate, onExp
                 <div onClick={() => { setMoreOpen(false); void onExport().catch((err: unknown) => toast(`备份失败：${(err as Error).message}`, 'err')); }} {...clickable()}>
                   <IconBackup /> 备份到 .json
                 </div>
+                {onSyncNotes && (
+                  <div onClick={() => { setMoreOpen(false); onSyncNotes(); }} {...clickable('选择章节目录里的笔记，生成二维码后可在手机端只读查看')}>
+                    <IconLink /> 发送到手机
+                  </div>
+                )}
                 <div onClick={() => void exportFolder()} {...clickable()}>
                   <IconFolder /> 导出 md 文件夹 (.zip)
                 </div>

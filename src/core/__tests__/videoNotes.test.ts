@@ -9,17 +9,38 @@ import {
   addClip,
   anchorHref,
   anchorMarkdown,
+  bindNoteVideo,
+  clearVideoHistory,
   clipRange,
   clipsFor,
   clipMarkdown,
   exportClips,
+  exportNoteVideos,
+  exportVideoHistory,
   findAnchors,
   formatClipRange,
+  getVideoForNote,
+  getVideoHistoryItem,
   importClips,
+  importNoteVideos,
+  importVideoHistory,
+  isLocalMediaKey,
   loadClips,
+  loadVideoHistory,
+  loadVideoRate,
   loopNext,
+  markClipsInserted,
+  MAX_VIDEO_HISTORY,
   parseAnchorHref,
+  recordVideoHistory,
   removeClip,
+  removeVideoHistory,
+  renameVideoHistory,
+  resumeSeconds,
+  saveVideoRate,
+  togglePinVideoHistory,
+  updateClip,
+  updateVideoHistoryProgress,
   type VideoClip,
 } from '../videoNotes';
 
@@ -196,5 +217,147 @@ describe('备份', () => {
     ]);
     expect(added).toBe(1);
     expect(loadClips().map((c) => c.id)).toEqual(['ok']);
+  });
+});
+
+describe('视频观看历史', () => {
+  it('按 media 去重并置顶，保留已有进度与有效标题', () => {
+    localStorage.clear();
+    recordVideoHistory({
+      media: 'bili:BV1xx411c7mD:p1',
+      url: 'https://www.bilibili.com/video/BV1xx411c7mD?p=1',
+      title: '生理学第1讲',
+      kind: 'bilibili',
+    }, 100);
+    updateVideoHistoryProgress('bili:BV1xx411c7mD:p1', { lastTime: 95, duration: 600 });
+
+    recordVideoHistory({
+      media: 'https://a.com/v.mp4',
+      url: 'https://a.com/v.mp4',
+      title: 'v.mp4',
+      kind: 'direct',
+    }, 200);
+
+    // 再次打开第一个视频：即使未传 lastTime 和 title 为空，也应保留进度并置顶
+    const list = recordVideoHistory({
+      media: 'bili:BV1xx411c7mD:p1',
+      url: 'https://www.bilibili.com/video/BV1xx411c7mD?p=1',
+      title: '',
+      kind: 'bilibili',
+    }, 300);
+
+    expect(list.map((x) => x.media)).toEqual([
+      'bili:BV1xx411c7mD:p1',
+      'https://a.com/v.mp4',
+    ]);
+    expect(list[0].title).toBe('生理学第1讲');
+    expect(list[0].lastTime).toBe(95);
+    expect(list[0].duration).toBe(600);
+  });
+
+  it('最多保留 MAX_VIDEO_HISTORY 条并按时间倒序', () => {
+    localStorage.clear();
+    for (let i = 0; i < MAX_VIDEO_HISTORY + 5; i++) {
+      recordVideoHistory({
+        media: `v-${i}`,
+        url: `https://example.com/${i}.mp4`,
+        title: `视频 ${i}`,
+        kind: 'direct',
+      }, 1000 + i);
+    }
+    const list = loadVideoHistory();
+    expect(list).toHaveLength(MAX_VIDEO_HISTORY);
+    expect(list[0].media).toBe(`v-${MAX_VIDEO_HISTORY + 4}`);
+    expect(list[list.length - 1].media).toBe('v-5');
+  });
+
+  it('更新进度、删除单条与清空历史互不干扰', () => {
+    localStorage.clear();
+    recordVideoHistory({ media: 'm1', url: 'https://a.com/1.mp4', title: '1.mp4', kind: 'direct' }, 10);
+    recordVideoHistory({ media: 'm2', url: 'https://a.com/2.mp4', title: '2.mp4', kind: 'direct' }, 20);
+    updateVideoHistoryProgress('m1', { lastTime: 42.9, duration: 120.4, title: '第一讲' });
+    expect(getVideoHistoryItem('m1')).toMatchObject({ lastTime: 42, duration: 120, title: '第一讲' });
+
+    expect(removeVideoHistory('m2').map((x) => x.media)).toEqual(['m1']);
+    expect(clearVideoHistory()).toEqual([]);
+    expect(loadVideoHistory()).toEqual([]);
+  });
+
+  it('备份导入只补不覆盖并丢弃异常条目', () => {
+    localStorage.clear();
+    recordVideoHistory({
+      media: 'm1',
+      url: 'https://a.com/1.mp4',
+      title: '本地标题',
+      kind: 'direct',
+      lastTime: 88,
+    }, 500);
+    const added = importVideoHistory([
+      { media: 'm1', url: 'https://a.com/1.mp4', title: '旧标题', kind: 'direct', at: 100, lastTime: 10 },
+      { media: 'm2', url: 'https://a.com/2.mp4', title: '新来的', kind: 'direct', at: 200 },
+      { media: '', url: 'bad', title: 'bad', kind: 'direct', at: 1 },
+      { media: 'bad-kind', url: 'x', title: 'x', kind: 'invalid', at: 1 },
+    ]);
+    expect(added).toBe(1);
+    expect(exportVideoHistory()).toHaveLength(2);
+    expect(getVideoHistoryItem('m1')?.title).toBe('本地标题');
+    expect(getVideoHistoryItem('m1')?.lastTime).toBe(88);
+  });
+
+  it('本地复合键识别与续播秒数边界', () => {
+    expect(isLocalMediaKey('生理学.mp4|1024|1700000000')).toBe(true);
+    expect(isLocalMediaKey('生理学.mp4')).toBe(false);
+    expect(resumeSeconds({ lastTime: 0, duration: 100 })).toBeNull();
+    expect(resumeSeconds({ lastTime: 99, duration: 100 })).toBeNull();
+    expect(resumeSeconds({ lastTime: 45, duration: 100 })).toBe(45);
+  });
+
+  it('置顶条目排在前面且不被 MAX_VIDEO_HISTORY 滚动淘汰', () => {
+    localStorage.clear();
+    recordVideoHistory({ media: 'pinned-course', url: 'https://a.com/p.mp4', title: '置顶课程', kind: 'direct' }, 1);
+    togglePinVideoHistory('pinned-course');
+    for (let i = 0; i < MAX_VIDEO_HISTORY + 5; i++) {
+      recordVideoHistory({ media: `v-${i}`, url: `https://a.com/${i}.mp4`, title: `视频${i}`, kind: 'direct' }, 100 + i);
+    }
+    const list = loadVideoHistory();
+    expect(list).toHaveLength(MAX_VIDEO_HISTORY);
+    expect(list[0].media).toBe('pinned-course');
+    expect(list[0].pinned).toBe(true);
+  });
+
+  it('重命名历史标题，空白串不生效', () => {
+    localStorage.clear();
+    recordVideoHistory({ media: 'm1', url: 'https://a.com/1.mp4', title: '1.mp4', kind: 'direct' }, 10);
+    renameVideoHistory('m1', '   ');
+    expect(getVideoHistoryItem('m1')?.title).toBe('1.mp4');
+    renameVideoHistory('m1', '循环系统总论');
+    expect(getVideoHistoryItem('m1')?.title).toBe('循环系统总论');
+  });
+
+  it('片段支持编辑备注/标签与标记已入笔记', () => {
+    localStorage.clear();
+    const c = seed({ media: 'a.mp4', start: 20, end: null, label: '旧备注', tags: ['旧'] });
+    const edited = updateClip(c.id, { label: '新备注', tags: ['新标签', '重点'] });
+    expect(edited.clips[0]).toMatchObject({ label: '新备注', tags: ['新标签', '重点'] });
+    const marked = markClipsInserted([c.id]);
+    expect(marked.clips[0].inserted).toBe(true);
+  });
+
+  it('笔记↔视频映射与倍速偏好支持持久化和只补不覆盖导入', () => {
+    localStorage.clear();
+    bindNoteVideo('生理学/第1章.md', 'bili:BV1xx411c7mD:p1');
+    expect(getVideoForNote('生理学/第1章.md')).toBe('bili:BV1xx411c7mD:p1');
+    const added = importNoteVideos({
+      '生理学/第1章.md': 'other',
+      '生理学/第2章.md': 'bili:BV1xx411c7mD:p2',
+    });
+    expect(added).toBe(1);
+    expect(exportNoteVideos()).toEqual({
+      '生理学/第1章.md': 'bili:BV1xx411c7mD:p1',
+      '生理学/第2章.md': 'bili:BV1xx411c7mD:p2',
+    });
+    expect(loadVideoRate()).toBe(1);
+    saveVideoRate(1.5);
+    expect(loadVideoRate()).toBe(1.5);
   });
 });

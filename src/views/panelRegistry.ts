@@ -29,6 +29,7 @@ export type PanelId =
   | 'todos' | 'dash' | 'report'
   | 'graph' | 'mind' | 'tags' | 'medref' | 'import'
   | 'pdf' | 'convert' | 'history' | 'notice' | 'settings' | 'integrity'
+  | 'noteSync'
   | 'pet'
   | 'anatomy' | 'brain' | 'imageLib'
   | 'ai' | 'agent' | 'draft' | 'video'
@@ -64,6 +65,7 @@ export const PANELS: readonly PanelDef[] = [
   { id: 'notice', rail: 'notice', modal: true },
   { id: 'settings', rail: 'settings', modal: true },
   { id: 'integrity', modal: true, note: '从设置进入的数据自检；不占导航轨，避免低频维护功能挤进入口' },
+  { id: 'noteSync', modal: true, note: '笔记发送到手机：从章节目录「更多」进入，不占导航轨' },
   { id: 'pet', modal: true, note: '桌宠自定义：从设置里进入，不占导航轨——桌宠是陪伴，不是功能入口' },
 
   // ---- 整屏模态：练习与复习 ----

@@ -34,5 +34,18 @@ export default defineConfig({
   build: {
     // scripts/size-budget.mjs 靠它把产物分成「产品 / 重依赖按需 / 入口」三类，缺了就报错退出。
     manifest: true,
+    rolldownOptions: {
+      output: {
+        // 把 <4KB 的首屏公共小模块（kv / cloze / subtitle）并成单个 chunk，避免多出零散请求
+        codeSplitting: {
+          groups: [
+            {
+              name: 'shared-core',
+              test: /[\\/]src[\\/](?:core[\\/](?:subtitle|cloze)|storage[\\/]kv)\.ts$/,
+            },
+          ],
+        },
+      },
+    },
   },
 })

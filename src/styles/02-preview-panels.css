@@ -798,104 +798,111 @@ a.wikilink.missing::after {
 
 /* ---- 笔记挖空（{{答案}}）----
    渲染出来的是真 <button>（可聚焦、Enter 可揭晓），所以这里要把它还原成行内文字，
-   不继承全局按钮的 padding/底色/字重。阅读态是淡底提示；背诵态盖成一块液态玻璃。 */
+   不继承全局按钮的 padding/底色/字重。阅读态是柔底虚线锚点；背诵态盖成轻透柔雾胶囊。 */
 .preview .cloze-blank {
   display: inline;
-  margin: 0;
-  padding: 1px 5px;
+  margin: 0 2px;
+  padding: 1px 7px;
   border: 0;
-  border-radius: 6px;
-  background: var(--accent-soft);
+  border-bottom: 1.5px dashed color-mix(in srgb, var(--accent) 48%, transparent);
+  border-radius: 5px 5px 2px 2px;
+  background-color: color-mix(in srgb, var(--accent) 7%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
   color: inherit;
   font: inherit;
   line-height: inherit;
   text-align: inherit;
-  cursor: pointer;
-  transition: var(--tr-interact);
+  cursor: default;
+  transition:
+    color var(--t-med) var(--ease),
+    background-color var(--t-med) var(--ease),
+    border-color var(--t-med) var(--ease),
+    box-shadow var(--t-med) var(--ease);
 }
 .preview .cloze-blank:hover {
-  text-decoration: underline dotted var(--border-accent);
-  text-underline-offset: 2px;
+  background-color: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-bottom-color: var(--accent);
 }
 .preview .cloze-blank:focus-visible {
   outline: 2px solid var(--border-accent);
   outline-offset: 2px;
 }
 
-/* 背诵：液态玻璃。
-   文字保持透明，所以只剩「玻璃罩住一块内容」的观感，答案读不出来。
-   底色用带饱和度的石板灰蓝而不是近白：浅底上近白玻璃会褪成一块灰渍，
-   深一档的底色让「这里有个洞」一眼可辨，高光与阴影负责玻璃质感。 */
+/* 背诵：柔雾胶囊。
+   文字保持透明，所以只剩「轻透胶囊罩住词句」的观感，答案读不出来；
+   不加厚重暗底与硬条纹，避免长段正文里出现刺眼的黑灰块；
+   内边距与阅读态保持一致，揭开/盖回时周围文字零抖动。 */
 .preview.md-recite .cloze-blank {
-  background-color: rgba(83, 96, 124, 0.82);
-  background-image:
-    linear-gradient(115deg,
-      rgba(255, 255, 255, 0.34) 0 14%,
-      rgba(255, 255, 255, 0.06) 30% 48%,
-      rgba(255, 255, 255, 0.22) 62% 74%,
-      rgba(255, 255, 255, 0.04) 90%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(15, 23, 42, 0.12));
+  cursor: pointer;
+  border-radius: 6px;
+  background-color: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  border-bottom: 1.5px solid color-mix(in srgb, var(--accent) 42%, transparent);
   color: transparent;
+  text-shadow: none;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
-    0 1px 3px rgba(15, 23, 42, 0.22),
-    0 4px 10px -4px rgba(15, 23, 42, 0.35);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
   user-select: none;
 }
-/* 悬停：高光走亮一档、阴影抬起来，点下去之前就知道它能揭 */
+.preview.md-recite .cloze-blank:not([data-revealed])::selection {
+  background: transparent;
+  color: transparent;
+}
+/* 悬停：边线与底色柔亮一档，提示可点击揭晓 */
 .preview.md-recite .cloze-blank:hover {
-  text-decoration: none;
-  background-color: rgba(72, 84, 114, 0.86);
-  background-image:
-    linear-gradient(115deg,
-      rgba(255, 255, 255, 0.46) 0 14%,
-      rgba(255, 255, 255, 0.10) 30% 48%,
-      rgba(255, 255, 255, 0.30) 62% 74%,
-      rgba(255, 255, 255, 0.07) 90%),
-    linear-gradient(180deg, rgba(129, 140, 248, 0.20), rgba(15, 23, 42, 0.14));
+  background-color: color-mix(in srgb, var(--accent) 20%, var(--panel));
+  border-bottom-color: var(--accent);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.20),
-    0 2px 6px rgba(15, 23, 42, 0.26),
-    0 6px 14px -4px rgba(15, 23, 42, 0.38);
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent),
+    0 2px 8px -2px color-mix(in srgb, var(--accent) 22%, transparent);
 }
-/* 已揭开：玻璃化开露出答案，再点一下重新盖回去 */
+.preview.md-recite .cloze-blank:active {
+  background-color: color-mix(in srgb, var(--accent) 25%, var(--panel));
+}
+/* 已揭开：雾面化开露出答案，保留柔底与实底线，再点一下重新盖回去 */
 .preview.md-recite .cloze-blank[data-revealed] {
-  background-color: var(--accent-soft);
-  background-image: none;
+  border-radius: 5px 5px 2px 2px;
+  background-color: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--accent) 55%, transparent);
   color: inherit;
-  box-shadow: inset 0 0 0 1px var(--border-accent);
+  box-shadow: none;
+  user-select: text;
 }
-/* 深色主题：同一套层次换成低明度玻璃，避免白底发灰 */
+.preview.md-recite .cloze-blank[data-revealed]:hover {
+  background-color: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-bottom-color: var(--accent);
+  box-shadow: none;
+}
+/* 深色主题：深曜石底上的柔靛胶囊，保持通透层次与对比 */
 [data-theme='dark'] .preview.md-recite .cloze-blank {
-  background-color: rgba(30, 41, 59, 0.55);
-  background-image:
-    linear-gradient(115deg,
-      rgba(255, 255, 255, 0.20) 0 16%,
-      rgba(255, 255, 255, 0.04) 32% 50%,
-      rgba(255, 255, 255, 0.14) 64% 76%,
-      rgba(255, 255, 255, 0.03) 90%),
-    linear-gradient(180deg, rgba(148, 163, 184, 0.10), rgba(15, 23, 42, 0.24));
+  background-color: color-mix(in srgb, var(--accent) 20%, var(--panel-deep));
+  border-bottom-color: color-mix(in srgb, var(--accent) 54%, transparent);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 2px 6px rgba(0, 0, 0, 0.40);
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 [data-theme='dark'] .preview.md-recite .cloze-blank:hover {
-  background-image:
-    linear-gradient(115deg,
-      rgba(255, 255, 255, 0.30) 0 16%,
-      rgba(255, 255, 255, 0.08) 32% 50%,
-      rgba(255, 255, 255, 0.22) 64% 76%,
-      rgba(255, 255, 255, 0.06) 90%),
-    linear-gradient(180deg, rgba(129, 140, 248, 0.18), rgba(30, 41, 59, 0.55));
+  background-color: color-mix(in srgb, var(--accent) 28%, var(--panel-deep));
+  border-bottom-color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 44%, transparent),
+    0 2px 10px -2px rgba(129, 140, 248, 0.28);
+}
+[data-theme='dark'] .preview.md-recite .cloze-blank:active {
+  background-color: color-mix(in srgb, var(--accent) 34%, var(--panel-deep));
 }
 [data-theme='dark'] .preview.md-recite .cloze-blank[data-revealed] {
-  background-color: rgba(129, 140, 248, 0.16);
-  background-image: none;
+  background-color: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  box-shadow: none;
+}
+[data-theme='dark'] .preview.md-recite .cloze-blank[data-revealed]:hover {
+  background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-bottom-color: var(--accent);
+  box-shadow: none;
 }
 
 /* 分屏头部：背诵开关的按下态 */

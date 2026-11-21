@@ -35,7 +35,9 @@ import { appendBankQuestions, loadBanks } from '../core/qbank';
 import { containsQuestions, importAiQuestions } from '../core/aiQuestionImport';
 import { initializeStats } from '../core/qbankStats';
 import { renderMarkdown } from '../core/markdown';
-import { CITE_LABEL, CITE_MARK, CITE_RANK, lookupQuote, verifyCitations, verifyQuote, type CiteStatus } from '../core/citeVerify';
+import {
+  CITE_LABEL, CITE_MARK, CITE_RANK, groupCitations, lookupQuote, verifyCitations, verifyQuote, type CiteStatus,
+} from '../core/citeVerify';
 import { safeVaultPath, BACKUP_RESTORED_EVENT } from '../core/vault';
 import { structureLossWarnings } from '../core/aiPatch';
 import { applyNotePatch, cleanCardKeys, insertCardHints } from '../core/aiTools';
@@ -145,7 +147,7 @@ function CitationCheck({ text, docs }: { text: string; docs: Map<string, string>
    * 新收到的消息本来就会带着当时的 docs 算一次。
    */
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const results = useMemo(() => verifyCitations(text, docs), [text]);
+  const results = useMemo(() => groupCitations(verifyCitations(text, docs)), [text]);
   const [bookHits, setBookHits] = useState<Map<string, { status: CiteStatus; book: string }>>(new Map());
 
   useEffect(() => {
@@ -185,10 +187,12 @@ function CitationCheck({ text, docs }: { text: string; docs: Map<string, string>
             className={`agent-cite agent-cite-${status}${c.ambiguous ? ' agent-cite-multi' : ''}`}
             title={`${CITE_LABEL[status]}${source ? `：${source}` : ''}\n“${c.quote}”`
               + (c.ambiguous ? `\n库内 ${c.hits} 篇笔记都含此句，出处不唯一` : '')
+              + (c.repeats > 1 ? `\n这条引用在回答里出现了 ${c.repeats} 次，已合并` : '')
               + (note ? `\n（${note}）` : '')}
           >
             {CITE_MARK[status]} {c.quote.length > 18 ? `${c.quote.slice(0, 18)}…` : c.quote}
             {c.page ? ` P${c.page}` : ''}
+            {c.repeats > 1 ? ` ×${c.repeats}` : ''}
             {c.ambiguous ? ` · ${c.hits} 处` : ''}
           </span>
         );

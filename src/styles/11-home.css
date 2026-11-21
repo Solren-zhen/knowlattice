@@ -9,8 +9,8 @@
   /* 只做水平居中，不做垂直居中：地图比旧 hero 高，垂直 auto 边距在溢出时会裁掉顶部标题。
      内容从舞台顶部开始排，超出的部分由 .welcome-stage 正常滚动。 */
   width: min(1040px, 100%); margin: 0 auto;
-  padding: 36px 28px 40px;
-  display: flex; flex-direction: column; gap: 24px;
+  padding: 26px 24px 32px;
+  display: flex; flex-direction: column; gap: 18px;
   text-align: left;
   /* 三列→两列按**可用宽度**切换，而不是窗口宽度：
      导航轨展开 + 目录卡片打开时，1100px 的窗口只剩 ~550px，按视口切会强行塞三列并把说明截断。 */
@@ -47,12 +47,18 @@
 }
 .home-recent {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-  min-width: 0; padding: 9px 13px; font: inherit; text-align: left; color: inherit;
+  min-width: 0; padding: 8px 12px; font: inherit; text-align: left; color: inherit;
   background: var(--panel-glass-strong); border: 1px solid var(--border);
   border-radius: var(--r-md); cursor: pointer;
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
-.home-recent:hover { background: var(--accent-soft); border-color: var(--border-accent); }
+.home-recent:hover {
+  background: var(--accent-soft); border-color: var(--border-accent);
+  transform: translateY(-1px); box-shadow: var(--shadow-xs);
+}
+.home-recent:active { transform: translateY(0) scale(0.985); }
+.home-recent:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 1px; }
 .home-recent__title {
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--fs-body); font-weight: 600; color: var(--text);
@@ -71,12 +77,17 @@
 }
 .home-feat {
   display: flex; align-items: center; gap: 9px; min-width: 0;
-  padding: 9px 12px; font: inherit; text-align: left; color: inherit;
+  padding: 8px 11px; font: inherit; text-align: left; color: inherit;
   background: var(--panel-glass-strong); border: 1px solid var(--border);
   border-radius: var(--r-md); cursor: pointer;
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
-.home-feat:hover { background: var(--accent-soft); border-color: var(--border-accent); }
+.home-feat:hover {
+  background: var(--accent-soft); border-color: var(--border-accent);
+  transform: translateY(-1px); box-shadow: var(--shadow-xs);
+}
+.home-feat:active { transform: translateY(0) scale(0.985); }
 .home-feat:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 1px; }
 .home-feat__icon {
   flex: 0 0 22px; width: 22px; height: 22px;
@@ -94,7 +105,7 @@
    按窗口宽度写死断点会时对时错。 */
 .home-wb { display: flex; flex-direction: column; gap: 9px; min-width: 0; container-type: inline-size; }
 .home-wb__grid {
-  display: grid; gap: 10px; min-height: 190px;
+  display: grid; gap: 10px; min-height: 172px;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 /* 放不下第三列（3×240 + 2×10）时「快捷操作」会独占第二行、右边空一大块：
@@ -103,8 +114,8 @@
   .home-wb__grid > :last-child { grid-column: 1 / -1; }
 }
 .home-wb__card {
-  display: flex; flex-direction: column; gap: 10px; min-width: 0;
-  padding: 13px 14px;
+  display: flex; flex-direction: column; gap: 9px; min-width: 0;
+  padding: 12px 14px;
   background: var(--panel-glass-strong); border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
@@ -141,7 +152,9 @@
   background: linear-gradient(180deg,
     color-mix(in srgb, var(--accent) 70%, transparent),
     color-mix(in srgb, var(--accent) 30%, transparent));
+  transition: filter var(--t-fast) var(--ease);
 }
+.home-wb__bar:hover i { filter: brightness(1.12) saturate(1.15); }
 .home-wb__bar span { font-size: 9px; line-height: 1; color: var(--muted); }
 
 .home-wb__todos {
@@ -154,9 +167,10 @@
   flex: none; width: 15px; height: 15px; padding: 0;
   border: 1.5px solid var(--border-strong); border-radius: 50%;
   background: transparent; cursor: pointer;
-  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
 }
-.home-wb__check:hover { border-color: var(--accent); background: var(--accent-soft); }
+.home-wb__check:hover { border-color: var(--accent); background: var(--accent-soft); transform: scale(1.1); }
 .home-wb__check:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 1px; }
 .home-wb__todo-text {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -175,12 +189,17 @@
 }
 .home-wb__actions button {
   display: inline-flex; align-items: center; gap: 6px; min-width: 0;
-  padding: 8px 10px; font: inherit; font-size: var(--fs-caption); font-weight: 550;
+  padding: 7px 10px; font: inherit; font-size: var(--fs-caption); font-weight: 550;
   text-align: left; color: var(--text); cursor: pointer;
   background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--r-sm);
-  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
 }
-.home-wb__actions button:hover { background: var(--accent-soft); border-color: var(--border-accent); color: var(--accent); }
+.home-wb__actions button:hover {
+  background: var(--accent-soft); border-color: var(--border-accent); color: var(--accent);
+  transform: translateY(-1px); box-shadow: var(--shadow-xs);
+}
+.home-wb__actions button:active { transform: translateY(0) scale(0.985); }
 .home-wb__actions button:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 1px; }
 .home-wb__actions button svg { flex: none; }
 /* 快捷操作下方的模式说明：导师陪练与 AI 笔记共用面板，用一行字讲清差别 */

@@ -12,12 +12,13 @@ import { defineStore } from '../storage/kv';
 
 export type ShortcutId =
   | 'search' | 'palette' | 'print' | 'save' | 'back' | 'forward'
-  | 'bold' | 'italic' | 'highlight' | 'wiki' | 'cloze';
+  | 'bold' | 'italic' | 'highlight' | 'wiki' | 'cloze'
+  | 'videoAnchor' | 'videoBack' | 'videoForward' | 'videoToggle';
 
 export interface ShortcutDef {
   id: ShortcutId;
   label: string;
-  group: '全局' | '编辑器格式';
+  group: '全局' | '编辑器格式' | '视频笔记';
   /** 默认键，形如 Mod+K / Alt+ArrowLeft / Shift+Enter */
   defaultKey: string;
   /** 设置页的一句话说明 */
@@ -36,6 +37,10 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   { id: 'italic', label: '斜体', group: '编辑器格式', defaultKey: 'Alt+Z', hint: '包裹 *文字*' },
   { id: 'cloze', label: '挖空', group: '编辑器格式', defaultKey: 'Alt+C', hint: '包裹 {{答案}}' },
   { id: 'wiki', label: '插入双链', group: '编辑器格式', defaultKey: 'Alt+X', hint: '包裹 [[笔记名]]' },
+  { id: 'videoAnchor', label: '记视频时间点', group: '视频笔记', defaultKey: 'Alt+T', hint: '视频面板打开时插入当前时间锚点' },
+  { id: 'videoBack', label: '视频后退 3 秒', group: '视频笔记', defaultKey: 'Alt+J', hint: '视频面板打开时快退 3 秒' },
+  { id: 'videoForward', label: '视频前进 3 秒', group: '视频笔记', defaultKey: 'Alt+L', hint: '视频面板打开时快进 3 秒' },
+  { id: 'videoToggle', label: '视频播放/暂停', group: '视频笔记', defaultKey: 'Alt+K', hint: '视频面板打开时切换播放与暂停' },
 ];
 
 export const SHORTCUT_INDEX: Record<ShortcutId, ShortcutDef> = Object.fromEntries(

@@ -14,7 +14,11 @@
  *   - 跳过删除/清空/重置/导入/导出/备份/打印/上传等破坏性或会弹系统选择的按钮；
  *   - 面板打不开就记 skip，不把「入口没找到」算成崩溃。
  *
- * 产物：ui-interact/report.json；任何 error / exception / 空主区 / ErrorBoundary 都 exit 1。
+ * 再看一眼布局：面板打开时顺手量一次横向溢出（整页能左右拖、面板根被内容顶宽），
+ * 并给每个打开成功的面板存一张 ui-interact/<id>.png，出问题能直接看是哪一层。
+ *
+ * 产物：ui-interact/report.json + ui-interact/<id>.png；
+ * 任何 error / exception / 空主区 / ErrorBoundary / 横向溢出都 exit 1。
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -123,6 +127,27 @@ async function openPanel(panel) {
   return waitForSurface();
 }
 
+/**
+ * 横向溢出：只查「整页」和「面板根」两层，不扫所有后代。
+ * 后代里横向滚动是刻意设计（chips 行、宽表格、代码块），全量扫会把它们误报成溢出。
+ */
+async function overflowOf() {
+  return page.evaluate(() => {
+    const out = [];
+    const pageOver = document.documentElement.scrollWidth - window.innerWidth;
+    if (pageOver > 2) out.push({ el: 'html', delta: pageOver });
+    const root = document.querySelector('.panel-backdrop') ?? document.querySelector('.panel');
+    if (root) {
+      const style = getComputedStyle(root);
+      const own = root.scrollWidth - root.clientWidth;
+      if (own > 2 && style.overflowX !== 'auto' && style.overflowX !== 'scroll') {
+        out.push({ el: '.' + String(root.className).split(' ').filter(Boolean).slice(0, 2).join('.'), delta: own });
+      }
+    }
+    return out;
+  });
+}
+
 async function clickButtons(panel) {
   const overlay = page.locator('.panel-backdrop').last();
   const scope = (await overlay.count()) ? overlay : page.locator('.panel').last();
@@ -161,8 +186,14 @@ for (const panel of PANELS) {
     await page.keyboard.press('Escape').catch(() => {});
     continue;
   }
+  // 截图放在点按钮之前：这是面板的干净初始态，点完再截会混进弹层
+  const shot = join(OUT, panel.id + '.png');
+  await page.screenshot({ path: shot, fullPage: false }).catch(() => {});
+  const overflow = await overflowOf().catch(() => []);
   const result = await clickButtons(panel);
-  report.push({ id: panel.id, rail: panel.rail, ...result, errors: [...errors] });
+  report.push({
+    id: panel.id, rail: panel.rail, ...result, overflow, shot, errors: [...errors],
+  });
   await page.keyboard.press('Escape').catch(() => {});
   await page.waitForTimeout(120);
   // 有些面板会弹二次确认：再按一次 Escape
@@ -173,11 +204,16 @@ writeFileSync(join(OUT, 'report.json'), JSON.stringify({ base: BASE, at: new Dat
 await context.close();
 
 const failed = report.filter((r) => r.opened && r.errors.length);
+const spilled = report.filter((r) => r.opened && (r.overflow ?? []).length);
 const skipped = report.filter((r) => !r.opened);
-console.log(`ui-interact: ${report.length} 个面板，打开 ${report.length - skipped.length}，跳过 ${skipped.length}，有错误 ${failed.length}`);
+console.log(`ui-interact: ${report.length} 个面板，打开 ${report.length - skipped.length}，跳过 ${skipped.length}，有错误 ${failed.length}，横向溢出 ${spilled.length}`);
 for (const r of failed) {
   console.log(`  ✗ ${r.id} (${r.clicked} clicks)`);
   for (const e of r.errors.slice(0, 4)) console.log('     · ' + e);
 }
+for (const r of spilled) {
+  console.log(`  ⇥ ${r.id}（截图 ${r.shot}）`);
+  for (const o of r.overflow) console.log(`     · ${o.el} 超出 ${o.delta}px`);
+}
 for (const r of skipped) console.log(`  - ${r.id}：入口未找到（跳过）`);
-process.exit(failed.length ? 1 : 0);
+process.exit(failed.length || spilled.length ? 1 : 0);

@@ -69,6 +69,7 @@ import {
   pickDailyQueue,
   pickQueue,
   recordDaily,
+  RECORDS_UPDATED_EVENT,
   saveCustomWords,
   saveDaily,
   saveRecords,
@@ -90,7 +91,9 @@ import {
 } from '../core/wordDrill';
 import { addVocab, loadVocab, rateVocab, vocabCardKey } from '../core/vocab';
 import { recordReview } from '../core/studyLog';
+import { isTauri } from '../storage/tauriEnv';
 import PanelOverlay from './PanelOverlay';
+import ReciteSyncPanel from './ReciteSyncPanel';
 import { escThenClose, useEsc } from './useEsc';
 
 interface Props {
@@ -320,6 +323,8 @@ export default function WordDrillView({ onClose, onSaveNote }: Props) {
   const [archivePinnedOnly, setArchivePinnedOnly] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [storyId, setStoryId] = useState<string | null>(null);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncFallback] = useState(() => ({ id: newStoryId(), createdAt: Date.now() }));
   /** 自增触发「自定义词库」导入框聚焦：等 React 提交完导入区再 focus */
   const [focusImportKey, setFocusImportKey] = useState(0);
   const archiveRef = useRef(archive);
@@ -354,6 +359,17 @@ export default function WordDrillView({ onClose, onSaveNote }: Props) {
   useEffect(() => {
     saveSettings({ bankId, mode, size, newLimit, reviewLimit });
   }, [bankId, mode, size, newLimit, reviewLimit]);
+
+  /** 手机回传合并后刷新本视图：面板里显示成功，背后的队列/错词本也要同步。 */
+  useEffect(() => {
+    const refresh = () => {
+      const next = loadRecords();
+      recordsRef.current = next;
+      setRecords(next);
+    };
+    window.addEventListener(RECORDS_UPDATED_EVENT, refresh);
+    return () => window.removeEventListener(RECORDS_UPDATED_EVENT, refresh);
+  }, []);
 
   /** 中途关闭前确认：已经答过题但这一轮还没做完，丢掉的是剩下的题 */
   const requestClose = () => {
@@ -1060,6 +1076,23 @@ export default function WordDrillView({ onClose, onSaveNote }: Props) {
   };
 
   const storyTargets = storyPicks.length ? storyPicks : weakPicks;
+  const syncEntries = useMemo<StoryArchiveEntry[]>(() => {
+    if (!story) return archive;
+    const saved = archive.find((entry) => entry.id === storyId);
+    if (saved) return archive;
+    return [
+      {
+        id: storyId ?? syncFallback.id,
+        createdAt: syncFallback.createdAt,
+        bankName: bankId === 'custom' ? '我的词库' : bank?.name ?? '',
+        words: storyTargets,
+        story,
+        analysis,
+        pinned: false,
+      },
+      ...archive,
+    ];
+  }, [archive, analysis, bank, bankId, story, storyId, storyTargets, syncFallback]);
   const storyForms = useMemo(
     () => (story ? storySurfaceForms(story, storyTargets.map((pick) => pick.word)) : []),
     [story, storyTargets],
@@ -1228,14 +1261,21 @@ export default function WordDrillView({ onClose, onSaveNote }: Props) {
                       生成结果会自动存到本机，最多保留 {STORY_ARCHIVE_LIMIT} 篇。
                     </p>
                   </div>
-                  <button
-                    className="btn btn-small"
-                    type="button"
-                    aria-expanded={archiveOpen}
-                    onClick={() => setArchiveOpen((open) => !open)}
-                  >
-                    {archiveOpen ? '收起历史' : archive.length ? `历史短文（${archive.length}）` : '历史短文'}
-                  </button>
+                  <div className="wd-story__head-actions">
+                    {!story && archive.length > 0 && isTauri() && (
+                      <button className="btn btn-small" type="button" onClick={() => setSyncOpen(true)}>
+                        手机导入
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-small"
+                      type="button"
+                      aria-expanded={archiveOpen}
+                      onClick={() => setArchiveOpen((open) => !open)}
+                    >
+                      {archiveOpen ? '收起历史' : archive.length ? `历史短文（${archive.length}）` : '历史短文'}
+                    </button>
+                  </div>
                 </div>
 
                 {archiveOpen && (
@@ -1380,6 +1420,11 @@ export default function WordDrillView({ onClose, onSaveNote }: Props) {
                           导出 .md
                         </button>
                       )}
+                      {story && isTauri() && (
+                        <button className="btn" type="button" onClick={() => setSyncOpen(true)}>
+                          手机导入
+                        </button>
+                      )}
                       {story && onSaveNote && (
                         <button
                           className="btn"
@@ -1392,6 +1437,14 @@ export default function WordDrillView({ onClose, onSaveNote }: Props) {
                       )}
                     </div>
                   </>
+                )}
+
+                {syncOpen && syncEntries.length > 0 && (
+                  <ReciteSyncPanel
+                    entries={syncEntries}
+                    initialSelectedId={storyId}
+                    onClose={() => setSyncOpen(false)}
+                  />
                 )}
 
                 {!aiReady && storyTargets.length > 0 && (

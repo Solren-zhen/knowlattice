@@ -10,7 +10,7 @@
  *
  * 面板不做二级页面：设置项本来就少，一屏能看完比点三次进去找更省事。
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import DialogSurface from './DialogSurface';
 import { useEsc, escThenClose } from './useEsc';
 import { IconBackup, IconFile, IconInfo } from './icons';
@@ -31,6 +31,8 @@ import {
 import { useKeybindings } from './useKeybindings';
 import PanelOverlay from './PanelOverlay';
 import { applyRefractMode, currentRefractMode, type RefractMode } from '../core/liquidGlass';
+import { applySnapshot, buildSnapshot, parseSnapshot, reportLine, snapshotToJson } from '../core/syncSnapshot';
+import { downloadTextFile } from '../core/download';
 
 /** 液态玻璃折射的三档：默认交给性能哨兵决定 */
 const REFRACT_OPTIONS: RefractMode[] = ['auto', 'on', 'off'];
@@ -62,7 +64,38 @@ export default function SettingsPanel(p: Props) {
   const bindings = useKeybindings();
   const [recording, setRecording] = useState<ShortcutId | null>(null);
   const [keyError, setKeyError] = useState('');
+  const [snapMsg, setSnapMsg] = useState('');
+  const [snapBusy, setSnapBusy] = useState(false);
+  const snapInputRef = useRef<HTMLInputElement | null>(null);
   useEsc(escThenClose(p.onClose));
+
+  // 学习进度快照：只搬「跟设备无关的学习状态」，附件与笔记仍走整包备份。
+  const exportSnapshot = async () => {
+    setSnapBusy(true);
+    try {
+      const snap = await buildSnapshot();
+      const stamp = new Date().toISOString().slice(0, 10);
+      downloadTextFile(`knowlattice-snapshot-${stamp}.json`, snapshotToJson(snap), 'application/json');
+      setSnapMsg('快照已导出：换台机器用「导入快照」合并即可');
+    } catch (error) {
+      setSnapMsg(`导出失败：${(error as Error).message}`);
+    } finally {
+      setSnapBusy(false);
+    }
+  };
+
+  const importSnapshot = async (file: File) => {
+    setSnapBusy(true);
+    try {
+      const report = await applySnapshot(parseSnapshot(await file.text()));
+      setSnapMsg(reportLine(report));
+    } catch (error) {
+      setSnapMsg(`导入失败：${(error as Error).message}`);
+    } finally {
+      setSnapBusy(false);
+      if (snapInputRef.current) snapInputRef.current.value = '';
+    }
+  };
 
   // 桌宠被右上角关掉时，设置面板里的开关跟着同步
   useEffect(() => subscribePet(() => setPetOff(isPetHidden())), []);
@@ -232,7 +265,7 @@ export default function SettingsPanel(p: Props) {
             <p className="settings-note">
               点键位后按下新的组合键即可改键；Esc 取消。冲突会直接拒绝，不会悄悄覆盖另一个动作。
             </p>
-            {(['全局', '编辑器格式'] as const).map((group) => (
+            {(['全局', '编辑器格式', '视频笔记'] as const).map((group) => (
               <div className="settings-keys" key={group}>
                 <div className="settings-keys__group">{group}</div>
                 {SHORTCUTS.filter((shortcut) => shortcut.group === group).map((shortcut) => (
@@ -287,6 +320,28 @@ export default function SettingsPanel(p: Props) {
                 <IconInfo /> 数据自检
               </button>
             </div>
+            <div className="settings-actions">
+              <button className="btn-small" onClick={() => { void exportSnapshot(); }} disabled={snapBusy}>
+                <IconBackup /> 导出学习进度快照
+              </button>
+              <button className="btn-small" onClick={() => snapInputRef.current?.click()} disabled={snapBusy}>
+                <IconFile /> 导入快照并合并
+              </button>
+              <input
+                ref={snapInputRef}
+                type="file"
+                accept=".json,application/json"
+                aria-label="选择学习进度快照文件"
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void importSnapshot(file);
+                }}
+              />
+            </div>
+            <p className="settings-note" role="status">
+              {snapMsg || '快照只搬题库、逐题统计、错题、复习卡、考试记录这些跟设备无关的进度（不含笔记与附件），通常几百 KB；笔记与附件仍走上面整包备份。'}
+            </p>
           </section>
 
           <section className="settings-sec" aria-label="运行环境">

@@ -10,7 +10,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import VideoNoteView from '../VideoNoteView';
-import { addClip } from '../../core/videoNotes';
+import { addClip, loadClips, loadVideoHistory, loadVideoRate, recordVideoHistory } from '../../core/videoNotes';
 
 afterEach(() => {
   cleanup();
@@ -290,5 +290,167 @@ describe('链接来源', () => {
     expect(head).toBeTruthy();
     expect(head!.className).not.toContain('vn__head--drag');
     expect(head!.getAttribute('title')).toBeNull();
+  });
+});
+
+describe('视频历史', () => {
+  it('展示历史记录（来源标签、播放进度、片段数）且支持点开和搜索', () => {
+    const entry = {
+      media: 'bili:BV1xx411c7mD:p1',
+      url: 'https://www.bilibili.com/video/BV1xx411c7mD?p=1',
+      title: '生理学第1讲',
+      kind: 'bilibili' as const,
+      lastTime: 90,
+      duration: 600,
+    };
+    recordVideoHistory(entry, Date.now());
+    recordVideoHistory({
+      media: 'https://example.com/other.mp4',
+      url: 'https://example.com/other.mp4',
+      title: '药理学总论',
+      kind: 'direct',
+    }, Date.now() - 10_000);
+    addClip({ media: entry.media, start: 30, end: null, label: '重点', tags: [] });
+
+    const onOpenHistory = vi.fn();
+    setup({ media: '', onOpenHistory });
+
+    expect(screen.getByText('视频历史')).toBeTruthy();
+    expect(screen.getByText('看到 1:30 / 10:00')).toBeTruthy();
+    expect(screen.getByText('1 片段')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('搜索历史视频'), { target: { value: '药理' } });
+    expect(screen.queryByText('看到 1:30 / 10:00')).toBeNull();
+    const historyList = document.querySelector('.vn__history')!;
+    expect(historyList.textContent).toContain('药理学总论');
+
+    fireEvent.change(screen.getByLabelText('搜索历史视频'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /生理学第1讲.*1:30/ }));
+    expect(onOpenHistory).toHaveBeenCalledWith(expect.objectContaining({ media: entry.media }));
+  });
+
+  it('支持单条删除与二次确认后清空历史', async () => {
+    recordVideoHistory({
+      media: 'https://example.com/a.mp4',
+      url: 'https://example.com/a.mp4',
+      title: '解剖学A',
+      kind: 'direct',
+    }, 100);
+    recordVideoHistory({
+      media: 'https://example.com/b.mp4',
+      url: 'https://example.com/b.mp4',
+      title: '解剖学B',
+      kind: 'direct',
+    }, 200);
+    setup({ media: '' });
+
+    fireEvent.click(screen.getByLabelText('从历史移除 解剖学A'));
+    expect(loadVideoHistory().map((h) => h.title)).toEqual(['解剖学B']);
+
+    fireEvent.click(screen.getByRole('button', { name: '清空' }));
+    const okBtn = document.querySelector<HTMLButtonElement>('.mv-confirm .mv-confirm-ok');
+    expect(okBtn).toBeTruthy();
+    fireEvent.click(okBtn!);
+
+    await vi.waitFor(() => expect(loadVideoHistory()).toEqual([]));
+  });
+
+  it('未重新选文件的本地历史项给出重选提示而不渲染坏掉的 <video>', () => {
+    const onPick = vi.fn();
+    setup({
+      media: '生理学-01.mp4|2048|1700000000',
+      src: null,
+      title: '生理学-01.mp4',
+      onPick,
+    });
+    expect(document.querySelector('video')).toBeNull();
+    expect(screen.getByText(/需要重新选择原文件才能播放/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '重新选择文件' }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+  });
+
+  it('播放元数据就绪与暂停时自动把进度写进视频历史', () => {
+    recordVideoHistory({
+      media: '生理学-01.mp4',
+      url: '',
+      title: '生理学-01.mp4',
+      kind: 'local',
+    });
+    setup();
+    const video = document.querySelector('video')!;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 300 });
+    fireEvent.loadedMetadata(video);
+    video.currentTime = 77.6;
+    fireEvent.pause(video);
+
+    expect(loadVideoHistory()[0]).toMatchObject({ lastTime: 77, duration: 300 });
+  });
+
+  it('支持置顶、重命名历史视频并一键打开关联笔记', () => {
+    recordVideoHistory({
+      media: 'https://example.com/a.mp4',
+      url: 'https://example.com/a.mp4',
+      title: '12345.mp4',
+      kind: 'direct',
+      notePath: '生理学/第1章.md',
+    }, 100);
+    recordVideoHistory({
+      media: 'https://example.com/b.mp4',
+      url: 'https://example.com/b.mp4',
+      title: '后打开的视频',
+      kind: 'direct',
+    }, 200);
+    const onOpenNote = vi.fn();
+    setup({ media: '', onOpenNote });
+
+    fireEvent.click(screen.getByLabelText('置顶 12345.mp4'));
+    expect(loadVideoHistory()[0].pinned).toBe(true);
+    expect(loadVideoHistory()[0].media).toBe('https://example.com/a.mp4');
+
+    fireEvent.click(screen.getByLabelText('重命名 12345.mp4'));
+    const renameInput = screen.getByLabelText('重命名历史视频');
+    fireEvent.change(renameInput, { target: { value: '消化生理第1讲' } });
+    fireEvent.keyDown(renameInput, { key: 'Enter' });
+    expect(loadVideoHistory()[0].title).toBe('消化生理第1讲');
+
+    fireEvent.click(screen.getByLabelText('打开关联笔记 第1章'));
+    expect(onOpenNote).toHaveBeenCalledWith('生理学/第1章.md');
+  });
+
+  it('支持编辑片段备注/标签，且插入笔记后标记已入笔记', () => {
+    addClip({ media: '生理学-01.mp4', start: 10, end: null, label: '原备注', tags: ['旧'] });
+    setup();
+
+    fireEvent.click(screen.getByLabelText('编辑片段 0:10'));
+    fireEvent.change(screen.getByLabelText('编辑片段备注'), { target: { value: '新备注' } });
+    fireEvent.change(screen.getByLabelText('编辑片段标签'), { target: { value: '重点 考点' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(screen.getByText('新备注')).toBeTruthy();
+    expect(loadClips()[0]).toMatchObject({ label: '新备注', tags: ['重点', '考点'] });
+
+    fireEvent.click(screen.getByLabelText('把片段 0:10 插入笔记'));
+    expect(screen.getByText('已入笔记')).toBeTruthy();
+    expect(loadClips()[0].inserted).toBe(true);
+  });
+
+  it('支持切换与记忆倍速，并向外注册快捷键动作', () => {
+    let actions: { insertAnchor: () => void; seekBy: (delta: number) => void; togglePlay: () => void } | null = null;
+    const { onInsert } = setup({
+      onRegisterActions: (a) => { actions = a; },
+    });
+    const video = document.querySelector('video')!;
+
+    fireEvent.click(screen.getByRole('button', { name: '1.5x' }));
+    expect(video.playbackRate).toBe(1.5);
+    expect(loadVideoRate()).toBe(1.5);
+
+    expect(actions).toBeTruthy();
+    video.currentTime = 20;
+    fireEvent.timeUpdate(video);
+    actions!.seekBy(5);
+    expect(video.currentTime).toBe(25);
+    actions!.insertAnchor();
+    expect(onInsert).toHaveBeenCalledWith('[▶ 0:25](#vn=25)');
   });
 });

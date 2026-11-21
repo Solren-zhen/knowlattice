@@ -805,13 +805,13 @@
   color: var(--muted);
 }
 
-/* 短文：浅底 + 左侧强调线，和界面的卡片区分开，读起来像一页纸 */
+/* 短文：浅底 + 细左侧强调线，和界面的卡片区分开，读起来像一页纸 */
 .wd-story__paper {
   max-width: 860px;
   padding: var(--sp-4) var(--sp-5);
   background: var(--bg);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
+  border-left: 1px solid var(--accent);
   border-radius: var(--r-md);
 }
 .wd-story__title {
@@ -1064,9 +1064,17 @@
   font-size: var(--fs-caption);
 }
 .wd-story__blank {
-  color: var(--accent);
-  letter-spacing: 0.08em;
-  border-bottom: 1px solid var(--border-accent);
+  display: inline-block;
+  min-width: 3em;
+  margin: 0 3px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background-color: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  border-bottom: 1.5px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+  color: transparent;
+  user-select: none;
+  line-height: 1.45;
 }
 .wd-studyhint {
   padding: 8px 12px;
@@ -1124,4 +1132,241 @@
   font-size: var(--fs-control);
   line-height: var(--lh-control);
   border-radius: var(--r-md);
+}
+
+/* 手机背诵：二维码是唯一视觉主语，说明文字退到次级；白底保证任何主题下都能扫 */
+.wd-sync {
+  display: grid;
+  gap: var(--sp-3);
+  max-width: 860px;
+  padding: var(--sp-4);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+.wd-sync__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.wd-sync__intro {
+  max-width: 74ch;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: 1.7;
+}
+.wd-sync__body {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-5);
+}
+.wd-sync__qr {
+  width: 260px;
+  max-width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.wd-sync__qr img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.wd-sync__guide ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--text);
+  font-size: var(--fs-caption);
+  line-height: 1.65;
+}
+.wd-sync__meta,
+.wd-sync__note,
+.wd-sync__hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+}
+.wd-sync__note { color: var(--accent); }
+.wd-sync__hint { margin-top: 8px; }
+.wd-sync__received {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+  color: var(--success-text);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  animation: received-pop 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes received-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.wd-sync__waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+}
+.wd-sync__waiting i {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: wd-story-pulse 1.6s ease-in-out infinite;
+}
+.wd-sync__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.wd-sync__state,
+.wd-sync__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-caption);
+}
+.wd-sync__state {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.wd-sync__state i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: wd-story-pulse 1.1s ease-in-out infinite;
+}
+.wd-sync__error {
+  justify-content: space-between;
+  border: 1px solid var(--danger-border, var(--border));
+  background: var(--danger-bg, var(--panel));
+  color: var(--danger-text, var(--text));
+}
+
+@media (max-width: 720px) {
+  .wd-sync__body { grid-template-columns: minmax(0, 1fr); }
+  .wd-sync__qr { width: min(240px, 100%); margin: 0 auto; }
+  .wd-sync__head { flex-direction: column; }
+}
+
+
+/* 手机导入：选择列表与二维码共用一张面板，先选再生成 */
+.wd-story__head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.wd-sync__pickbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.wd-sync__pickbar b {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.wd-sync__pickactions {
+  display: flex;
+  gap: 6px;
+}
+.wd-sync__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 250px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg);
+}
+.wd-sync__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.wd-sync__item:hover {
+  background: var(--bg-raised);
+}
+.wd-sync__item.is-on {
+  border-color: var(--border-accent);
+  background: var(--accent-soft);
+}
+.wd-sync__item input {
+  flex: none;
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.wd-sync__item-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.wd-sync__item-copy b {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wd-sync__item-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wd-sync__generate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.wd-sync__generate span {
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.wd-sync__generate .btn {
+  width: auto;
+}
+@media (max-width: 720px) {
+  .wd-story__head-actions { justify-content: flex-start; }
+  .wd-sync__list { max-height: 220px; }
 }

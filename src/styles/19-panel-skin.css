@@ -13,9 +13,13 @@
 /* ---- 面板内的「卡片级」容器：与 .card 同一套材质 ---- */
 .panel .cw-card,
 .panel .wd-card,
+.panel .wd-side,
+.panel .wd-wordcard,
 .panel .wb-card,
 .panel .wb-stat,
 .panel .dash-card,
+.panel .dash-exam-center,
+.panel .dash-next,
 .panel .report-sec,
 .panel .quiz-chapter,
 .panel .bank-item,
@@ -26,7 +30,12 @@
 .panel .quiz-resume,
 .panel .quiz-reflect,
 .panel .mv-confirm,
-.panel .card-edit {
+.panel .card-edit,
+.panel .matgen-sec-card,
+.panel .integrity-summary,
+.panel .it-check,
+.panel .exam-mode,
+.panel .settings-sec {
   background-color: var(--lg-frost);
   background-image: var(--lg-tint-image);
   -webkit-backdrop-filter: var(--lg-blur);
@@ -36,7 +45,39 @@
   box-shadow: var(--lg-shadow-soft), var(--lg-inset-highlight);
   transition:
     box-shadow var(--t-med) var(--ease),
-    border-color var(--t-med) var(--ease);
+    border-color var(--t-med) var(--ease),
+    background-color var(--t-med) var(--ease);
+}
+
+/* 次级区块 / 列表子卡：保留紧凑圆角与轻底色，不喧宾夺主 */
+.panel .quiz-answer,
+.panel .quiz-import-report,
+.panel .quiz-group,
+.panel .review-related,
+.panel .cloze-prompt,
+.panel .matgen-src,
+.panel .matgen-restored,
+.panel .wd-story__archive,
+.panel .wd-sync,
+.panel .hist-list,
+.panel .settings-cap,
+.panel .medref-edit,
+.note-sync .note-sync__list {
+  background-color: color-mix(in srgb, var(--bg-raised) 72%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--lg-inset-highlight);
+}
+
+/* 答题选项未判分态：融合玻璃卡片底色，保留 .right / .wrong / .on 判分色 */
+.panel .opt:not(.right):not(.wrong):not(.on) {
+  background-color: color-mix(in srgb, var(--bg-raised) 76%, transparent);
+  border-color: var(--border);
+  box-shadow: var(--shadow-xs), var(--lg-inset-highlight);
+}
+.panel .opt:not(:disabled):not(.right):not(.wrong):not(.on):hover {
+  background-color: var(--accent-soft);
+  border-color: var(--border-accent);
 }
 
 /* 可点的卡片才给悬停抬升；静态容器保持安静 */
@@ -46,7 +87,8 @@
 .panel .dash-card:hover,
 .panel .quiz-chapter:hover,
 .panel .bank-item:hover,
-.panel .quiz-search-item:hover {
+.panel .quiz-search-item:hover,
+.panel .exam-mode:hover:not(:disabled) {
   box-shadow: var(--lg-shadow), var(--lg-inset-highlight);
   border-color: var(--lg-edge-cool);
 }
@@ -75,7 +117,16 @@
 .panel .todo-date,
 .panel .todo-select,
 .panel .todo-note-input,
-.panel .wb-field input[type='number'] {
+.panel .wb-field input[type='number'],
+.panel .matgen-input,
+.panel .matgen-src select,
+.panel .img-lib__search,
+.panel .medref-search,
+.panel .quiz-search-input,
+.panel .quiz-paste,
+.panel .opt-note-input,
+.panel .wd-archive__search,
+.note-sync .note-sync__search {
   border-radius: var(--r-sm);
   border: 1px solid var(--border-strong);
   background: var(--bg-raised);
@@ -88,7 +139,15 @@
 .panel .wb-select:focus-visible,
 .panel .todo-search:focus-visible,
 .panel .todo-edit:focus-visible,
-.panel .card-edit-input:focus-visible {
+.panel .card-edit-input:focus-visible,
+.panel .matgen-input:focus-visible,
+.panel .img-lib__search:focus-visible,
+.panel .medref-search:focus-visible,
+.panel .quiz-search-input:focus-visible,
+.panel .quiz-paste:focus-visible,
+.panel .opt-note-input:focus-visible,
+.panel .wd-archive__search:focus-visible,
+.note-sync .note-sync__search:focus-visible {
   outline: 2px solid var(--accent-ring);
   outline-offset: 1px;
   border-color: var(--border-accent);
@@ -104,11 +163,14 @@
   color: var(--text);
 }
 
-/* ---- 整屏面板：让外壳的极光透一点上来 ----
-   88% → 84%：仍能盖住长文与表格，但不再是「一块灰板」；PDF/图谱的画布本身是实底，
-   不受影响。层叠位置与圆角仍由 16-liquid-glass 决定。 */
+/* ---- 整屏面板：让外壳的极光与主题背景柔和透上来 ----
+   78% + 模糊：既保证表格与长文可读，又让子功能界面的背景与外部主题保持连贯，
+   覆盖 cw-panel / wd-panel 等独立写过实底 background:var(--bg) 的类。 */
 .panel.panel--full {
-  background-color: color-mix(in srgb, var(--bg) 84%, transparent);
+  background-color: color-mix(in srgb, var(--bg) 78%, transparent);
+  background-image: var(--lg-tint-image);
+  -webkit-backdrop-filter: var(--lg-blur-soft);
+  backdrop-filter: var(--lg-blur-soft);
 }
 
 /* ---- 面板内的空状态：统一成同一种「安静提示」 ---- */

@@ -329,3 +329,147 @@ html[data-theme='light'] .app--home .home-keys {
     padding: 8px 10px;
   }
 }
+
+/* ============================================================
+   浅色子功能界面与卡片（与首页蓝白玻璃同一套材质，消除「点进去变灰白板」的断层）
+   ============================================================ */
+html[data-theme='light'] .panel-backdrop,
+html[data-theme='light'] .notice-overlay,
+html[data-theme='light'] .mistake-overlay,
+html[data-theme='light'] .graph-overlay {
+  background: rgba(226, 237, 255, 0.44);
+  -webkit-backdrop-filter: blur(16px) saturate(145%);
+  backdrop-filter: blur(16px) saturate(145%);
+}
+
+html[data-theme='light'] .panel.panel--full,
+html[data-theme='light'] .mindmap-overlay.panel--full {
+  background-color: rgba(242, 246, 255, 0.74);
+  background-image:
+    radial-gradient(50% 44% at 14% 12%, rgba(99, 102, 241, 0.09) 0%, transparent 72%),
+    radial-gradient(46% 42% at 88% 86%, rgba(34, 211, 238, 0.08) 0%, transparent 74%);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+}
+
+html[data-theme='light'] .panel:not(.panel--full),
+html[data-theme='light'] .quiz-panel,
+html[data-theme='light'] .mistake-panel,
+html[data-theme='light'] .notice-panel,
+html[data-theme='light'] .note-sync,
+html[data-theme='light'] .convert-panel,
+html[data-theme='light'] .draft-panel,
+html[data-theme='light'] .recite-panel,
+html[data-theme='light'] .sheet-panel,
+html[data-theme='light'] .img-picker__card,
+html[data-theme='light'] .img-lib__lightbox-body,
+html[data-theme='light'] .anatomy-note-card {
+  background-color: rgba(255, 255, 255, 0.84);
+  background-image:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 44%),
+    radial-gradient(110% 85% at 100% 0%, rgba(99, 102, 241, 0.10) 0%, transparent 66%),
+    radial-gradient(95% 75% at 0% 100%, rgba(34, 211, 238, 0.07) 0%, transparent 62%);
+  border-color: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    0 24px 60px -26px rgba(30, 64, 175, 0.34),
+    0 6px 20px -8px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+}
+
+html[data-theme='light'] .panel__head,
+html[data-theme='light'] .quiz-header,
+html[data-theme='light'] .mistake-header,
+html[data-theme='light'] .review-header,
+html[data-theme='light'] .notice-header,
+html[data-theme='light'] .anatomy-header,
+html[data-theme='light'] .mindmap-header {
+  background-color: rgba(255, 255, 255, 0.42);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, transparent 100%);
+  border-bottom-color: rgba(79, 70, 229, 0.10);
+}
+
+/* 子功能内部卡片：与首页工作台卡片同一套亮白玻璃 + 细冷靛边，避免白底白边看不清轮廓 */
+html[data-theme='light'] .panel .cw-card,
+html[data-theme='light'] .panel .wd-card,
+html[data-theme='light'] .panel .wd-side,
+html[data-theme='light'] .panel .wd-wordcard,
+html[data-theme='light'] .panel .wb-card,
+html[data-theme='light'] .panel .wb-stat,
+html[data-theme='light'] .panel .dash-card,
+html[data-theme='light'] .panel .dash-exam-center,
+html[data-theme='light'] .panel .dash-next,
+html[data-theme='light'] .panel .report-sec,
+html[data-theme='light'] .panel .quiz-chapter,
+html[data-theme='light'] .panel .bank-item,
+html[data-theme='light'] .panel .quiz-search-item,
+html[data-theme='light'] .panel .review-card,
+html[data-theme='light'] .panel .compose-picked,
+html[data-theme='light'] .panel .quiz-gate,
+html[data-theme='light'] .panel .quiz-resume,
+html[data-theme='light'] .panel .quiz-reflect,
+html[data-theme='light'] .panel .mv-confirm,
+html[data-theme='light'] .panel .card-edit,
+html[data-theme='light'] .panel .matgen-sec-card,
+html[data-theme='light'] .panel .integrity-summary,
+html[data-theme='light'] .panel .it-check,
+html[data-theme='light'] .panel .exam-mode,
+html[data-theme='light'] .panel .settings-sec {
+  background-color: rgba(255, 255, 255, 0.86);
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.6) 0%, rgba(238, 244, 255, 0.25) 100%);
+  border-color: rgba(79, 70, 229, 0.11);
+  box-shadow:
+    0 14px 36px -24px rgba(30, 64, 175, 0.36),
+    0 2px 8px -3px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96);
+}
+
+html[data-theme='light'] .panel .cw-card:hover,
+html[data-theme='light'] .panel .wd-card:hover,
+html[data-theme='light'] .panel .wb-card:hover,
+html[data-theme='light'] .panel .dash-card:hover,
+html[data-theme='light'] .panel .quiz-chapter:hover,
+html[data-theme='light'] .panel .bank-item:hover,
+html[data-theme='light'] .panel .quiz-search-item:hover,
+html[data-theme='light'] .panel .exam-mode:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.95);
+  border-color: rgba(79, 70, 229, 0.30);
+  box-shadow:
+    0 18px 40px -24px rgba(30, 64, 175, 0.44),
+    0 4px 12px -4px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 #fff;
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  html[data-theme='light'] .panel-backdrop,
+  html[data-theme='light'] .notice-overlay,
+  html[data-theme='light'] .mistake-overlay,
+  html[data-theme='light'] .graph-overlay {
+    background: rgba(226, 237, 255, 0.78);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  html[data-theme='light'] .panel.panel--full,
+  html[data-theme='light'] .mindmap-overlay.panel--full {
+    background: var(--bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  html[data-theme='light'] .panel:not(.panel--full),
+  html[data-theme='light'] .quiz-panel,
+  html[data-theme='light'] .mistake-panel,
+  html[data-theme='light'] .notice-panel,
+  html[data-theme='light'] .note-sync,
+  html[data-theme='light'] .convert-panel,
+  html[data-theme='light'] .draft-panel,
+  html[data-theme='light'] .recite-panel,
+  html[data-theme='light'] .sheet-panel,
+  html[data-theme='light'] .img-picker__card,
+  html[data-theme='light'] .img-lib__lightbox-body,
+  html[data-theme='light'] .anatomy-note-card {
+    background: var(--bg-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

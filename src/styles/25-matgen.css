@@ -25,9 +25,9 @@
   margin: 0 var(--sp-6) var(--sp-3);
   padding: 8px 12px;
   border-radius: 10px;
-  border: 1px solid color-mix(in srgb, #d33 35%, transparent);
-  background: color-mix(in srgb, #d33 8%, transparent);
-  color: color-mix(in srgb, #d33 75%, var(--text));
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger-text);
   font-size: var(--fs-caption);
   white-space: pre-wrap;
 }
@@ -48,15 +48,16 @@
 .matgen-style-chip {
   padding: 6px 14px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--line, rgba(128, 128, 128, 0.3)) 80%, transparent);
+  border: 1px solid var(--border-strong);
   background: transparent;
   color: var(--muted);
   font-size: var(--fs-caption);
   cursor: pointer;
+  transition: var(--tr-interact);
 }
-.matgen-style-chip:hover { color: var(--text); border-color: var(--accent); }
+.matgen-style-chip:hover { color: var(--text); border-color: var(--border-accent); }
 .matgen-style-chip.on {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
@@ -67,13 +68,13 @@
   flex: 1;
   min-width: 0;
   padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--line, rgba(128, 128, 128, 0.25));
-  background: transparent;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
   color: var(--text);
   font-size: var(--fs-body);
 }
-.matgen-input:focus { outline: none; border-color: var(--accent); }
+.matgen-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 
 .matgen-drop { cursor: pointer; }
 .matgen-drop.busy { cursor: progress; }
@@ -94,7 +95,7 @@
   gap: 10px;
   padding: 7px 12px;
   border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--line, rgba(128, 128, 128, 0.25)) 80%, transparent);
+  border: 1px solid var(--border);
   font-size: var(--fs-caption);
 }
 .matgen-src-name {
@@ -106,9 +107,9 @@
 }
 .matgen-src select {
   padding: 2px 6px;
-  border-radius: 8px;
-  border: 1px solid var(--line, rgba(128, 128, 128, 0.25));
-  background: transparent;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
   color: var(--text);
   font-size: var(--fs-caption);
 }
@@ -122,7 +123,7 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: var(--accent-soft);
   color: var(--accent);
   font-size: var(--fs-caption);
   font-weight: 600;
@@ -138,7 +139,7 @@
   font-size: var(--fs-body);
 }
 .matgen-sec-title:hover, .matgen-sec-title:focus {
-  border-color: var(--line, rgba(128, 128, 128, 0.3));
+  border-color: var(--border-strong);
   outline: none;
 }
 
@@ -171,11 +172,11 @@
   font-size: var(--fs-caption);
 }
 
-/* —— 结果卡片：安静实底 + 状态色只落在指示件上（可点卡片才有 hover 抬升） —— */
+/* —— 结果卡片：走统一的主题卡片皮肤 + 状态色只落在指示件上 —— */
 .matgen-sec-card {
   padding: 12px 16px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--line, rgba(128, 128, 128, 0.25)) 80%, transparent);
+  border-radius: var(--r-card);
+  border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -190,15 +191,15 @@
   font-size: var(--fs-body);
 }
 .matgen-sec-card__state { flex: none; font-size: var(--fs-caption); }
-.matgen-sec-card__state.state-done { color: #2e8b57; }
-.matgen-sec-card__state.state-error { color: #d33; }
+.matgen-sec-card__state.state-done { color: var(--success-text); }
+.matgen-sec-card__state.state-error { color: var(--danger-text); }
 .matgen-sec-card__state.state-idle { color: var(--muted); }
 
 .matgen-sec-err {
   padding: 6px 10px;
   border-radius: 8px;
-  background: color-mix(in srgb, #d33 8%, transparent);
-  color: color-mix(in srgb, #d33 75%, var(--text));
+  background: var(--danger-soft);
+  color: var(--danger-text);
   font-size: var(--fs-caption);
 }
 
@@ -208,7 +209,7 @@
   color: var(--text);
   max-height: 260px;
   overflow-y: auto;
-  border-top: 1px dashed color-mix(in srgb, var(--line, rgba(128, 128, 128, 0.25)) 70%, transparent);
+  border-top: 1px dashed var(--border);
   padding-top: 8px;
 }
 /* 生成中的流式预览：纯文本等宽呈现（done 后才渲染 Markdown，避免中途闪烁重排） */
@@ -222,7 +223,7 @@
 .matgen-sec-body ul, .matgen-sec-body ol { padding-left: 1.4em; margin: 4px 0; }
 .matgen-sec-body table { border-collapse: collapse; margin: 6px 0; }
 .matgen-sec-body th, .matgen-sec-body td {
-  border: 1px solid var(--line, rgba(128, 128, 128, 0.25));
+  border: 1px solid var(--border);
   padding: 3px 8px;
   font-size: var(--fs-caption);
 }

@@ -218,6 +218,13 @@
    .dash-week-empty（近 7 天学习，全零时不再画七根几乎看不见的凸起） */
 .dash-calib-empty,
 .dash-week-empty { margin: 0; font-size: var(--fs-caption); line-height: 1.7; }
+/* 实测比标称难的题：一行一题 + 一键采纳（只改题目的 difficulty 字段） */
+.dash-diff-rows { display: grid; gap: 6px; margin-top: 10px; }
+.dash-diff-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 48px auto;
+  align-items: center; gap: 10px; font-size: var(--fs-caption);
+}
+.dash-diff-stem { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 
 /* ============================================================ 思维导图
    节点配色走 MindMapView.tsx 里的 theme（22 个 CSS 变量，值全部指向本项目 token，

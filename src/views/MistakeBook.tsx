@@ -3,7 +3,7 @@
  * 复习中点「忘了」自动收录；顶部按章节聚合失败次数生成热力条，
  * 点击章节可过滤列表，点击条目直达对应笔记，✕ 清除记录。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useEsc } from './useEsc';
 import {
   loadMistakes,
@@ -25,7 +25,9 @@ import { needsAttention, severityHint, severityInfo } from '../core/mistakeSever
 import { activeBacklog, forecastBacklog, forecastLine, netByDay } from '../core/backlogForecast';
 import { recommendNotesForMistake, type NoteMetadata, type NoteRecommendation } from '../core/mistakeNoteRecommendation';
 import { loadBanks, type QuizQuestion } from '../core/qbank';
-import { loadStats } from '../core/qbankStats';
+import { chapterMastery, loadStats, type ChapterMastery } from '../core/qbankStats';
+import { mergeMastery } from '../core/qbankWeakness';
+import { CAUSE_KEYS, CAUSE_LABELS, mistakeMatrix } from '../core/mistakeMatrix';
 import { generateCardsFromMistakes } from '../core/qbankCards';
 import { addGeneratedCards, loadGeneratedCards } from '../core/generatedCards';
 import { toast } from '../core/feedback';
@@ -58,6 +60,25 @@ export default function MistakeBook({ onOpenPath, onClose, onAskAi, docs, onRedo
 
   const heat = useMemo(() => chapterHeat(mistakes), [mistakes]);
   const maxCount = Math.max(1, ...heat.map((h) => h.count));
+
+  /**
+   * 章节正确率：矩阵那一栏要的是「这一章做题对了几成」，只能从题库统计来。
+   * 面板打开时取一次（与 convertToCards 同一套 loadBanks + loadStats），取不到就留空 ——
+   * 错题章节与题库章节是两套命名，对不上时显示「—」比编一个数字诚实。
+   */
+  const [mastery, setMastery] = useState<ChapterMastery[]>([]);
+  useEffect(() => {
+    let alive = true;
+    loadBanks()
+      .then((banks) => {
+        if (!alive) return;
+        const stats = loadStats();
+        setMastery(mergeMastery(banks.flatMap((bank) => chapterMastery(bank, stats))));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const matrix = useMemo(() => mistakeMatrix(mistakes, mastery), [mistakes, mastery]);
 
   // 错题 → 相关笔记：把错题的标题当题干、章节当筛选条件，走 core/mistakeNoteRecommendation
   // 的同一套评分（章节 > 标题关键词 > 正文关键词）。当前这条错题自己的笔记会被排除。
@@ -218,6 +239,38 @@ export default function MistakeBook({ onOpenPath, onClose, onAskAi, docs, onRedo
                 </div>
               ))}
             </div>
+
+            {/* 章节 × 错因：热力图只说哪章错得多，这里说错在哪一类 —— 决定下一步动作 */}
+            {matrix.length > 0 && (
+              <div className="cause-section">
+                <div className="heat-title">章节 × 错因</div>
+                <div className="cause-table" role="table" aria-label="章节与错因交叉表">
+                  <div className="cause-row cause-head" role="row">
+                    <span role="columnheader">章节</span>
+                    {CAUSE_KEYS.map((c) => (
+                      <span key={c} role="columnheader">{CAUSE_LABELS[c]}</span>
+                    ))}
+                    <span role="columnheader">正确率</span>
+                  </div>
+                  {matrix.map((row) => (
+                    <div key={row.chapter || '~none'} className="cause-row" role="row">
+                      <span
+                        className={`cause-chapter${filterChapter === row.chapter ? ' on' : ''}`}
+                        onClick={() => toggleFilter(row.chapter)}
+                        {...clickable(`按章节筛选：${row.chapter || '未标注章节'}`)}
+                      >{row.chapter || '未标注章节'}</span>
+                      {CAUSE_KEYS.map((c) => (
+                        <span key={c} className={`cause-cell${row.topCause === c ? ' top' : ''}`} role="cell">
+                          {row.byCause[c] || '·'}
+                        </span>
+                      ))}
+                      <span className="cause-acc" role="cell">{row.accuracy === null ? '—' : `${Math.round(row.accuracy * 100)}%`}</span>
+                      {row.nextStep && <span className="cause-next muted" role="cell">{row.nextStep}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* 错因分布：堆叠条给一眼比例，图例给绝对数（只画条读不出 3 和 30 的差别） */}
             <div className="reason-section">

@@ -1,7 +1,8 @@
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_fs::FsExt;
 
 mod bili_proxy;
+mod recite_sync;
 
 /// 命令错误的统一形状：前端按 `code` 分支，按 `message` 展示。
 /// 旧实现直接返回 String，前端只能看到一段中文，无法区分「没权限 / 没启动 / 网络失败」。
@@ -106,6 +107,29 @@ fn load_ai_api_key() -> Result<String, AppError> {
     }
 }
 
+/// 启动一次性手机同步服务：返回二维码深链与局域网 URL。
+/// 背诵包取包一次后 token 失效，但服务保留 60 分钟接收手机回传的复习事件；
+/// 笔记包仍然是取包成功即停止。前端关闭面板时也会调用 stop。
+#[tauri::command]
+fn start_recite_sync(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, recite_sync::ReciteSyncState>,
+    pack: String,
+) -> Result<recite_sync::ReciteSyncInfo, AppError> {
+    let sink: recite_sync::ReviewSink = std::sync::Arc::new(move |payload: String| {
+        // 回传是后台线程收到的，转成前端事件；面板关闭后无人监听，失败也不影响服务。
+        if let Err(error) = app.emit("recite-review", payload) {
+            eprintln!("[recite-sync] emit review: {error}");
+        }
+    });
+    state.start(pack, sink).map_err(|e| AppError::new("recite_sync_unavailable", e))
+}
+
+#[tauri::command]
+fn stop_recite_sync(state: tauri::State<'_, recite_sync::ReciteSyncState>) {
+    state.stop();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -121,6 +145,7 @@ pub fn run() {
         // 桌面安装版没有 Vite 的 /bili-proxy；启动本机回环代理，
         // 前端通过 bili_proxy_base 拿到端口。失败不阻塞主应用启动。
         .manage(bili_proxy::BiliProxyState::new())
+        .manage(recite_sync::ReciteSyncState::new())
         .setup(|app| {
             if let Err(e) = bili_proxy::start(app.handle().clone()) {
                 eprintln!("[bili-proxy] {e}");
@@ -142,7 +167,9 @@ pub fn run() {
             bili_proxy_base,
             bili_proxy_status,
             save_ai_api_key,
-            load_ai_api_key
+            load_ai_api_key,
+            start_recite_sync,
+            stop_recite_sync
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -270,6 +270,50 @@
   font-weight: 550;
 }
 
+/* 章节 × 错因矩阵：行内数字横向可比（同一类错因在各章之间比），跨行看「这章主要错在哪」 */
+.cause-section {
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+.cause-table { display: flex; flex-direction: column; }
+.cause-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1.6fr) repeat(5, 40px) 62px;
+  align-items: center;
+  column-gap: 6px;
+  padding: 3px 0;
+  font-size: var(--fs-caption);
+}
+.cause-head {
+  color: var(--muted); font-size: var(--fs-micro);
+  font-weight: 650; letter-spacing: 0.04em;
+}
+.cause-head span { text-align: center; }
+.cause-head span:first-child { text-align: left; }
+.cause-chapter {
+  font-weight: 600; color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--t-fast) var(--ease);
+}
+.cause-chapter:hover, .cause-chapter.on { color: var(--accent); }
+.cause-cell {
+  text-align: center; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* 主要错因那一格高亮：一眼看到「这章是概念混了」而不是「这章差」 */
+.cause-cell.top { color: var(--accent); font-weight: 650; }
+.cause-acc {
+  text-align: right; color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+/* 下一步建议独占一行：七列并排会挤成一团字 */
+.cause-row > .cause-next {
+  grid-column: 1 / -1;
+  padding-left: 2px; line-height: 1.5;
+  font-size: var(--fs-micro);
+}
+
 /* 错题列表 */
 .mistake-list { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
 .mistake-item {

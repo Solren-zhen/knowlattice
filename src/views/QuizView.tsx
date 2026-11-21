@@ -17,7 +17,7 @@ import type { ImageEntry } from '../core/imageLib';
 import { parseQbankFile, parseQbankJsonText } from '../core/qbankParse';
 import { mergeQuestions, mergeSummary } from '../core/qbankMerge';
 import {
-  DEFAULT_RULES, chapterCounts, composeQuestions, filterPool,
+  DEFAULT_RULES, adaptivePick, chapterCounts, composeQuestions, filterPool,
   type ComposeOrder, type ComposeRules, type ComposeScope,
 } from '../core/qbankCompose';
 import { bankProgress, chapterMastery, consumeSaveFailure, initializeStats, loadStats, recordAnswer, statOf } from '../core/qbankStats';
@@ -646,9 +646,17 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
   };
 
   // ---------- 练习 ----------
+  /** 自适应模式下的整池候选（非自适应为 null）；逐题调档只在这一池里换题 */
+  const adaptivePool = useRef<QuizQuestion[] | null>(null);
   /** 开一轮练习。rules 为 null 时整库洗牌（「全部」入口） */
   const start = (bank: QuizBank, rules: ComposeRules | null) => {
-    const qs = rules ? composeQuestions(bank, rules, loadStats(), undefined, undefined, loadStars(), tagCtx ?? undefined) : pickQuestions(bank);
+    const stats0 = loadStats();
+    const stars0 = loadStars();
+    const qs = rules ? composeQuestions(bank, rules, stats0, undefined, undefined, stars0, tagCtx ?? undefined) : pickQuestions(bank);
+    // 自适应模式留住整池：开局只定「第一批」，逐题调档要能在剩下的候选里重挑
+    adaptivePool.current = rules && rules.order === 'adaptive'
+      ? filterPool(bank.questions, rules, stats0, bank.name, undefined, stars0, tagCtx ?? undefined)
+      : null;
     setSession({ bankName: bank.name, questions: qs, rules });
     setIdx(0);
     setResults(new Array(qs.length).fill(undefined));
@@ -668,6 +676,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
 
   /** 从搜题结果直接练某一道题（单题精练，不组卷） */
   const startOne = (bank: QuizBank, question: QuizQuestion) => {
+    adaptivePool.current = null;
     setSession({ bankName: bank.name, questions: [question], rules: null });
     setIdx(0);
     setResults([undefined]);
@@ -767,6 +776,7 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
 
   /** 回到题库列表：现读一次游标，让提示条与本轮实际进度对齐 */
   const exitToList = () => {
+    adaptivePool.current = null;
     setSession(null);
     setCursor(loadCursor());
   };
@@ -790,6 +800,24 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
       const content = path ? docs.get(path) : undefined;
       // content 必须存在：错题本要拿原文提章节与标题（core/mistakes.ts）
       if (path && content !== undefined) recordMistake(path, content);
+    }
+    /*
+     * 逐题调档（P0-2 收尾）：自适应模式下，这一答完就重新决定**下一题**是谁。
+     * 开局那批题是按「答完这道题之前」的统计挑的；这道题错得厉害、预测正确率往下掉之后，
+     * 原定的下一题可能已经偏简单。这里把下一格换成「按当前统计离目标最近」的那道，
+     * 换下来的题回到池里，后面还轮得到。
+     *
+     * 只换下一格、只换没答过的格子：已答的题有结果记录（results 按下标对齐），不能动。
+     */
+    if (adaptivePool.current && session && idx + 1 < session.questions.length) {
+      const scheduled = new Set(session.questions.map((x) => x.id));
+      const rest = adaptivePool.current.filter((x) => !scheduled.has(x.id));
+      const [best] = adaptivePick(rest, loadStats()[session.bankName] ?? {}, 1);
+      if (best) {
+        const nextQs = session.questions.slice();
+        nextQs[idx + 1] = best;
+        setSession({ ...session, questions: nextQs });
+      }
     }
   };
 
@@ -1615,10 +1643,17 @@ export default function QuizView({ docs, resolveLink, onOpenPath, onClose, onAsk
             <div className="compose-row">
               <span className="compose-label">顺序</span>
               <div className="compose-chips">
-                {([['shuffle', '乱序'], ['chapter', '按章节'], ['interleave', '按章节交错']] as Array<[ComposeOrder, string]>).map(([v, label]) => (
-                  <button key={v} className={`chip${rules.order === v ? ' on' : ''}`} onClick={() => setRules((r) => ({ ...r, order: v }))}>
+                {([['shuffle', '乱序'], ['chapter', '按章节'], ['interleave', '按章节交错'], ['adaptive', '自适应']] as Array<[ComposeOrder, string]>).map(([v, label]) => (
+                  <button
+                    key={v}
+                    className={`chip${rules.order === v ? ' on' : ''}`}
+                    aria-pressed={rules.order === v}
+                    title={v === 'adaptive' ? '按实测正确率挑离 70% 最近的题：既不太难也不太简单' : undefined}
+                    onClick={() => setRules((r) => ({ ...r, order: v }))}
+                  >
                     {label}
                     {v === 'interleave' && <span className="muted">（推荐：混着练更能分辨相似知识点）</span>}
+                    {v === 'adaptive' && <span className="muted">（按实测正确率向 70% 靠）</span>}
                   </button>
                 ))}
               </div>

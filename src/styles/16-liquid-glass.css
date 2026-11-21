@@ -197,10 +197,16 @@ body::after {
    sheet-panel / slash-menu / update-notice），点进去就变回一块白板，
    和首页的玻璃断档。这里统一接管材质，但不动它们的尺寸与布局。 */
 .quiz-panel,
+.mistake-panel,
+.notice-panel,
+.note-sync,
 .convert-panel,
 .draft-panel,
 .recite-panel,
 .sheet-panel,
+.img-picker__card,
+.img-lib__lightbox-body,
+.anatomy-note-card,
 .slash-menu,
 .update-notice {
   background-color: var(--lg-tint-strong);
@@ -301,7 +307,11 @@ body::after {
 /* ---- 面板与弹窗 ----
    遮罩从「近乎不透明的黑」改成带色温的薄雾，让后面的极光还能看见。
    面板本体用厚玻璃；内容区（表格/表单/正文）仍由各自规则给实底。 */
-.panel-backdrop {
+.panel-backdrop,
+.notice-overlay,
+.mistake-overlay,
+.graph-overlay,
+.img-picker {
   background: var(--lg-scrim);
   -webkit-backdrop-filter: blur(14px) saturate(125%);
   backdrop-filter: blur(14px) saturate(125%);
@@ -317,14 +327,37 @@ body::after {
    选择器必须写成 `.panel.panel--full`（0,2,0）：`.panel` 这条在本文件后面，
    只写 `.panel--full`（0,1,0）会被它盖掉，全屏面板就退回普通薄霜。 */
 .panel.panel--full {
-  background-color: color-mix(in srgb, var(--bg) 88%, transparent);
+  background-color: color-mix(in srgb, var(--bg) 84%, transparent);
   -webkit-backdrop-filter: var(--lg-blur-soft);
   backdrop-filter: var(--lg-blur-soft);
   box-shadow: inset 0 0 0 1px var(--lg-edge);
 }
-.panel__head {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, transparent 100%);
+.panel__head,
+.quiz-header,
+.mistake-header,
+.review-header,
+.notice-header,
+.anatomy-header,
+.mindmap-header {
+  background-color: transparent;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, transparent 100%);
   border-bottom-color: var(--lg-rim);
+}
+[data-theme='dark'] .panel__head,
+[data-theme='dark'] .quiz-header,
+[data-theme='dark'] .mistake-header,
+[data-theme='dark'] .review-header,
+[data-theme='dark'] .notice-header,
+[data-theme='dark'] .anatomy-header,
+[data-theme='dark'] .mindmap-header {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
+}
+.review-scope {
+  background-color: color-mix(in srgb, var(--panel) 48%, transparent);
+  border-bottom-color: var(--lg-rim);
+}
+.quiz-footer {
+  background: linear-gradient(180deg, transparent, var(--lg-frost) 36%);
 }
 /* 面板内需要「实底」的内容块不要被玻璃污染 */
 .panel__body .table-wrap,
@@ -477,10 +510,16 @@ body::after {
    低透明度、高对比度、打印、老内核里它们仍在半透明，和周围实底打架。 */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .quiz-panel,
+  .mistake-panel,
+  .notice-panel,
+  .note-sync,
   .convert-panel,
   .draft-panel,
   .recite-panel,
   .sheet-panel,
+  .img-picker__card,
+  .img-lib__lightbox-body,
+  .anatomy-note-card,
   .slash-menu,
   .update-notice {
     background: var(--bg-raised);
@@ -496,10 +535,16 @@ body::after {
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .quiz-panel,
+  .mistake-panel,
+  .notice-panel,
+  .note-sync,
   .convert-panel,
   .draft-panel,
   .recite-panel,
   .sheet-panel,
+  .img-picker__card,
+  .img-lib__lightbox-body,
+  .anatomy-note-card,
   .slash-menu,
   .update-notice {
     background: var(--bg-raised);
@@ -515,10 +560,16 @@ body::after {
 }
 @media print {
   .quiz-panel,
+  .mistake-panel,
+  .notice-panel,
+  .note-sync,
   .convert-panel,
   .draft-panel,
   .recite-panel,
   .sheet-panel,
+  .img-picker__card,
+  .img-lib__lightbox-body,
+  .anatomy-note-card,
   .slash-menu,
   .update-notice,
   .panel.panel--full,

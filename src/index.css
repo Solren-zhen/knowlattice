@@ -46,3 +46,5 @@
 
 /* 国风主题：宣纸 · 墨 · 花青。只作用于 [data-theme='guofeng']，不改前三套主题 */
 @import './styles/23-guofeng-theme.css';
+
+@import './styles/26-note-sync.css';

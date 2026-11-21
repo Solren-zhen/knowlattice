@@ -220,6 +220,32 @@ const VERIFY_CACHE = new WeakMap<Map<string, string>, Map<string, CitationResult
 /** 结果缓存的键：书名 + 引文（页码/原文标记不属于核验输入，命中后按当前引用回填） */
 const citeKey = (c: Citation): string => `${c.book ?? ''}\u0000${c.quote}`;
 
+/** 同一句原文被引了多次时的合并结果：repeats 是出现次数 */
+export interface CitationGroup extends CitationResult {
+  repeats: number;
+}
+
+/**
+ * 重复引用闸门：同一条（书名, 原文）在一个回答里出现多次只留一条，记下出现次数。
+ *
+ * 模型凑长度时会把同一句话在几段里各引一遍，徽标行因此翻成好几倍——同一条结论重复看 N 次
+ * 没有信息量。核验结论本来就只取决于（书名, 原文），合并后不会丢任何信息。
+ */
+export function groupCitations(results: CitationResult[]): CitationGroup[] {
+  const byKey = new Map<string, CitationGroup>();
+  for (const r of results) {
+    const key = citeKey(r);
+    const seen = byKey.get(key);
+    if (seen) {
+      seen.repeats += 1;
+      // 页码/原始标记取第一个：重复引用出现的页码不一致时，以第一次出现的为准
+      continue;
+    }
+    byKey.set(key, { ...r, repeats: 1 });
+  }
+  return [...byKey.values()];
+}
+
 /**
  * 逐条核验回答里的引用：在库内（有书名则限定同名笔记）找最佳命中来源。
  * 无引文的标记（quote 为空）状态记 not_found，由调用方决定是否展示。

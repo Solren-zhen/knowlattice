@@ -16,6 +16,11 @@ import { chapterMastery, initializeStats, type ChapterMastery, type StatsMap } f
 import { mergeMastery, radarAxes, systemMastery, weakestChapters, type RadarAxis } from '../core/qbankWeakness';
 import { dailyStreak, isDailyDone, last7Daily, todayKey } from '../core/dailyPractice';
 import { CONFIDENCE_LABELS, calibrationSummary } from '../core/qbankCalib';
+import {
+  calibSentence, calibrateBank, hardestFirst, summarizeCalib, withDifficulty,
+  type CalibSummary, type QuestionCalib,
+} from '../core/qbankDifficulty';
+import { putBank } from '../storage/qbank';
 import { loadTodos } from '../core/todos';
 import { streak, last7 } from '../core/stats';
 import { seedDemo } from '../core/demo';
@@ -87,6 +92,8 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
     questions: Map<string, QuizQuestion>;
     loaded: boolean;
   }>({ bankCount: 0, totalQ: 0, mastery: [], stats: {}, questions: new Map(), loaded: false });
+  // 难度校准（P0-1）：标称难度来自 FSRS 估计，实测来自真实作答 —— 两者在同一个 effect 里一起算
+  const [diffCalib, setDiffCalib] = useState<{ summary: CalibSummary; hardest: QuestionCalib[] } | null>(null);
   useEffect(() => {
     let active = true;
     Promise.all([loadBanks(), initializeStats()]).then(([banks, stats]) => {
@@ -96,6 +103,8 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
       // 周报要按 qid 找到题目所属章节，这里一次性建索引，避免每份报告重复扫描
       const questions = new Map<string, QuizQuestion>();
       for (const bank of banks) for (const q of bank.questions) questions.set(q.id, q);
+      const calibRows = banks.flatMap((bank) => calibrateBank(bank, stats));
+      setDiffCalib({ summary: summarizeCalib(calibRows), hardest: hardestFirst(calibRows, 3) });
       setQbank({
         bankCount: banks.length,
         totalQ: banks.reduce((count, bank) => count + bank.questions.length, 0),
@@ -107,6 +116,25 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
     }).catch(() => {});
     return () => { active = false; };
   }, []);
+  /**
+   * 采纳难度建议：把实测档位写回题目的 `difficulty` 一个字段。
+   * 只改这一道题、只改这一个字段，然后重算一次校准 —— 采纳后它就不再出现在「实测比标称难」里。
+   */
+  const adoptDifficulty = async (rowI: QuestionCalib) => {
+    if (!rowI.bank || rowI.suggested === null) return;
+    try {
+      const banks = await loadBanks();
+      const target = banks.find((b) => b.name === rowI.bank);
+      if (!target) return;
+      await putBank(withDifficulty(target, rowI.id, rowI.suggested));
+      const fresh = await loadBanks();
+      const rows = fresh.flatMap((b) => calibrateBank(b, qbank.stats));
+      setDiffCalib({ summary: summarizeCalib(rows), hardest: hardestFirst(rows, 3) });
+      toast('已写回题目难度');
+    } catch {
+      toast('写回失败，题目没有被改动');
+    }
+  };
   const mdPaths = useMemo(() => [...docs.keys()].filter((p) => p.endsWith('.md')), [docs]);
   const reviewCards = useMemo(
     () => [...buildCards(mdPaths, docs), ...loadGeneratedCards()],
@@ -575,6 +603,35 @@ export default function Dashboard({ docs, onClose, onOpenReview, onOpenQuiz, onO
             </>
           )}
         </section>
+
+        {/* 难度校准：FSRS 的 difficulty 是模型估计，跟实测正确率背离时按难度筛题会筛错人 */}
+        {diffCalib && calibSentence(diffCalib.summary) && (
+          <section className="dash-calib" data-reveal aria-label="题目难度校准">
+            <h4>难度校准</h4>
+            <p className="dash-calib-verdict">{calibSentence(diffCalib.summary)}</p>
+            {diffCalib.hardest.length > 0 && (
+              <div className="dash-diff-rows" role="list" aria-label="实测比标称难的题">
+                {diffCalib.hardest.map((dr) => (
+                  <div className="dash-diff-row" key={`${dr.bank ?? ''}:${dr.id}`} role="listitem">
+                    <span className="dash-diff-stem" title={dr.stem ?? dr.id}>{dr.stem ?? dr.id}</span>
+                    <span className="dash-calib-pct">{dr.rate === null ? '—' : `${Math.round(dr.rate * 100)}%`}</span>
+                    <button type="button" className="btn-small" onClick={() => adoptDifficulty(dr)}>
+                      标为{dr.suggested === 1 ? '简单' : dr.suggested === 3 ? '困难' : '适中'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {diffCalib.summary.declared === 0 && (
+              <p className="dash-calib-empty muted">
+                这些题都还没标过作者难度，标称是 FSRS 现推的；点右侧按钮把实测档位写回题目，下次就能按标称筛了。
+              </p>
+            )}
+            {diffCalib.summary.unrated > 0 && (
+              <p className="dash-calib-empty muted">另有 {diffCalib.summary.unrated} 题作答不足 3 次，暂不下结论。</p>
+            )}
+          </section>
+        )}
 
         <section className="dash-plan" data-reveal aria-label="复习计划与提醒">
           <h4>复习计划与提醒</h4>

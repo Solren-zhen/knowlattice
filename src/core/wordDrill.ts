@@ -834,6 +834,9 @@ export const recordsStore = defineStore<Record<string, WordRecord>>({
   decode: decodeRecords,
 });
 
+/** 外部（手机回传）合并记录后广播，让已打开的单词工坊刷新队列与错词本。 */
+export const RECORDS_UPDATED_EVENT = 'knowlattice-word-records-updated';
+
 export const customBankStore = defineStore<Word[]>({
   key: 'knowlattice-word-drill-bank',
   fallback: [],

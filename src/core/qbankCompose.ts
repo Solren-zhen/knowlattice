@@ -15,9 +15,11 @@ import { isStarred, type StarMap } from './qbankStarred';
 import {
   difficultyBand, isHighFreq, statusTagOf, type DifficultyBand, type QStatusTag, type TagContext,
 } from './qbankTags';
+import { DEFAULT_TARGET_ACCURACY, targetDistance } from './qbankDifficulty';
 
 export type ComposeScope = 'all' | 'new' | 'wrong' | 'due' | 'starred';
-export type ComposeOrder = 'shuffle' | 'chapter' | 'interleave';
+/** adaptive = 按「离目标正确率多远」挑题（见 core/qbankDifficulty），抽谁由顺序决定 */
+export type ComposeOrder = 'shuffle' | 'chapter' | 'interleave' | 'adaptive';
 export type ComposeType = 'choice' | 'recall';
 
 export interface ComposeRules {
@@ -89,6 +91,40 @@ export function weightedPick(
   const keyed = pool.map((q) => ({ q, key: Math.pow(rnd(), 1 / weight(q)) }));
   keyed.sort((a, b) => b.key - a.key);
   return keyed.slice(0, Math.max(0, k)).map((x) => x.q);
+}
+/**
+ * 自适应抽取（P0-2）：按「离目标正确率多远」分桶，桶内仍加权随机。
+ *
+ * 为什么不严格按距离取 Top-k：那样每轮都是同一批题，错题被反复刷、其余薄弱点永远轮不到
+ * （weightOf 的注释里踩过同一个坑）。所以先把距离量化成 0.1 宽的桶，桶间由近到远取，
+ * 桶内保留 weightOf 的错题/到期加权 —— 难度落在目标附近，题面仍在换。
+ *
+ * 桶宽 0.1 与 UNSEEN_PRIOR 是经验值：真要让正确率精确收敛到 70%，得先做题目难度标定
+ * （IRT/CAT，几千次作答），这里刻意不做。
+ */
+export function adaptivePick(
+  pool: QuizQuestion[],
+  per: Record<string, QStat>,
+  k: number,
+  rnd: () => number = Math.random,
+  target: number = DEFAULT_TARGET_ACCURACY,
+  now: number = Date.now(),
+): QuizQuestion[] {
+  const buckets = new Map<number, QuizQuestion[]>();
+  for (const q of pool) {
+    const b = Math.floor(targetDistance(per[q.id], target) / 0.1);
+    const arr = buckets.get(b);
+    if (arr) arr.push(q);
+    else buckets.set(b, [q]);
+  }
+  const out: QuizQuestion[] = [];
+  for (const b of [...buckets.keys()].sort((x, y) => x - y)) {
+    const room = k - out.length;
+    if (room <= 0) break;
+    const arr = buckets.get(b) ?? [];
+    out.push(...weightedPick(arr, (q) => weightOf(per[q.id], now), Math.min(room, arr.length), rnd));
+  }
+  return out;
 }
 
 /**
@@ -175,6 +211,8 @@ export function composeQuestions(
 ): QuizQuestion[] {
   const pool = filterPool(bank.questions, rules, stats, bank.name, now, stars, tagCtx);
   const k = rules.count > 0 ? Math.min(rules.count, pool.length) : pool.length;
+  // 自适应：抽谁与先后由同一个目标正确率决定，提前返回，不再走加权随机（否则两套口径打架）
+  if (rules.order === 'adaptive') return adaptivePick(pool, stats[bank.name] ?? {}, k, rnd, DEFAULT_TARGET_ACCURACY, now);
   const picked = weightedPick(pool, (q) => weightOf(statOf(stats, bank.name, q.id), now), k, rnd);
   if (rules.order === 'chapter') return sortByChapter(picked);
   if (rules.order === 'interleave') return interleaveByChapter(picked, rnd);

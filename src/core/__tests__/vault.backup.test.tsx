@@ -492,6 +492,83 @@ describe('v14：视频片段收藏随备份走', () => {
     expect(r.storeMerges?.some((s) => s.name === '视频片段')).toBeFalsy();
     expect(store('knowlattice-video-clips')).toEqual(CLIPS);
   });
+
+  it('导出带上视频历史；清空后导入能恢复且同 media 只补不覆盖', async () => {
+    const HISTORY = [
+      {
+        media: 'bili:BV1xx411c7mD:p1',
+        url: 'https://www.bilibili.com/video/BV1xx411c7mD?p=1',
+        title: '生理学第1讲',
+        kind: 'bilibili',
+        at: 1_700_000_000_000,
+        lastTime: 120,
+        duration: 600,
+      },
+    ];
+    localStorage.setItem('knowlattice-video-history', JSON.stringify(HISTORY));
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    fireEvent.click(screen.getByText('导出'));
+    await waitFor(() => expect(captured).not.toBeNull());
+
+    const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
+    expect(payload.videoHistory).toEqual(HISTORY);
+
+    localStorage.setItem('knowlattice-video-history', JSON.stringify([
+      { ...HISTORY[0], title: '本机更新的标题', lastTime: 240 },
+    ]));
+    backupText = JSON.stringify({
+      app: 'knowlattice',
+      version: 18,
+      files: [{ path: '笔记.md', content: '# 笔记\n' }],
+      videoHistory: [
+        HISTORY[0],
+        {
+          media: 'https://example.com/2.mp4',
+          url: 'https://example.com/2.mp4',
+          title: '第二讲',
+          kind: 'direct',
+          at: 1_700_000_100_000,
+        },
+      ],
+    });
+    const r = await importOnce();
+    expect(r.failed).toBe(0);
+    expect(r.storeMerges?.find((s) => s.name === '视频历史')).toEqual({ name: '视频历史', added: 1, kept: 1 });
+    const after = store('knowlattice-video-history') as Array<{ media: string; title: string }>;
+    expect(after.find((h) => h.media === 'bili:BV1xx411c7mD:p1')?.title).toBe('本机更新的标题');
+    expect(after.some((h) => h.media === 'https://example.com/2.mp4')).toBe(true);
+  });
+
+  it('导出带上笔记视频关联；恢复时只补不覆盖', async () => {
+    const MAP = { '生理学/第1章.md': 'bili:BV1xx411c7mD:p1' };
+    localStorage.setItem('knowlattice-note-video', JSON.stringify(MAP));
+    render(<Probe />);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('ok'));
+    fireEvent.click(screen.getByText('导出'));
+    await waitFor(() => expect(captured).not.toBeNull());
+
+    const payload = JSON.parse(await captured!.text()) as Record<string, unknown>;
+    expect(payload.noteVideos).toEqual(MAP);
+
+    localStorage.setItem('knowlattice-note-video', JSON.stringify({ '生理学/第1章.md': 'local-override' }));
+    backupText = JSON.stringify({
+      app: 'knowlattice',
+      version: 18,
+      files: [{ path: '笔记.md', content: '# 笔记\n' }],
+      noteVideos: {
+        '生理学/第1章.md': 'bili:BV1xx411c7mD:p1',
+        '生理学/第2章.md': 'bili:BV1xx411c7mD:p2',
+      },
+    });
+    const r = await importOnce();
+    expect(r.failed).toBe(0);
+    expect(r.storeMerges?.find((s) => s.name === '笔记视频关联')).toEqual({ name: '笔记视频关联', added: 1, kept: 1 });
+    expect(store('knowlattice-note-video')).toEqual({
+      '生理学/第1章.md': 'local-override',
+      '生理学/第2章.md': 'bili:BV1xx411c7mD:p2',
+    });
+  });
 });
 
 describe('整包备份：单词工坊历史短文', () => {

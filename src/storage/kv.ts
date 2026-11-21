@@ -199,6 +199,7 @@ export const KV_KEYS = {
   'knowlattice-word-drill-daily': '单词工坊：每日新词/复习/正确率 · core/wordDrill',
   'knowlattice-word-drill-settings': '单词工坊：上次使用的词库 / 模式 / 题量与每日配额 · core/wordDrill',
   'knowlattice-word-drill-stories': '单词工坊：薄弱词成文的历史短文与逐句精读（最多 20 篇）· core/wordStory',
+  'knowlattice-recite-review': '手机回传复习事件的去重台账（已合并的事件 id）· core/reciteReview',
 
   // —— 统计与激励 ——
   'knowlattice-days': '打卡天数 · core/stats',
@@ -237,6 +238,9 @@ export const KV_KEYS = {
   'knowlattice-pdf-autodraft': 'PDF 自动草稿开关 · views/PdfSplitView',
   'knowlattice-pdf-colmode': 'PDF 分栏模式 · views/PdfSplitView',
   'knowlattice-video-clips': '视频片段收藏 · core/videoNotes',
+  'knowlattice-video-history': '视频笔记观看历史 · core/videoNotes',
+  'knowlattice-note-video': '笔记关联的视频标识（notePath → media）· core/videoNotes',
+  'knowlattice-video-rate': '视频笔记默认播放倍速 · core/videoNotes',
   'knowlattice-bili-cookie': 'B 站登录态 · core/biliPlay',
 
   // —— AI 助手 ——
@@ -259,6 +263,7 @@ export const IDB_NAMES = {
   'knowlattice-pathways': '通路模板 · core/pathwayTemplates',
   'knowlattice-pet': '桌宠形象 · core/petImage',
   'knowlattice-pdfs': 'PDF 书架 · core/pdfLib',
+  'knowlattice-video-handles': '本地视频文件句柄（用于跨刷新直开）· storage/videoHandles',
 } as const;
 
 /** 已废弃的键前缀：只允许出现在 `core/migrate.ts` 的迁移逻辑里 */
